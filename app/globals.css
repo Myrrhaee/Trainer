@@ -1,26 +1,46 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+ :root {
+  /* Core surface + text */
+  --background: #000000;
+  --foreground: #f4f4f5; /* zinc-100-ish for high contrast on black */
+
+  /* Neutral zinc-like grays for borders / subtle surfaces */
+  --border: #27272a; /* zinc-800 */
+  --muted: #18181b; /* zinc-900 */
+  --muted-foreground: #a1a1aa; /* zinc-400 */
+  --accent: #18181b;
+  --accent-foreground: #e4e4e7; /* zinc-100 */
+
+  /* Radius for soft corners */
+  --radius: 1rem;
 }
 
 @theme inline {
+  /* Colors mapped into Tailwind tokens */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  /* Typography: clean sans-serif stack */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  /* Radii */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 0.25rem);
+  --radius-sm: calc(var(--radius) - 0.5rem);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
