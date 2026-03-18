@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Sparkles } from "lucide-react";
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 
-const supabase = getSupabaseClient();
+const supabase = createClient();
 
 type Profile = {
   id: string;

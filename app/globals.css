@@ -44,3 +44,36 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+@layer utilities {
+  @keyframes float-up {
+    0% {
+      top: 50%;
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    100% {
+      top: calc(var(--uplift) * -1); 
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 0;
+    }
+  }
+
+  .animate-float-up {
+    animation: float-up 3s ease-in-out infinite;
+  }
+
+  .animate-float-up-slow {
+    animation: float-up 12s ease-in-out infinite;
+  }
+}
+
+.footer-content {
+  @apply text-zinc-500 text-sm;
+}
+
+@media (max-width: 600px) {
+  .footer-content {
+    text-align: center;
+  }
+}

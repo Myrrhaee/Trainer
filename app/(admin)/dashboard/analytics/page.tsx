@@ -22,7 +22,7 @@ import {
   YAxis,
 } from "recharts";
 import { DollarSign, TrendingUp, Receipt } from "lucide-react";
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import { useTrainer } from "@/lib/auth-context";
 import {
   Card,
@@ -44,7 +44,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const supabase = getSupabaseClient();
+const supabase = createClient();
 
 type Payment = {
   id: string;
@@ -108,9 +108,8 @@ export default function AnalyticsPage() {
         setPayments(paymentsRes.data as unknown as Payment[]);
       }
       if (clientsRes.data) {
-        const list = (clientsRes.data as { profiles: ClientOption | null }[])
-          .map((r) => r.profiles)
-          .filter(Boolean) as ClientOption[];
+        const raw = clientsRes.data as unknown as { profiles: ClientOption | null }[];
+        const list = raw.map((r) => r.profiles).filter(Boolean) as ClientOption[];
         setClients(list);
       }
       setLoading(false);

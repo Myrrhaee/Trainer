@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import { useTrainer } from "@/lib/auth-context";
 import {
   Card,
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 type Program = {
   id: string;
@@ -32,7 +33,7 @@ type Program = {
   price: number | null;
 };
 
-const supabase = getSupabaseClient();
+const supabase = createClient();
 
 export default function ProgramsPage() {
   const { trainerId } = useTrainer();
@@ -42,6 +43,7 @@ export default function ProgramsPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -80,6 +82,7 @@ export default function ProgramsPage() {
         trainer_id: trainerId,
         title: title.trim(),
         weeks: 4,
+        is_public: isPublic,
       })
       .select("id, title, weeks, price")
       .single();
@@ -95,6 +98,7 @@ export default function ProgramsPage() {
     setPrograms((prev) => [data as Program, ...prev]);
     setDialogOpen(false);
     setTitle("");
+    setIsPublic(false);
     router.push(`/dashboard/programs/${data.id}`);
   }
 
@@ -141,6 +145,24 @@ export default function ProgramsPage() {
                     }
                     className="h-9 rounded-xl border-border/70 bg-zinc-900/80 text-sm text-foreground ring-0 focus-visible:ring-2 focus-visible:ring-zinc-400/70"
                     placeholder="Например, 8-недельный массонабор"
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-zinc-900/40 px-4 py-3">
+                  <div className="space-y-0.5">
+                    <Label
+                      htmlFor="is_public"
+                      className="text-sm font-medium text-zinc-200"
+                    >
+                      Опубликовать в Маркете
+                    </Label>
+                    <p className="text-xs text-zinc-500">
+                      Если включено, программу смогут видеть и покупать все пользователи платформы.
+                    </p>
+                  </div>
+                  <Switch
+                    id="is_public"
+                    checked={isPublic}
+                    onCheckedChange={setIsPublic}
                   />
                 </div>
                 <DialogFooter className="pt-2">

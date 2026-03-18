@@ -18,9 +18,11 @@ function extractClientId(body: unknown): string | null {
   const metadata = o.metadata ?? o.custom_metadata;
   if (metadata && typeof metadata === "object") {
     const m = metadata as Record<string, unknown>;
-    const id =
-      m.client_id ?? m.clientId ?? m.client_id?.toString?.() ?? m.clientId?.toString?.();
-    if (id && typeof id === "string") return id.trim() || null;
+    const raw = m.client_id ?? m.clientId;
+    if (raw != null) {
+      const id = typeof raw === "string" ? raw.trim() : String(raw).trim();
+      if (id.length > 0) return id;
+    }
   }
 
   const orderId = o.order_id ?? o.orderId ?? o.payment_id ?? o.paymentId;
@@ -48,9 +50,11 @@ function extractProgramId(body: unknown): string | null {
   const metadata = o.metadata ?? o.custom_metadata;
   if (metadata && typeof metadata === "object") {
     const m = metadata as Record<string, unknown>;
-    const id =
-      m.program_id ?? m.programId ?? m.program_id?.toString?.() ?? m.programId?.toString?.();
-    if (id && typeof id === "string") return id.trim() || null;
+    const raw = m.program_id ?? m.programId;
+    if (raw != null) {
+      const id = typeof raw === "string" ? raw.trim() : String(raw).trim();
+      if (id.length > 0) return id;
+    }
   }
 
   const programId = o.program_id ?? o.programId;
@@ -113,6 +117,7 @@ export async function POST(req: Request) {
       // Покупка программы: открываем доступ в client_programs
       const { error: insertError } = await supabaseAdmin
         .from("client_programs")
+        // @ts-ignore - client_programs row type may be missing in generated schema
         .upsert(
           {
             client_id: clientId,
@@ -176,6 +181,7 @@ export async function POST(req: Request) {
 
     const { data: profile, error: updateError } = await supabaseAdmin
       .from("profiles")
+      // @ts-ignore - profiles columns may be missing in generated schema
       .update({
         is_paid: true,
         subscription_ends_at: subscriptionEndsAt,

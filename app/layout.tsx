@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { Footer } from "@/components/Footer";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const inter = Inter({
@@ -19,8 +20,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body className={`${inter.className} antialiased bg-black text-foreground`}>
-        <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
+      <body className={`${inter.className} flex min-h-screen flex-col antialiased bg-black text-foreground`}>
+        <TooltipProvider delayDuration={300}>
+          <div className="flex-1">{children}</div>
+          <Footer />
+        </TooltipProvider>
       </body>
     </html>
   );

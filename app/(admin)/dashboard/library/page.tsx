@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import { useTrainer } from "@/lib/auth-context";
 import {
   Card,
@@ -33,7 +33,7 @@ type Exercise = {
   video_url: string | null;
 };
 
-const supabase = getSupabaseClient();
+const supabase = createClient();
 
 const MUSCLE_GROUPS = [
   "Грудь",

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTrainer } from "@/lib/auth-context";
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Sparkles } from "lucide-react";
 
@@ -13,7 +13,6 @@ const TRIAL_DAYS = 7;
 type ProfileRow = {
   role: string | null;
   trainer_subscription_status: string | null;
-  created_at: string | null;
 };
 
 function isTrialActive(userCreatedAt: string): boolean {
@@ -28,18 +27,22 @@ export function SubscriptionGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = getSupabaseClient();
+  const supabase = createClient();
   const isSubscribePage = pathname === "/dashboard/subscribe";
 
   useEffect(() => {
-    if (!user?.id) return;
+    const userId = user?.id;
+    if (!userId) return;
 
     async function load() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("profiles")
-        .select("role, trainer_subscription_status, created_at")
-        .eq("id", user.id)
-        .single();
+        .select("role, trainer_subscription_status")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) {
+        console.error("profiles select failed:", error);
+      }
       setProfile((data as ProfileRow) ?? null);
       setLoading(false);
     }

@@ -8,7 +8,7 @@ import {
   useCallback,
 } from "react";
 import { useRouter } from "next/navigation";
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import type { User } from "@supabase/supabase-js";
 
 type TrainerContextValue = {
@@ -32,7 +32,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = getSupabaseClient();
+  const supabase = createClient();
 
   useEffect(() => {
     let mounted = true;
@@ -66,12 +66,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [router, supabase.auth]);
+  }, [router]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     router.replace("/login");
-  }, [supabase.auth, router]);
+  }, [router]);
 
   if (loading) {
     return (

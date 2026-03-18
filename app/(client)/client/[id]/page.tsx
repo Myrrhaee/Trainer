@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import confetti from "canvas-confetti";
-import { LogOut, Play, Sparkles, X } from "lucide-react";
+import { LogOut, Play, Plus, Sparkles, Trash2, X } from "lucide-react";
+import * as htmlToImage from "html-to-image";
 
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import {
   Card,
   CardContent,
@@ -15,8 +17,33 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WeightTracker } from "@/components/client/WeightTracker";
+import { ShareCard } from "@/components/client/ShareCard";
 
-const supabase = getSupabaseClient();
+const supabase = createClient();
+
+/** ID виртуального шаблона для своей тренировки (без тренера). */
+const CUSTOM_TEMPLATE_ID = "00000000-0000-0000-0000-000000000001";
+
+/** Упражнения, которые можно добавить в свою тренировку. */
+const ADDABLE_EXERCISES = [
+  "Жим лёжа",
+  "Присед со штангой",
+  "Становая тяга",
+  "Подтягивания",
+  "Отжимания",
+  "Тяга горизонтальная",
+  "Жим стоя",
+  "Разводки гантелей",
+  "Выпады",
+  "Планка",
+];
+
+/** Популярные программы для блока «Магазин». */
+const MARKET_PROGRAMS = [
+  { id: "market-1", title: "Мощный верх", price: "990 ₽" },
+  { id: "market-2", title: "Жиросжигание за 30 дней", price: "Бесплатно" },
+  { id: "market-3", title: "База для набора массы", price: "1 490 ₽" },
+];
 
 type PlanExercise = {
   id: string;
@@ -74,6 +101,18 @@ type LogEntry = {
   done: boolean;
 };
 
+type WorkoutFinishStats = {
+  tonnageKg: number;
+  exercisesDone: number;
+  keyExercise: {
+    title: string;
+    exerciseId: string;
+    currentMaxKg: number | null;
+    previousMaxKg: number | null;
+    isNewRecord: boolean;
+  } | null;
+};
+
 function closeOrGoHome() {
   const w = typeof window !== "undefined" ? window : null;
   const tg = (w as { Telegram?: { WebApp?: { close?: () => void } } })
@@ -115,12 +154,45 @@ export default function ClientWorkoutPage() {
   const [finishSending, setFinishSending] = useState<"idle" | "sending" | "done">(
     "idle"
   );
+  const [finishStats, setFinishStats] = useState<WorkoutFinishStats | null>(null);
+  const [shareToast, setShareToast] = useState<string | null>(null);
+  const [shareGenerating, setShareGenerating] = useState(false);
+  const [shareCardVisible, setShareCardVisible] = useState(false);
+  const shareCardRef = useRef<HTMLDivElement>(null);
   const [expandedVideoId, setExpandedVideoId] = useState<string | null>(null);
   const [lastResultByExerciseId, setLastResultByExerciseId] = useState<
     Record<string, { weight: number | null; reps: string | null }>
   >({});
   const [activatingAccess, setActivatingAccess] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [hasTrainer, setHasTrainer] = useState<boolean | null>(null);
+  const [customExercises, setCustomExercises] = useState<PlanExercise[]>([]);
+  const [showAddExercise, setShowAddExercise] = useState(false);
+
+  const STORAGE_KEY = clientId ? `client:${clientId}:customExercises` : null;
+
+  function buildVirtualTemplate(exercises: PlanExercise[]): WorkoutTemplate | null {
+    if (!exercises.length) return null;
+    return {
+      id: CUSTOM_TEMPLATE_ID,
+      title: "Своя тренировка",
+      plan_json: {
+        weeks: [
+          {
+            id: "w1",
+            name: "Неделя 1",
+            days: [
+              {
+                id: "d1",
+                name: "Тренировка",
+                exercises,
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
 
   useEffect(() => {
     if (!clientId) return;
@@ -129,24 +201,31 @@ export default function ClientWorkoutPage() {
       setLoading(true);
       setAccessDenied(false);
 
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("id, full_name, is_paid")
         .eq("id", clientId)
-        .single();
+        .maybeSingle();
 
+      if (profileError) {
+        console.error("profiles select failed:", profileError);
+      }
       if (profileData) {
         setProfile(profileData as Profile);
       }
 
       const { data: linkRow } = await supabase
         .from("trainer_clients")
-        .select("access_granted")
+        .select("trainer_id, access_granted")
         .eq("client_id", clientId)
         .limit(1)
         .maybeSingle();
 
-      if (linkRow && (linkRow as { access_granted?: boolean }).access_granted === false) {
+      const linked = linkRow as { trainer_id?: string | null; access_granted?: boolean } | null;
+      const trainerLinked = !!(linked?.trainer_id != null && String(linked.trainer_id).trim() !== "");
+      setHasTrainer(trainerLinked);
+
+      if (linked && linked.access_granted === false) {
         setAccessDenied(true);
         setLoading(false);
         return;
@@ -190,20 +269,32 @@ export default function ClientWorkoutPage() {
         }
       }
 
-      if (!templateId) {
+      if (templateId) {
+        const { data: templateData } = await supabase
+          .from("workout_templates")
+          .select("id, title, plan_json")
+          .eq("id", templateId)
+          .single();
+
+        if (templateData) {
+          setTemplate(templateData as WorkoutTemplate);
+        } else {
+          setTemplate(null);
+        }
+      } else {
         setTemplate(null);
-        setLoading(false);
-        return;
-      }
-
-      const { data: templateData } = await supabase
-        .from("workout_templates")
-        .select("id, title, plan_json")
-        .eq("id", templateId)
-        .single();
-
-      if (templateData) {
-        setTemplate(templateData as WorkoutTemplate);
+        if (!trainerLinked && typeof window !== "undefined" && clientId) {
+          try {
+            const raw = localStorage.getItem(`client:${clientId}:customExercises`);
+            const parsed = raw ? (JSON.parse(raw) as PlanExercise[]) : [];
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setCustomExercises(parsed);
+              setTemplate(buildVirtualTemplate(parsed));
+            }
+          } catch {
+            // ignore
+          }
+        }
       }
 
       setLoading(false);
@@ -211,6 +302,15 @@ export default function ClientWorkoutPage() {
 
     loadClientWorkout();
   }, [clientId, programIdFromQuery]);
+
+  useEffect(() => {
+    if (!STORAGE_KEY || customExercises.length === 0) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(customExercises));
+    } catch {
+      // ignore
+    }
+  }, [STORAGE_KEY, customExercises]);
 
   const todayDay = useMemo<PlanDay | null>(() => {
     if (!template?.plan_json?.weeks?.length) return null;
@@ -271,6 +371,164 @@ export default function ClientWorkoutPage() {
 
   function logKey(exerciseId: string, setIndex: number): LogKey {
     return `${exerciseId}:${setIndex}`;
+  }
+
+  function parseNum(raw: string | null | undefined): number | null {
+    if (!raw) return null;
+    const s = String(raw).trim().replace(",", ".");
+    if (!s) return null;
+    const n = Number(s);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  }
+
+  function pickKeyExercise(day: PlanDay): PlanExercise | null {
+    const byName = day.exercises.find((e) => e.title?.toLowerCase().includes("жим"));
+    return byName ?? day.exercises[0] ?? null;
+  }
+
+  async function computeFinishStats(): Promise<WorkoutFinishStats> {
+    const day = todayDay;
+    if (!day) {
+      return { tonnageKg: 0, exercisesDone: 0, keyExercise: null };
+    }
+
+    let tonnageKg = 0;
+    let exercisesDone = 0;
+
+    // count an exercise as "done" if at least one set is marked done
+    for (const ex of day.exercises) {
+      const setCount = parseSetCount(ex);
+      let exHasDone = false;
+      for (let i = 1; i <= setCount; i++) {
+        const entry = logState[logKey(ex.id, i)];
+        if (!entry?.done) continue;
+        exHasDone = true;
+
+        const w = parseNum(entry.weight);
+        const r = parseNum(entry.reps);
+        if (w != null && r != null) {
+          tonnageKg += w * r;
+        }
+      }
+      if (exHasDone) exercisesDone += 1;
+    }
+
+    const key = pickKeyExercise(day);
+    if (!clientId || !key) {
+      return {
+        tonnageKg: Math.round(tonnageKg),
+        exercisesDone,
+        keyExercise: null,
+      };
+    }
+
+    const keyExerciseId = key.exercise_id ?? key.id;
+
+    let currentMaxKg: number | null = null;
+    {
+      const setCount = parseSetCount(key);
+      for (let i = 1; i <= setCount; i++) {
+        const entry = logState[logKey(key.id, i)];
+        if (!entry?.done) continue;
+        const w = parseNum(entry.weight);
+        if (w == null) continue;
+        currentMaxKg = currentMaxKg == null ? w : Math.max(currentMaxKg, w);
+      }
+    }
+
+    // previous record: max performed_weight in history for this exercise
+    const { data: prevRows } = await supabase
+      .from("workout_logs")
+      .select("performed_weight")
+      .eq("client_id", clientId)
+      .eq("exercise_id", keyExerciseId)
+      .not("performed_weight", "is", null)
+      .order("performed_weight", { ascending: false })
+      .limit(1);
+
+    const previousMaxKg =
+      (prevRows?.[0] as { performed_weight: number | null } | undefined)
+        ?.performed_weight ?? null;
+
+    const isNewRecord =
+      currentMaxKg != null && (previousMaxKg == null || currentMaxKg > previousMaxKg);
+
+    return {
+      tonnageKg: Math.round(tonnageKg),
+      exercisesDone,
+      keyExercise: {
+        title: key.title,
+        exerciseId: keyExerciseId,
+        currentMaxKg,
+        previousMaxKg,
+        isNewRecord,
+      },
+    };
+  }
+
+  async function shareResult() {
+    if (shareGenerating) return;
+
+    const stats = finishStats ?? (await computeFinishStats());
+    setFinishStats(stats);
+
+    setShareToast("Генерирую твой трофей...");
+    setShareGenerating(true);
+    setShareCardVisible(true);
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    const node = shareCardRef.current;
+    if (!node) {
+      setShareGenerating(false);
+      setShareCardVisible(false);
+      return;
+    }
+
+    try {
+      const dataUrl = await htmlToImage.toPng(node, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#09090b", // zinc-950
+      });
+
+      const blob = await (await fetch(dataUrl)).blob();
+      const file = new File([blob], "my-workout-progress.png", {
+        type: "image/png",
+      });
+
+      const navAny = navigator as unknown as {
+        canShare?: (data: { files: File[] }) => boolean;
+        share?: (data: {
+          files?: File[];
+          title?: string;
+          text?: string;
+        }) => Promise<void>;
+      };
+
+      const payload = {
+        files: [file],
+        title: "Мой прогресс",
+        text: "Мой результат тренировки в AI Strength Coach",
+      };
+
+      if (navAny.share && (!navAny.canShare || navAny.canShare({ files: [file] }))) {
+        await navAny.share(payload);
+      } else {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = "my-workout-progress.png";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch (e) {
+      console.error("Share generation failed:", e);
+    } finally {
+      setShareGenerating(false);
+      setShareCardVisible(false);
+    }
   }
 
   async function saveLog(
@@ -341,6 +599,12 @@ export default function ClientWorkoutPage() {
     return () => clearInterval(interval);
   }, [restActive, restSecondsLeft]);
 
+  useEffect(() => {
+    if (!shareToast) return;
+    const t = setTimeout(() => setShareToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [shareToast]);
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-foreground">
@@ -348,6 +612,42 @@ export default function ClientWorkoutPage() {
           <div className="mx-auto h-10 w-40 rounded-full bg-zinc-900/80" />
           <p>Загружаем вашу тренировку...</p>
         </div>
+        {/* Hidden share card render target */}
+        {shareCardVisible && (
+          <div
+            className="pointer-events-none fixed left-[-10000px] top-0 opacity-0"
+            aria-hidden
+          >
+            <div ref={shareCardRef}>
+              <ShareCard
+                date={new Date()}
+                tonnageKg={finishStats?.tonnageKg ?? 0}
+                exercisesDone={finishStats?.exercisesDone ?? 0}
+                progress={
+                  finishStats?.keyExercise &&
+                  finishStats.keyExercise.currentMaxKg != null &&
+                  finishStats.keyExercise.previousMaxKg != null
+                    ? {
+                        exerciseTitle: finishStats.keyExercise.title,
+                        deltaKg:
+                          finishStats.keyExercise.currentMaxKg -
+                          finishStats.keyExercise.previousMaxKg,
+                      }
+                    : null
+                }
+                qrUrl="https://t.me/ai_strength_coach_bot"
+              />
+            </div>
+          </div>
+        )}
+
+        {shareToast && (
+          <div className="fixed inset-x-0 bottom-5 z-50 flex justify-center px-4">
+            <div className="max-w-md rounded-full border border-zinc-800 bg-zinc-950/90 px-4 py-2 text-sm text-zinc-200 shadow-lg backdrop-blur">
+              {shareToast}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -457,37 +757,54 @@ export default function ClientWorkoutPage() {
     );
   }
 
+  // Нет программы: с тренером — ждём программу; без тренера — своя тренировка + магазин
   if (!template || !todayDay) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center text-foreground">
-        <div className="mx-auto max-w-sm space-y-3 px-4 text-center">
-          <h1 className="text-lg font-semibold text-zinc-50">
-            Программа не найдена
-          </h1>
-          <p className="text-sm text-zinc-400">
-            Для этого клиента пока не назначена активная программа.
-          </p>
+    if (hasTrainer === true) {
+      return (
+        <div className="mx-auto flex w-full max-w-md flex-col gap-6 pb-28">
+          <header className="flex items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+                Привет, {profile?.full_name || "атлет"}!
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={closeOrGoHome}
+              className="size-10 shrink-0 rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+              aria-label="Выход"
+            >
+              <LogOut className="size-5" />
+            </Button>
+          </header>
+          {clientId && <WeightTracker clientId={clientId} />}
+          <div className="flex min-h-[30vh] items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/50 px-6 py-12 text-center">
+            <div className="space-y-3">
+              <h1 className="text-lg font-semibold text-zinc-50">
+                Жди программу от тренера
+              </h1>
+              <p className="text-sm text-zinc-400">
+                Как только тренер назначит программу, она появится здесь.
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  const firstExerciseTitle = todayDay.exercises[0]?.title ?? template.title;
-
-  return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-6 pb-28">
-        {/* Шапка: приветствие + выход */}
+    // Без тренера: график веса, создать свою тренировку, магазин программ
+    return (
+      <div className="mx-auto flex w-full max-w-md flex-col gap-6 pb-28">
         <header className="flex items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
-              Сегодня
+              Для себя
             </p>
             <h1 className="truncate text-xl font-semibold tracking-tight text-zinc-50 sm:text-2xl">
               Привет, {profile?.full_name || "атлет"}!
             </h1>
-            <p className="mt-0.5 truncate text-sm text-zinc-400">
-              <span className="font-medium text-zinc-100">{firstExerciseTitle}</span>
-            </p>
           </div>
           <Button
             type="button"
@@ -501,8 +818,205 @@ export default function ClientWorkoutPage() {
           </Button>
         </header>
 
+        {clientId && <WeightTracker clientId={clientId} />}
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <h2 className="text-base font-semibold text-zinc-100">
+            Создать свою тренировку
+          </h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Добавь упражнения и записывай подходы. График веса и история сохраняются.
+          </p>
+          <Button
+            type="button"
+            className="mt-4 w-full rounded-xl bg-zinc-100 py-2.5 text-sm font-medium text-black hover:bg-white"
+            onClick={() => setShowAddExercise(true)}
+          >
+            <Plus className="mr-2 size-4" />
+            Добавить упражнение
+          </Button>
+          {showAddExercise && (
+            <div className="mt-4 space-y-2 rounded-xl border border-zinc-700/80 bg-zinc-950/80 p-3">
+              <p className="text-xs font-medium text-zinc-400">
+                Выбери упражнение
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {ADDABLE_EXERCISES.filter(
+                  (name) => !customExercises.some((e) => e.title === name)
+                ).map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className="rounded-lg border border-zinc-600 bg-zinc-800/80 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-700"
+                    onClick={() => {
+                      const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                      const newEx: PlanExercise = {
+                        id,
+                        exercise_id: id,
+                        title: name,
+                        sets: "3",
+                        reps: "10",
+                        weight: "",
+                        rpe: "",
+                        rest: "60",
+                      };
+                      const next = [...customExercises, newEx];
+                      setCustomExercises(next);
+                      setTemplate(buildVirtualTemplate(next));
+                      setShowAddExercise(false);
+                    }}
+                  >
+                    + {name}
+                  </button>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-2 text-zinc-400"
+                onClick={() => setShowAddExercise(false)}
+              >
+                Закрыть
+              </Button>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <h2 className="text-base font-semibold text-zinc-100">
+            Популярные программы из магазина
+          </h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Готовые планы от экспертов — можно купить или получить бесплатно.
+          </p>
+          <div className="mt-4 grid gap-3">
+            {MARKET_PROGRAMS.map((prog) => (
+              <Link
+                key={prog.id}
+                href={`/client/${clientId}/program/${prog.id}`}
+                className="flex items-center justify-between rounded-xl border border-zinc-700/80 bg-zinc-800/40 px-4 py-3 text-left transition hover:bg-zinc-800/70"
+              >
+                <span className="font-medium text-zinc-100">{prog.title}</span>
+                <span
+                  className={
+                    prog.price === "Бесплатно"
+                      ? "text-sm font-medium text-emerald-400"
+                      : "text-sm text-zinc-400"
+                  }
+                >
+                  {prog.price}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  const firstExerciseTitle = todayDay.exercises[0]?.title ?? template.title;
+  const isCustomWorkout = template.id === CUSTOM_TEMPLATE_ID;
+
+  function removeCustomExercise(exerciseId: string) {
+    const next = customExercises.filter((e) => e.id !== exerciseId);
+    setCustomExercises(next);
+    if (next.length > 0) {
+      setTemplate(buildVirtualTemplate(next));
+    } else {
+      setTemplate(null);
+    }
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-md flex-col gap-6 pb-28">
+        {/* Шапка: приветствие + выход */}
+        <header className="flex items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+              {isCustomWorkout ? "Своя тренировка" : "Сегодня"}
+            </p>
+            <h1 className="truncate text-xl font-semibold tracking-tight text-zinc-50 sm:text-2xl">
+              Привет, {profile?.full_name || "атлет"}!
+            </h1>
+            <p className="mt-0.5 truncate text-sm text-zinc-400">
+              <span className="font-medium text-zinc-100">{firstExerciseTitle}</span>
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {isCustomWorkout && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+                onClick={() => setShowAddExercise(true)}
+              >
+                <Plus className="mr-1 size-4" />
+                Добавить
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={closeOrGoHome}
+              className="size-10 rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+              aria-label="Выход"
+            >
+              <LogOut className="size-5" />
+            </Button>
+          </div>
+        </header>
+
         {/* Вес + аналитика */}
         {clientId && <WeightTracker clientId={clientId} />}
+
+        {/* Добавить упражнение (своя тренировка) */}
+        {isCustomWorkout && showAddExercise && (
+          <div className="rounded-2xl border border-zinc-700/80 bg-zinc-900/80 p-4">
+            <p className="text-xs font-medium text-zinc-400">Добавить упражнение</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {ADDABLE_EXERCISES.filter(
+                (name) => !todayDay.exercises.some((e) => e.title === name)
+              ).map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="rounded-lg border border-zinc-600 bg-zinc-800/80 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-700"
+                  onClick={() => {
+                    const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                    const newEx: PlanExercise = {
+                      id,
+                      exercise_id: id,
+                      title: name,
+                      sets: "3",
+                      reps: "10",
+                      weight: "",
+                      rpe: "",
+                      rest: "60",
+                    };
+                    const next = [...customExercises, newEx];
+                    setCustomExercises(next);
+                    setTemplate(buildVirtualTemplate(next));
+                    setShowAddExercise(false);
+                  }}
+                >
+                  + {name}
+                </button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-3 text-zinc-400"
+              onClick={() => setShowAddExercise(false)}
+            >
+              Закрыть
+            </Button>
+          </div>
+        )}
 
         {/* Список упражнений */}
         <section className="flex flex-col gap-4">
@@ -535,6 +1049,7 @@ export default function ClientWorkoutPage() {
                           : null}
                       </p>
                     </div>
+                    <div className="flex shrink-0 items-center gap-1">
                     {exercise.video_url && (
                       <Button
                         type="button"
@@ -543,7 +1058,7 @@ export default function ClientWorkoutPage() {
                         onClick={() =>
                           setExpandedVideoId(showVideo ? null : exercise.id)
                         }
-                        className="size-9 shrink-0 rounded-full bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+                        className="size-9 rounded-full bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white"
                         aria-label={showVideo ? "Свернуть видео" : "Смотреть видео"}
                       >
                         {showVideo ? (
@@ -553,6 +1068,19 @@ export default function ClientWorkoutPage() {
                         )}
                       </Button>
                     )}
+                    {isCustomWorkout && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeCustomExercise(exercise.id)}
+                        className="size-9 rounded-full bg-zinc-800/80 text-zinc-400 hover:bg-red-500/20 hover:text-red-400"
+                        aria-label="Удалить упражнение"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
+                  </div>
                   </div>
                 </CardHeader>
                 {showVideo && exercise.video_url && (
@@ -676,43 +1204,59 @@ export default function ClientWorkoutPage() {
           })}
         </section>
 
-        {/* Кнопка завершения тренировки */}
+        {/* Кнопка завершения тренировки (только при программе от тренера) */}
+        {!isCustomWorkout && (
         <section className="mt-2">
-          <Button
-            type="button"
-            className="h-12 w-full rounded-full bg-emerald-500 text-sm font-semibold text-black shadow-lg transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
-            disabled={finishSending === "sending"}
-            onClick={async () => {
-              if (!clientId) return;
-              try {
-                setFinishSending("sending");
-                const res = await fetch("/api/notify-complete", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({ clientId }),
-                });
-                if (!res.ok) {
-                  console.error("Не удалось отправить уведомление тренеру");
+          <div className="flex flex-col gap-3">
+            <Button
+              type="button"
+              className="h-12 w-full rounded-full bg-emerald-500 text-sm font-semibold text-black shadow-lg transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={finishSending === "sending"}
+              onClick={async () => {
+                if (!clientId) return;
+                try {
+                  setFinishSending("sending");
+                  const stats = await computeFinishStats();
+                  setFinishStats(stats);
+                  const res = await fetch("/api/notify-complete", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ clientId }),
+                  });
+                  if (!res.ok) {
+                    console.error("Не удалось отправить уведомление тренеру");
+                    setFinishSending("idle");
+                    return;
+                  }
+                  setFinishSending("done");
+                  setTimeout(() => setFinishSending("idle"), 2000);
+                } catch (e) {
+                  console.error("Ошибка при завершении тренировки:", e);
                   setFinishSending("idle");
-                  return;
                 }
-                setFinishSending("done");
-                setTimeout(() => setFinishSending("idle"), 2000);
-              } catch (e) {
-                console.error("Ошибка при завершении тренировки:", e);
-                setFinishSending("idle");
-              }
-            }}
-          >
-            {finishSending === "sending"
-              ? "Отправляем..."
-              : finishSending === "done"
-              ? "Отправлено!"
-              : "Завершить тренировку"}
-          </Button>
+              }}
+            >
+              {finishSending === "sending"
+                ? "Отправляем..."
+                : finishSending === "done"
+                ? "Отправлено!"
+                : "Завершить тренировку"}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full rounded-full border-zinc-700 bg-zinc-950/30 text-sm font-semibold text-zinc-100 hover:bg-zinc-900/60"
+              disabled={shareGenerating}
+              onClick={() => void shareResult()}
+            >
+              Поделиться результатом 🚀
+            </Button>
+          </div>
         </section>
+        )}
 
         {/* Таймер отдыха */}
         {restActive && (

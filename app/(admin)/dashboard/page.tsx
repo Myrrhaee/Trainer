@@ -2,17 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, BellRing, DollarSign, Dumbbell, Loader2, Users } from "lucide-react";
 import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
-import { getSupabaseClient } from "@/lib/supabase-client";
+import { createClient } from "@/lib/supabase-client";
 import { useTrainer } from "@/lib/auth-context";
 import {
   Card,
@@ -34,7 +35,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Tooltip,
+  Tooltip as UITooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
@@ -51,7 +52,7 @@ type Client = {
   access_granted?: boolean;
 };
 
-const supabase = getSupabaseClient();
+const supabase = createClient();
 
 type WorkoutLogRow = {
   client_id: string;
@@ -67,6 +68,7 @@ type WeightLogRow = {
 type TabKey = "all" | "active" | "lazy";
 
 export default function Home() {
+  const router = useRouter();
   const { trainerId } = useTrainer();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,13 +97,43 @@ export default function Home() {
   const [reminderLoadingId, setReminderLoadingId] = useState<string | null>(null);
   const [accessUpdatingId, setAccessUpdatingId] = useState<string | null>(null);
   const [payments, setPayments] = useState<{ amount: number; created_at: string }[]>([]);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!trainerId) return;
+    async function loadProfile() {
+      const { data } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", trainerId)
+        .single();
+      if (data?.display_name) setDisplayName(data.display_name as string);
+    }
+    loadProfile();
+  }, [trainerId]);
+
+  useEffect(() => {
+    async function ensureSession() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      console.log("Текущая сессия:", session);
+      if (!session) {
+        console.log("Пользователь не авторизован");
+        router.push("/login?type=trainer");
+      }
+    }
+    ensureSession();
+  }, [router]);
 
   useEffect(() => {
     async function loadClients() {
       setLoading(true);
       const { data, error } = await supabase
         .from("trainer_clients")
-        .select("id, access_granted, profiles ( id, full_name, email, telegram_id, last_reminder_at )")
+        .select(
+          "id, access_granted, profiles ( id, full_name, email, role, telegram_id, last_reminder_at )"
+        )
         .eq("trainer_id", trainerId);
 
       if (!error && data) {
@@ -265,7 +297,7 @@ export default function Home() {
           role: "client",
         })
         .select("id")
-        .single();
+        .maybeSingle();
 
       if (profileError || !profileData) {
         console.error("Ошибка создания профиля клиента:", profileError);
@@ -448,7 +480,9 @@ export default function Home() {
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-              Dashboard
+              {displayName
+                ? `Панель управления: ${displayName}`
+                : "Панель управления"}
             </h1>
             <p className="text-sm text-muted-foreground">
               Быстрый обзор активности и состояния клиентов.
@@ -699,13 +733,13 @@ export default function Home() {
                                 (60 * 60 * 1000)
                             )
                           : 0;
-                        const cooldownTooltip =
-                          withinCooldown &&
-                          `Напоминание уже отправлено. Можно будет повторить через ${hoursLeft} ч.`;
-                        const reminderTooltip = reminderDisabled
+                        const cooldownTooltip = withinCooldown
+                          ? `Напоминание уже отправлено. Можно будет повторить через ${hoursLeft} ч.`
+                          : "Можно напомнить через несколько часов";
+                        const reminderTooltip: string = reminderDisabled
                           ? !client.telegram_id
                             ? "Нужна привязка ТГ"
-                            : cooldownTooltip ?? "Можно напомнить через несколько часов"
+                            : cooldownTooltip
                           : "Отправить дружеское напоминание";
                         const isLoading = reminderLoadingId === client.id;
                         const button = (
@@ -733,7 +767,7 @@ export default function Home() {
                           </Button>
                         );
                         return reminderDisabled ? (
-                          <Tooltip>
+                          <UITooltip>
                             <TooltipTrigger asChild>
                               <span className="inline-block size-8 shrink-0">
                                 {button}
@@ -742,7 +776,7 @@ export default function Home() {
                             <TooltipContent side="top">
                               {reminderTooltip}
                             </TooltipContent>
-                          </Tooltip>
+                          </UITooltip>
                         ) : (
                           button
                         );
@@ -787,7 +821,7 @@ export default function Home() {
                         >
                           <XAxis dataKey="d" hide />
                           <YAxis hide domain={["dataMin - 1", "dataMax + 1"]} />
-                          <Tooltip
+                          <RechartsTooltip
                             cursor={false}
                             content={({ active, payload }) => {
                               if (!active || !payload?.length) return null;
