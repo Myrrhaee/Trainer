@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,11 +10,31 @@ import { Label } from "@/components/ui/label";
 
 type LoginType = "trainer" | "client";
 
-export default function LoginPage() {
-  const router = useRouter();
-  const supabase = createClient();
+function roleFromSearchParams(searchParams: URLSearchParams | null): LoginType {
+  if (!searchParams) return "client";
+  return searchParams.get("role") === "trainer" ? "trainer" : "client";
+}
 
-  const [loginType, setLoginType] = useState<LoginType>("trainer");
+function LoginContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
+  if (supabaseRef.current === null) supabaseRef.current = createClient();
+  const supabase = supabaseRef.current;
+
+  const [loginType, setLoginType] = useState<LoginType>(() =>
+    roleFromSearchParams(searchParams)
+  );
+
+  // Синхронизация вкладки с URL при загрузке и при смене параметров (назад/вперёд)
+  useEffect(() => {
+    setLoginType(roleFromSearchParams(searchParams));
+  }, [searchParams]);
+
+  function setRoleAndUrl(role: LoginType) {
+    setLoginType(role);
+    router.replace(`/login?role=${role}`);
+  }
   const [isSignUp, setIsSignUp] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -55,113 +75,133 @@ export default function LoginPage() {
     if (!email.trim() || !password) return;
     setLoading(true);
 
-    const normalizedEmail = email.trim();
-    const normalizedName = fullName.trim();
+    try {
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedName = fullName.trim();
 
-    // 1) Pre-check email existence in profiles
-    if (!isSignUp) {
-      const { data: existing, error: existsErr } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("email", normalizedEmail)
-        .maybeSingle();
+      // 1) Pre-check email existence in profiles
+      if (!isSignUp) {
+        const { data: existing, error: existsErr } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("email", normalizedEmail)
+          .maybeSingle();
 
-      if (existsErr && !existing) {
-        console.error("login profiles email check failed:", existsErr);
-        setLoading(false);
-        setError("Не удалось проверить почту. Попробуйте позже.");
+        if (existsErr && !existing) {
+          console.error("login profiles email check failed:", existsErr);
+          setError("Не удалось проверить почту. Попробуйте позже.");
+          return;
+        }
+
+        if (!existing) {
+          setError("Пользователь с такой почтой не зарегистрирован");
+          return;
+        }
+      }
+
+      if (isSignUp) {
+        if (!normalizedName) {
+          setError("Введите имя");
+          return;
+        }
+
+        const { data, error: err } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+        });
+
+        if (err) {
+          setError(err.message ?? "Ошибка регистрации");
+          return;
+        }
+
+        const userId = data.user?.id;
+        if (userId) {
+          const role: "client" | "trainer" = loginType === "trainer" ? "trainer" : "client";
+          await ensureProfile(userId, role, normalizedName, data.user?.email ?? normalizedEmail);
+          router.refresh();
+          router.push(role === "client" ? "/client/me" : "/dashboard");
+          return;
+        }
+
+        router.refresh();
+        router.push("/login");
         return;
       }
 
-      if (!existing) {
-        setLoading(false);
-        setError("Пользователь с такой почтой не зарегистрирован");
-        return;
-      }
-    }
-
-    if (isSignUp) {
-      if (!normalizedName) {
-        setLoading(false);
-        setError("Введите имя");
-        return;
-      }
-
-      const { data, error: err } = await supabase.auth.signUp({
+      const { data, error: err } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password,
       });
 
-      setLoading(false);
       if (err) {
-        setError(err.message ?? "Ошибка регистрации");
+        const msg = err.message ?? "Ошибка входа";
+        if (msg.toLowerCase().includes("invalid login credentials")) {
+          setError("Неверный пароль. Попробуйте еще раз");
+        } else {
+          setError(msg);
+        }
         return;
       }
 
       const userId = data.user?.id;
       if (userId) {
-        const role: "client" | "trainer" = loginType === "trainer" ? "trainer" : "client";
-        await ensureProfile(userId, role, normalizedName, data.user?.email ?? normalizedEmail);
-        router.replace(role === "client" ? "/client/me" : "/dashboard");
-        router.refresh();
-        return;
-      }
+        const PROFILE_SYNC_TIMEOUT_MS = 10_000;
 
-      // If email confirmation is required, userId may be null until confirmed
-      router.replace("/login");
-      router.refresh();
-      return;
-    }
+        const { data: profile, error: profileErr } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .maybeSingle();
 
-    const { data, error: err } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    });
-
-    setLoading(false);
-    if (err) {
-      const msg = err.message ?? "Ошибка входа";
-      if (msg.toLowerCase().includes("invalid login credentials")) {
-        setError("Неверный пароль. Попробуйте еще раз");
-      } else {
-        setError(msg);
-      }
-      return;
-    }
-
-    const userId = data.user?.id;
-    if (userId) {
-      const { data: profile, error: profileErr } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (profileErr) {
-        console.error("profiles role load failed:", profileErr);
-      }
-
-      let role = (profile as { role?: string | null } | null)?.role ?? null;
-
-      // If profile is missing or role is null, recover it "on the fly"
-      if (!role) {
-        if (loginType === "trainer") {
-          await ensureProfile(userId, "trainer", normalizedName || "", normalizedEmail);
-          role = "trainer";
-        } else {
-          role = "client";
+        if (profileErr) {
+          console.error("profiles role load failed:", profileErr);
         }
-      }
 
-      if (role === "client") {
-        router.replace("/client/me");
+        let role = (profile as { role?: string | null } | null)?.role ?? null;
+
+        // Если профиля нет — принудительно вызываем ensure-profile и ждём появления профиля (таймаут 10 с)
+        if (!role) {
+          const newRole = loginType === "trainer" ? "trainer" : "client";
+          await ensureProfile(userId, newRole, normalizedName || "", normalizedEmail);
+
+          const deadline = Date.now() + PROFILE_SYNC_TIMEOUT_MS;
+          while (Date.now() < deadline) {
+            const { data: retryProfile } = await supabase
+              .from("profiles")
+              .select("role")
+              .eq("id", userId)
+              .maybeSingle();
+            const retryRole = (retryProfile as { role?: string | null } | null)?.role ?? null;
+            if (retryRole) {
+              role = retryRole;
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+
+          if (!role) {
+            setError("Ошибка синхронизации профиля");
+            return;
+          }
+        }
+
+        console.log("Профиль найден, роль:", role);
+
         router.refresh();
+        if (role === "client") {
+          router.push("/client/me");
+          return;
+        }
+        router.push("/dashboard");
         return;
       }
-    }
 
-    router.replace("/dashboard");
-    router.refresh();
+      router.refresh();
+      router.push("/dashboard");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -192,19 +232,7 @@ export default function LoginPage() {
             <div className="inline-flex rounded-full border border-zinc-800 bg-zinc-900/70 p-1">
               <button
                 type="button"
-                onClick={() => setLoginType("trainer")}
-                className={[
-                  "rounded-full px-4 py-2 text-xs font-semibold transition",
-                  loginType === "trainer"
-                    ? "bg-zinc-100 text-black"
-                    : "text-zinc-400 hover:text-zinc-200",
-                ].join(" ")}
-              >
-                Войти как Тренер
-              </button>
-              <button
-                type="button"
-                onClick={() => setLoginType("client")}
+                onClick={() => setRoleAndUrl("client")}
                 className={[
                   "rounded-full px-4 py-2 text-xs font-semibold transition",
                   loginType === "client"
@@ -213,6 +241,18 @@ export default function LoginPage() {
                 ].join(" ")}
               >
                 Войти как Клиент
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleAndUrl("trainer")}
+                className={[
+                  "rounded-full px-4 py-2 text-xs font-semibold transition",
+                  loginType === "trainer"
+                    ? "bg-zinc-100 text-black"
+                    : "text-zinc-400 hover:text-zinc-200",
+                ].join(" ")}
+              >
+                Войти как Тренер
               </button>
             </div>
           </div>
@@ -241,6 +281,7 @@ export default function LoginPage() {
               <Input
                 id="email"
                 type="email"
+                autoCapitalize="none"
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -294,5 +335,19 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-black">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-100" />
+        </div>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }

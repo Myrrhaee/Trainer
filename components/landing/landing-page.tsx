@@ -217,7 +217,7 @@ export function LandingPage() {
                 size="lg"
                 className="rounded-full bg-zinc-100 px-8 py-6 text-base font-medium text-black hover:bg-white transition shadow-lg"
               >
-                <Link href="/login?type=client">Начать тренироваться бесплатно</Link>
+                <Link href="/login?role=client">Начать тренироваться бесплатно</Link>
               </Button>
               <Button
                 asChild
@@ -225,7 +225,7 @@ export function LandingPage() {
                 variant="outline"
                 className="rounded-full border-zinc-600 px-8 py-6 text-base font-medium text-zinc-100 hover:bg-zinc-800/80 hover:text-white transition"
               >
-                <Link href="/login?type=trainer">Создать кабинет тренера</Link>
+                <Link href="/login?role=trainer">Создать кабинет тренера</Link>
               </Button>
             </div>
           </FadeIn>
@@ -484,7 +484,7 @@ export function LandingPage() {
                 size="lg"
                 className="rounded-full bg-zinc-100 px-8 py-6 text-base font-medium text-black hover:bg-white transition"
               >
-                <Link href="/login?type=client">Начать тренироваться бесплатно</Link>
+                <Link href="/login?role=client">Начать тренироваться бесплатно</Link>
               </Button>
               <Button
                 asChild
@@ -492,7 +492,7 @@ export function LandingPage() {
                 variant="outline"
                 className="rounded-full border-zinc-600 px-8 py-6 text-base font-medium text-zinc-100 hover:bg-zinc-800/80 hover:text-white transition"
               >
-                <Link href="/login?type=trainer">Создать кабинет тренера</Link>
+                <Link href="/login?role=trainer">Создать кабинет тренера</Link>
               </Button>
             </div>
           </div>

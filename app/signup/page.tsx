@@ -1,14 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export default function SignupPage() {
-  const supabase = createClient();
+type SignupRole = "trainer" | "client";
+
+function roleFromSearchParams(searchParams: URLSearchParams | null): SignupRole {
+  if (!searchParams) return "client";
+  return searchParams.get("role") === "trainer" ? "trainer" : "client";
+}
+
+function SignupContent() {
+  const searchParams = useSearchParams();
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
+  if (supabaseRef.current === null) supabaseRef.current = createClient();
+  const supabase = supabaseRef.current;
+  const [role, setRole] = useState<SignupRole>(() => roleFromSearchParams(searchParams));
   const [fullName, setFullName] = useState("");
   const [teamName, setTeamName] = useState("");
   const [email, setEmail] = useState("");
@@ -17,10 +29,14 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  useEffect(() => {
+    setRole(roleFromSearchParams(searchParams));
+  }, [searchParams]);
+
   async function handleSignUp(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    const normalizedEmail = email.trim();
+    const normalizedEmail = email.trim().toLowerCase();
     const normalizedFullName = fullName.trim();
     const normalizedTeamName = teamName.trim();
     if (!normalizedEmail || !password) {
@@ -56,6 +72,7 @@ export default function SignupPage() {
             email: normalizedEmail,
             fullName: normalizedFullName,
             teamName: normalizedTeamName || undefined,
+            role,
           }),
         });
       } catch (err) {
@@ -95,7 +112,9 @@ export default function SignupPage() {
       <div className="w-full max-w-sm space-y-8">
         <div className="text-center">
           <h1 className="text-xl font-semibold tracking-tight text-zinc-50">Регистрация</h1>
-          <p className="mt-1 text-sm text-zinc-400">Создайте аккаунт</p>
+          <p className="mt-1 text-sm text-zinc-400">
+            {role === "trainer" ? "Создание профиля тренера" : "Создание профиля клиента"}
+          </p>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 shadow-xl">
@@ -132,6 +151,7 @@ export default function SignupPage() {
               <Input
                 id="email"
                 type="email"
+                autoCapitalize="none"
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -164,12 +184,31 @@ export default function SignupPage() {
           </form>
           <p className="mt-4 text-center text-xs text-zinc-500">
             Уже есть аккаунт?{" "}
-            <Link href="/login" className="text-zinc-300 hover:text-zinc-100">
+            <Link href={`/login?role=${role}`} className="text-zinc-300 hover:text-zinc-100">
               Войти
             </Link>
+            {role === "trainer" ? (
+              <> · <Link href="/signup?role=client" className="text-zinc-400 hover:text-zinc-200">Регистрация клиента</Link></>
+            ) : (
+              <> · <Link href="/signup?role=trainer" className="text-zinc-400 hover:text-zinc-200">Регистрация тренера</Link></>
+            )}
           </p>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-black">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-100" />
+        </div>
+      }
+    >
+      <SignupContent />
+    </Suspense>
   );
 }
