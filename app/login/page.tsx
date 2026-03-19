@@ -9,6 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 type LoginType = "trainer" | "client";
+const TEST_ADMIN_LOGIN = "admin";
+const TEST_TRAINER_EMAIL = "admin.trainer@local.test";
+const TEST_CLIENT_EMAIL = "admin.client@local.test";
+const TEST_LOGIN_SET = new Set([TEST_ADMIN_LOGIN, TEST_TRAINER_EMAIL, TEST_CLIENT_EMAIL]);
+
+function resolveLoginEmail(raw: string, loginType: LoginType): string {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === TEST_ADMIN_LOGIN) {
+    return loginType === "trainer" ? TEST_TRAINER_EMAIL : TEST_CLIENT_EMAIL;
+  }
+  return normalized;
+}
 
 function roleFromSearchParams(searchParams: URLSearchParams | null): LoginType {
   if (!searchParams) return "client";
@@ -42,16 +54,6 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function check() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user) router.replace("/dashboard");
-    }
-    check();
-  }, [router, supabase.auth]);
-
   async function ensureProfile(userId: string, role: "client" | "trainer", name: string, userEmail: string) {
     try {
       await fetch("/api/ensure-profile", {
@@ -76,8 +78,18 @@ function LoginContent() {
     setLoading(true);
 
     try {
-      const normalizedEmail = email.trim().toLowerCase();
+      const typedLogin = email.trim().toLowerCase();
+      const normalizedEmail = resolveLoginEmail(email, loginType);
       const normalizedName = fullName.trim();
+
+      // If user enters any test login, ensure test users + profiles exist.
+      if (!isSignUp && TEST_LOGIN_SET.has(typedLogin)) {
+        try {
+          await fetch("/api/seed-test-users", { method: "POST" });
+        } catch (seedErr) {
+          console.error("seed-test-users call failed:", seedErr);
+        }
+      }
 
       // 1) Pre-check email existence in profiles
       if (!isSignUp) {

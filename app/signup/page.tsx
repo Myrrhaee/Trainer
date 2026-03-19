@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase-client";
@@ -21,6 +21,10 @@ function SignupContent() {
   if (supabaseRef.current === null) supabaseRef.current = createClient();
   const supabase = supabaseRef.current;
   const [role, setRole] = useState<SignupRole>(() => roleFromSearchParams(searchParams));
+  const trainerIdFromUrl = useMemo(
+    () => searchParams.get("trainer_id")?.trim() || null,
+    [searchParams]
+  );
   const [fullName, setFullName] = useState("");
   const [teamName, setTeamName] = useState("");
   const [email, setEmail] = useState("");
@@ -73,6 +77,7 @@ function SignupContent() {
             fullName: normalizedFullName,
             teamName: normalizedTeamName || undefined,
             role,
+            trainerId: trainerIdFromUrl,
           }),
         });
       } catch (err) {

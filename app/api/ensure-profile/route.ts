@@ -6,6 +6,7 @@ type Body = {
   email?: string | null;
   fullName?: string | null;
   teamName?: string | null;
+  trainerId?: string | null;
   role?: "client" | "trainer" | string | null;
 };
 
@@ -64,6 +65,10 @@ export async function POST(req: Request) {
     if (typeof body.email === "string") payload.email = body.email.trim().toLowerCase();
     if (typeof body.fullName === "string") payload.full_name = body.fullName;
     if (typeof body.teamName === "string") payload.display_name = body.teamName;
+    // Bind client to trainer only on first creation
+    if (!existing && typeof body.trainerId === "string" && body.trainerId.trim()) {
+      payload.trainer_id = body.trainerId.trim();
+    }
 
     console.log("[ensure-profile] Upsert payload (no secrets):", {
       id: payload.id,
@@ -71,6 +76,7 @@ export async function POST(req: Request) {
       hasEmail: !!payload.email,
       hasFullName: !!payload.full_name,
       hasDisplayName: !!payload.display_name,
+      hasTrainerId: !!payload.trainer_id,
     });
 
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment

@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +52,13 @@ type Client = {
   access_granted?: boolean;
 };
 
+type MyClientRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  created_at: string | null;
+};
+
 const supabase = createClient();
 
 type WorkoutLogRow = {
@@ -72,6 +79,8 @@ export default function Home() {
   const { trainerId } = useTrainer();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const [myClientsLoading, setMyClientsLoading] = useState(true);
+  const [myClients, setMyClients] = useState<MyClientRow[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -98,16 +107,18 @@ export default function Home() {
   const [accessUpdatingId, setAccessUpdatingId] = useState<string | null>(null);
   const [payments, setPayments] = useState<{ amount: number; created_at: string }[]>([]);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [teamLogoUrl, setTeamLogoUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!trainerId) return;
     async function loadProfile() {
       const { data } = await supabase
         .from("profiles")
-        .select("display_name")
+        .select("display_name, team_logo_url")
         .eq("id", trainerId)
         .single();
       if (data?.display_name) setDisplayName(data.display_name as string);
+      if (data?.team_logo_url) setTeamLogoUrl(data.team_logo_url as string);
     }
     loadProfile();
   }, [trainerId]);
@@ -155,6 +166,36 @@ export default function Home() {
     if (trainerId) {
       loadClients();
     }
+  }, [trainerId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMyClients() {
+      if (!trainerId) return;
+      setMyClientsLoading(true);
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("trainer_id", trainerId)
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("my-clients load failed:", error);
+        setMyClients([]);
+        setMyClientsLoading(false);
+        return;
+      }
+
+      const rows = (data ?? []) as unknown as MyClientRow[];
+      setMyClients(rows);
+      setMyClientsLoading(false);
+    }
+    loadMyClients();
+    return () => {
+      cancelled = true;
+    };
   }, [trainerId]);
 
   async function setClientAccess(clientId: string, granted: boolean) {
@@ -479,11 +520,33 @@ export default function Home() {
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-10">
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-              {displayName
-                ? `Панель управления: ${displayName}`
-                : "Панель управления"}
-            </h1>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
+                {displayName
+                  ? `Панель управления: ${displayName}`
+                  : "Панель управления"}
+              </h1>
+
+              <div className="inline-flex items-center gap-3 rounded-full border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                <Avatar size="sm" className="bg-zinc-900">
+                  {teamLogoUrl ? (
+                    <AvatarImage src={teamLogoUrl} alt="Логотип команды" />
+                  ) : (
+                    <AvatarFallback className="bg-zinc-900 text-zinc-200">
+                      {(displayName?.trim()?.[0] ?? "К").toUpperCase()}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Команда
+                  </div>
+                  <div className="max-w-[220px] truncate text-sm font-medium text-zinc-100">
+                    {displayName?.trim() ? displayName : "Без названия"}
+                  </div>
+                </div>
+              </div>
+            </div>
             <p className="text-sm text-muted-foreground">
               Быстрый обзор активности и состояния клиентов.
             </p>
@@ -850,6 +913,89 @@ export default function Home() {
               </Card>
             ))
           )}
+        </section>
+
+        {/* Мои клиенты (привязка по trainer_id) */}
+        <section>
+          <Card className="border border-border/60 bg-zinc-900/30 shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
+            <CardHeader>
+              <CardTitle className="text-zinc-100">Мои клиенты</CardTitle>
+              <CardDescription>
+                Клиенты, зарегистрированные по вашей ссылке (привязка по trainer_id).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {myClientsLoading ? (
+                <div className="space-y-2">
+                  <div className="h-10 w-full rounded-xl bg-zinc-900/60" />
+                  <div className="h-10 w-full rounded-xl bg-zinc-900/60" />
+                  <div className="h-10 w-full rounded-xl bg-zinc-900/60" />
+                </div>
+              ) : myClients.length === 0 ? (
+                <div className="rounded-2xl border border-border/60 bg-zinc-950/40 p-4 text-sm text-zinc-300">
+                  <div className="font-medium text-zinc-100">
+                    У вас пока нет клиентов.
+                  </div>
+                  <div className="mt-1 text-zinc-400">
+                    Поделитесь своей ссылкой на визитку, чтобы начать!
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-2xl border border-border/60">
+                  <div className="grid grid-cols-12 gap-3 bg-zinc-950/60 px-4 py-3 text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+                    <div className="col-span-5">Имя клиента</div>
+                    <div className="col-span-4">Email</div>
+                    <div className="col-span-2">Регистрация</div>
+                    <div className="col-span-1 text-right"> </div>
+                  </div>
+                  <div className="divide-y divide-border/60 bg-zinc-950/30">
+                    {myClients.map((c) => {
+                      const name = (c.full_name ?? "").trim() || "Без имени";
+                      const email = (c.email ?? "").trim() || "—";
+                      const date = c.created_at
+                        ? new Date(c.created_at).toLocaleDateString("ru-RU", {
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                          })
+                        : "—";
+
+                      return (
+                        <div
+                          key={c.id}
+                          className="grid grid-cols-12 items-center gap-3 px-4 py-3 text-sm"
+                        >
+                          <div className="col-span-5 min-w-0">
+                            <div className="truncate font-medium text-zinc-100">
+                              {name}
+                            </div>
+                          </div>
+                          <div className="col-span-4 min-w-0">
+                            <div className="truncate text-zinc-300">{email}</div>
+                          </div>
+                          <div className="col-span-2 text-zinc-400">{date}</div>
+                          <div className="col-span-1 flex justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-full border-zinc-800 bg-zinc-950 text-zinc-100 hover:bg-zinc-900"
+                              onClick={() => {
+                                // placeholder
+                                alert("Скоро: откроем программу клиента");
+                              }}
+                            >
+                              Открыть программу
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </section>
       </main>
 

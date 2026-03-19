@@ -44,6 +44,7 @@ export function NavBar() {
           <NavLink href="/dashboard/library" label="Библиотека" />
           <NavLink href="/dashboard/programs" label="Программы" />
           <NavLink href="/dashboard/analytics" label="Аналитика" />
+          <NavLink href="/trainers" label="Найти тренера" />
         </nav>
         <Button
           type="button"
