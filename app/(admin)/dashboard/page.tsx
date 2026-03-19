@@ -3,7 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, BellRing, DollarSign, Dumbbell, Loader2, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  BellRing,
+  Copy,
+  DollarSign,
+  Dumbbell,
+  Loader2,
+  Users,
+} from "lucide-react";
 import {
   Line,
   LineChart,
@@ -108,20 +116,45 @@ export default function Home() {
   const [payments, setPayments] = useState<{ amount: number; created_at: string }[]>([]);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [teamLogoUrl, setTeamLogoUrl] = useState<string | null>(null);
+  const [profileSlug, setProfileSlug] = useState<string | null>(null);
+  const [publicOrigin, setPublicOrigin] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  useEffect(() => {
+    setPublicOrigin(typeof window !== "undefined" ? window.location.origin : "");
+  }, []);
 
   useEffect(() => {
     if (!trainerId) return;
     async function loadProfile() {
       const { data } = await supabase
         .from("profiles")
-        .select("display_name, team_logo_url")
+        .select("display_name, team_logo_url, slug")
         .eq("id", trainerId)
         .single();
       if (data?.display_name) setDisplayName(data.display_name as string);
       if (data?.team_logo_url) setTeamLogoUrl(data.team_logo_url as string);
+      const s = (data as { slug?: string | null } | null)?.slug;
+      setProfileSlug(typeof s === "string" && s.trim() ? s.trim() : null);
     }
     loadProfile();
   }, [trainerId]);
+
+  const publicTrainerUrl = useMemo(() => {
+    if (!publicOrigin || !profileSlug) return "";
+    return `${publicOrigin}/t/${encodeURIComponent(profileSlug)}`;
+  }, [publicOrigin, profileSlug]);
+
+  async function copyTrainerLink() {
+    if (!publicTrainerUrl) return;
+    try {
+      await navigator.clipboard.writeText(publicTrainerUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (e) {
+      console.error("copy failed:", e);
+    }
+  }
 
   useEffect(() => {
     async function ensureSession() {
@@ -518,6 +551,46 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-zinc-950 font-sans text-foreground">
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-10">
+        {/* Ссылка для приглашения клиентов */}
+        <section className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-950/50 via-zinc-950 to-zinc-950 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.45)] ring-1 ring-emerald-500/10">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold tracking-tight text-zinc-50">
+                Твоя ссылка для клиентов
+              </h2>
+              <p className="text-sm text-zinc-400">
+                Поделитесь ею — клиент откроет вашу визитку и сможет записаться.
+              </p>
+            </div>
+            {profileSlug ? (
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[320px]">
+                <div className="flex items-center gap-2 rounded-xl border border-zinc-700/80 bg-zinc-900/80 px-3 py-2.5 font-mono text-sm text-emerald-200/95 shadow-inner">
+                  <span className="min-w-0 flex-1 truncate select-all">
+                    {publicTrainerUrl || `…/t/${profileSlug}`}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void copyTrainerLink()}
+                  className="w-full rounded-xl bg-zinc-100 text-black hover:bg-white sm:w-auto"
+                >
+                  <Copy className="mr-2 size-4" />
+                  {linkCopied ? "Скопировано!" : "Копировать ссылку"}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                asChild
+                className="w-full rounded-xl bg-emerald-500 px-5 text-sm font-medium text-zinc-950 hover:bg-emerald-400 sm:w-auto"
+              >
+                <Link href="/settings">Настроить ссылку профиля</Link>
+              </Button>
+            )}
+          </div>
+        </section>
+
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="space-y-1">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">

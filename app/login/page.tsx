@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff, Info } from "lucide-react";
 import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,14 +44,29 @@ function LoginContent() {
     setLoginType(roleFromSearchParams(searchParams));
   }, [searchParams]);
 
+  const urlMessage = useMemo(() => {
+    const raw = searchParams.get("message");
+    if (raw == null || !String(raw).trim()) return null;
+    try {
+      return decodeURIComponent(String(raw).replace(/\+/g, " "));
+    } catch {
+      return String(raw).replace(/\+/g, " ");
+    }
+  }, [searchParams]);
+
   function setRoleAndUrl(role: LoginType) {
     setLoginType(role);
-    router.replace(`/login?role=${role}`);
+    const params = new URLSearchParams();
+    params.set("role", role);
+    const msg = searchParams.get("message");
+    if (msg) params.set("message", msg);
+    router.replace(`/login?${params.toString()}`);
   }
   const [isSignUp, setIsSignUp] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -269,6 +285,19 @@ function LoginContent() {
             </div>
           </div>
 
+          {urlMessage && !isSignUp && (
+            <div
+              role="status"
+              className="mb-5 flex gap-3 rounded-xl border border-emerald-900/50 bg-emerald-950/25 px-4 py-3 text-left ring-1 ring-emerald-500/10"
+            >
+              <Info
+                className="mt-0.5 size-4 shrink-0 text-emerald-400/90"
+                aria-hidden
+              />
+              <p className="text-sm leading-relaxed text-emerald-100/95">{urlMessage}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {isSignUp && (
               <div className="space-y-2">
@@ -306,15 +335,29 @@ function LoginContent() {
               <Label htmlFor="password" className="text-xs font-medium text-zinc-300">
                 Пароль
               </Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="h-10 rounded-xl border-zinc-700 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 focus-visible:ring-zinc-400"
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={isSignUp ? "new-password" : "current-password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="h-10 rounded-xl border-zinc-700 bg-zinc-900 pr-10 text-zinc-100 placeholder:text-zinc-500 focus-visible:ring-zinc-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2 text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60"
+                  aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4 shrink-0" aria-hidden />
+                  ) : (
+                    <Eye className="size-4 shrink-0" aria-hidden />
+                  )}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -338,6 +381,7 @@ function LoginContent() {
               className="text-sm font-medium text-zinc-400 hover:text-zinc-200"
               onClick={() => {
                 setError(null);
+                setShowPassword(false);
                 setIsSignUp((v) => !v);
               }}
             >

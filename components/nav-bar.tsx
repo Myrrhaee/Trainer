@@ -39,12 +39,13 @@ export function NavBar() {
             Trainer
           </span>
         </div>
-        <nav className="flex items-center gap-2 rounded-full border border-border/60 bg-zinc-950/60 px-1.5 py-1">
+        <nav className="flex flex-wrap items-center gap-2 rounded-full border border-border/60 bg-zinc-950/60 px-1.5 py-1">
           <NavLink href="/dashboard" label="Клиенты" />
           <NavLink href="/dashboard/library" label="Библиотека" />
           <NavLink href="/dashboard/programs" label="Программы" />
           <NavLink href="/dashboard/analytics" label="Аналитика" />
           <NavLink href="/trainers" label="Найти тренера" />
+          <NavLink href="/settings" label="Настройки" />
         </nav>
         <Button
           type="button"

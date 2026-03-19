@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Eye, EyeOff, Mail } from "lucide-react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,9 +31,10 @@ function SignupContent() {
   const [teamName, setTeamName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submittedEmail, setSubmittedEmail] = useState("");
 
   useEffect(() => {
     setRole(roleFromSearchParams(searchParams));
@@ -86,21 +89,55 @@ function SignupContent() {
     }
 
     setLoading(false);
-    setSuccess(true);
+    toast.success("Успешно! Инструкции отправлены на почту");
+    setSubmittedEmail(normalizedEmail);
+    setIsSubmitted(true);
   }
 
-  if (success) {
+  if (isSubmitted) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-black px-4">
-        <div className="w-full max-w-sm space-y-6 text-center">
-          <p className="text-lg font-medium text-zinc-100">
-            Проверьте почту для подтверждения
-          </p>
-          <p className="text-sm text-zinc-400">
-            Перейдите по ссылке из письма, чтобы активировать аккаунт. До активации вход в кабинет недоступен.
-          </p>
-          <Button asChild variant="outline" className="rounded-xl">
-            <Link href="/login">На страницу входа</Link>
+        <div className="absolute left-4 top-4 sm:left-6 sm:top-6">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+          >
+            <Link href="/">На главную</Link>
+          </Button>
+        </div>
+        <div className="w-full max-w-md space-y-8 text-center">
+          <div className="flex flex-col items-center gap-6">
+            <div className="relative flex h-24 w-24 items-center justify-center">
+              <span
+                className="absolute inline-flex h-20 w-20 animate-ping rounded-full bg-zinc-500/25"
+                aria-hidden
+              />
+              <span className="absolute inline-flex h-16 w-16 animate-pulse rounded-full bg-zinc-400/10" aria-hidden />
+              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-900 shadow-lg shadow-black/40">
+                <Mail className="size-8 text-zinc-200" strokeWidth={1.75} aria-hidden />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+                Подтвердите почту
+              </p>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
+                Письмо отправлено!
+              </h1>
+            </div>
+            <p className="max-w-sm text-sm leading-relaxed text-zinc-400">
+              Мы отправили ссылку для подтверждения на{" "}
+              <span className="break-all font-medium text-zinc-200">{submittedEmail}</span>. Пожалуйста,
+              проверьте папку Входящие или Спам.
+            </p>
+          </div>
+          <Button
+            asChild
+            className="w-full rounded-xl bg-zinc-100 py-2.5 text-sm font-medium text-black hover:bg-white sm:w-auto sm:min-w-[200px]"
+          >
+            <Link href="/login">Вернуться к логину</Link>
           </Button>
         </div>
       </div>
@@ -166,19 +203,30 @@ function SignupContent() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="password" className="text-xs font-medium text-zinc-300">Пароль</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="h-10 rounded-xl border-zinc-700 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 focus-visible:ring-zinc-400"
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="h-10 rounded-xl border-zinc-700 bg-zinc-900 pr-10 text-zinc-100 placeholder:text-zinc-500 focus-visible:ring-zinc-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg p-2 text-zinc-500 transition-colors hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60"
+                  aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4 shrink-0" aria-hidden />
+                  ) : (
+                    <Eye className="size-4 shrink-0" aria-hidden />
+                  )}
+                </button>
+              </div>
             </div>
-            {error && (
-              <p className="text-sm text-rose-400" role="alert">{error}</p>
-            )}
             <Button
               type="submit"
               disabled={loading || !email.trim() || !password || !fullName.trim()}

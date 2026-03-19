@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Settings } from "lucide-react";
 import { createClient } from "@/lib/supabase-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -299,14 +300,28 @@ export default function ClientMePage() {
               Ваш прогресс и программа тренировок.
             </p>
           </div>
-          <Button
-            asChild
-            variant="ghost"
-            size="sm"
-            className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
-          >
-            <Link href="/">На главную</Link>
-          </Button>
+          <div className="flex shrink-0 items-start gap-1">
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+              aria-label="Настройки"
+              title="Настройки"
+            >
+              <Link href="/client/settings">
+                <Settings className="size-5" />
+              </Link>
+            </Button>
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+            >
+              <Link href="/">На главную</Link>
+            </Button>
+          </div>
         </header>
 
         {error && (

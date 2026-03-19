@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Footer } from "@/components/Footer";
+import { AppToaster } from "@/components/app-toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const inter = Inter({
@@ -24,6 +25,7 @@ export default function RootLayout({
         <TooltipProvider delayDuration={300}>
           <div className="flex-1">{children}</div>
           <Footer />
+          <AppToaster />
         </TooltipProvider>
       </body>
     </html>
