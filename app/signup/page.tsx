@@ -42,16 +42,15 @@ function SignupContent() {
 
   async function handleSignUp(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setError(null);
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedFullName = fullName.trim();
     const normalizedTeamName = teamName.trim();
     if (!normalizedEmail || !password) {
-      setError("Заполните email и пароль");
+      toast.error("Заполните email и пароль");
       return;
     }
     if (!normalizedFullName) {
-      setError("Введите имя и фамилию");
+      toast.error("Введите имя и фамилию");
       return;
     }
 
@@ -64,7 +63,7 @@ function SignupContent() {
 
     if (signUpError) {
       setLoading(false);
-      setError(signUpError.message ?? "Ошибка регистрации");
+      toast.error(signUpError.message ?? "Ошибка регистрации");
       return;
     }
 
