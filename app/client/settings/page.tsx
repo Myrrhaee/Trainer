@@ -147,16 +147,27 @@ export default function ClientSettingsPage() {
 
     setSavingProfile(true);
     try {
+      const profileUpdatePayload: Record<string, unknown> = {
+        full_name: name,
+        telegram_link: telegramLink.trim() || null,
+      };
+      const sessionUserId = user.id;
+      console.log("[client/settings] перед profiles.update (профиль)", {
+        updatePayload: { ...profileUpdatePayload },
+        eqId: user.id,
+        sessionUserIdFromGetUser: sessionUserId,
+        idsMatch: user.id === sessionUserId,
+        payloadHasUndefined: Object.values(profileUpdatePayload).some((v) => v === undefined),
+        payloadKeys: Object.keys(profileUpdatePayload),
+      });
+
       const { error: updateError } = await supabase
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         .from("profiles")
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        .update({
-          full_name: name,
-          telegram_link: telegramLink.trim() || null,
-        } as Record<string, unknown>)
+        .update(profileUpdatePayload as Record<string, unknown>)
         .eq("id", user.id);
 
       if (updateError) {
@@ -202,17 +213,28 @@ export default function ClientSettingsPage() {
 
     setSavingMetrics(true);
     try {
+      const metricsUpdatePayload: Record<string, unknown> = {
+        weight: w,
+        height: h,
+        target_weight: tw,
+      };
+      const sessionUserIdMetrics = user.id;
+      console.log("[client/settings] перед profiles.update (параметры)", {
+        updatePayload: { ...metricsUpdatePayload },
+        eqId: user.id,
+        sessionUserIdFromGetUser: sessionUserIdMetrics,
+        idsMatch: user.id === sessionUserIdMetrics,
+        payloadHasUndefined: Object.values(metricsUpdatePayload).some((v) => v === undefined),
+        payloadKeys: Object.keys(metricsUpdatePayload),
+      });
+
       const { error: updateError } = await supabase
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         .from("profiles")
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        .update({
-          weight: w,
-          height: h,
-          target_weight: tw,
-        } as Record<string, unknown>)
+        .update(metricsUpdatePayload as Record<string, unknown>)
         .eq("id", user.id);
 
       if (updateError) {

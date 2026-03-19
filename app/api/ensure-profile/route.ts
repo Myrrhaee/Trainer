@@ -95,6 +95,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const boundTrainerId =
+      typeof payload.trainer_id === "string" ? payload.trainer_id.trim() : "";
+    if (role === "client" && boundTrainerId && boundTrainerId !== userId) {
+      await admin.from("trainer_clients").delete().eq("client_id", userId);
+      const { error: linkErr } = await admin.from("trainer_clients").insert({
+        trainer_id: boundTrainerId,
+        client_id: userId,
+        status: "active",
+        access_granted: true,
+      } as never);
+      if (linkErr) {
+        console.error("[ensure-profile] trainer_clients insert failed:", linkErr);
+      }
+    }
+
     console.log("[ensure-profile] Success, profile ensured for:", userId);
     return NextResponse.json({ ok: true });
   } catch (e) {

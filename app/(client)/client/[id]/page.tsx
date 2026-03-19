@@ -668,11 +668,18 @@ export default function ClientWorkoutPage() {
   if (profile && profile.is_paid !== true) {
     async function activateAccess() {
       if (!clientId) return;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user?.id || user.id !== clientId) {
+        console.error("activateAccess: несовпадение id сессии и ссылки клиента");
+        return;
+      }
       setActivatingAccess(true);
       const { error } = await supabase
         .from("profiles")
         .update({ is_paid: true })
-        .eq("id", clientId);
+        .eq("id", user.id);
       setActivatingAccess(false);
       if (error) {
         console.error("Ошибка активации доступа:", error);

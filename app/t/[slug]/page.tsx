@@ -143,7 +143,7 @@ export default async function PublicTrainerPage(
           )}
 
           <Link
-            href={`/signup?role=client&trainer_id=${encodeURIComponent(profile.id)}`}
+            href={`/login?role=client&trainer_id=${encodeURIComponent(profile.id)}`}
             className="inline-flex w-full items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950/60 px-6 py-4 text-base font-medium text-zinc-100 transition hover:bg-zinc-900/60"
           >
             Стать моим клиентом

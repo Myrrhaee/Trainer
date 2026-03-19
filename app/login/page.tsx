@@ -54,12 +54,19 @@ function LoginContent() {
     }
   }, [searchParams]);
 
+  const trainerIdFromUrl = useMemo(
+    () => searchParams.get("trainer_id")?.trim() || null,
+    [searchParams]
+  );
+
   function setRoleAndUrl(role: LoginType) {
     setLoginType(role);
     const params = new URLSearchParams();
     params.set("role", role);
     const msg = searchParams.get("message");
     if (msg) params.set("message", msg);
+    const tid = searchParams.get("trainer_id");
+    if (tid) params.set("trainer_id", tid);
     router.replace(`/login?${params.toString()}`);
   }
   const [isSignUp, setIsSignUp] = useState(false);
@@ -70,7 +77,13 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function ensureProfile(userId: string, role: "client" | "trainer", name: string, userEmail: string) {
+  async function ensureProfile(
+    userId: string,
+    role: "client" | "trainer",
+    name: string,
+    userEmail: string,
+    inviteTrainerId?: string | null
+  ) {
     try {
       await fetch("/api/ensure-profile", {
         method: "POST",
@@ -80,11 +93,28 @@ function LoginContent() {
           role,
           fullName: name,
           email: userEmail,
+          ...(role === "client" && inviteTrainerId ? { trainerId: inviteTrainerId } : {}),
         }),
       });
     } catch {
       // ignore
     }
+  }
+
+  async function linkToTrainerFromInvite(accessToken: string, trainerId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const res = await fetch("/api/link-trainer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ trainerId }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      return { ok: false, error: json.error ?? "Не удалось присоединиться к тренеру" };
+    }
+    return { ok: true };
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -146,7 +176,14 @@ function LoginContent() {
         const userId = data.user?.id;
         if (userId) {
           const role: "client" | "trainer" = loginType === "trainer" ? "trainer" : "client";
-          await ensureProfile(userId, role, normalizedName, data.user?.email ?? normalizedEmail);
+          const inviteTid = role === "client" ? trainerIdFromUrl : null;
+          await ensureProfile(
+            userId,
+            role,
+            normalizedName,
+            data.user?.email ?? normalizedEmail,
+            inviteTid
+          );
           router.refresh();
           router.push(role === "client" ? "/client/me" : "/dashboard");
           return;
@@ -191,7 +228,8 @@ function LoginContent() {
         // Если профиля нет — принудительно вызываем ensure-profile и ждём появления профиля (таймаут 10 с)
         if (!role) {
           const newRole = loginType === "trainer" ? "trainer" : "client";
-          await ensureProfile(userId, newRole, normalizedName || "", normalizedEmail);
+          const inviteTid = newRole === "client" ? trainerIdFromUrl : null;
+          await ensureProfile(userId, newRole, normalizedName || "", normalizedEmail, inviteTid);
 
           const deadline = Date.now() + PROFILE_SYNC_TIMEOUT_MS;
           while (Date.now() < deadline) {
@@ -215,6 +253,20 @@ function LoginContent() {
         }
 
         console.log("Профиль найден, роль:", role);
+
+        if (role === "client" && trainerIdFromUrl) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const token = session?.access_token;
+          if (token) {
+            const linked = await linkToTrainerFromInvite(token, trainerIdFromUrl);
+            if (!linked.ok) {
+              setError(linked.error);
+              return;
+            }
+          }
+        }
 
         router.refresh();
         if (role === "client") {
@@ -284,6 +336,20 @@ function LoginContent() {
               </button>
             </div>
           </div>
+
+          {trainerIdFromUrl && loginType === "client" && (
+            <div
+              role="status"
+              className="mb-5 rounded-xl border border-sky-900/45 bg-sky-950/25 px-4 py-3 text-left text-sm text-sky-100/95 ring-1 ring-sky-500/10"
+            >
+              <p className="font-medium text-sky-50">Приглашение тренера</p>
+              <p className="mt-1 text-xs leading-relaxed text-sky-200/80">
+                {isSignUp
+                  ? "Создайте аккаунт — вы автоматически станете клиентом этого тренера. Уже есть аккаунт? Переключитесь на вход."
+                  : "Войдите в аккаунт — после входа вы будете присоединены к тренеру. Нет аккаунта? Нажмите «Зарегистрироваться» ниже."}
+              </p>
+            </div>
+          )}
 
           {urlMessage && !isSignUp && (
             <div

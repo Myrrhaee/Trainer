@@ -2,8 +2,9 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Eye, EyeOff, Mail } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Eye, EyeOff, Mail, UserPlus } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,19 @@ function roleFromSearchParams(searchParams: URLSearchParams | null): SignupRole 
   return searchParams.get("role") === "trainer" ? "trainer" : "client";
 }
 
+type MyProfileRow = {
+  role: string | null;
+  trainer_id: string | null;
+};
+
+type TrainerCardRow = {
+  full_name: string | null;
+  display_name: string | null;
+  role: string | null;
+};
+
 function SignupContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (supabaseRef.current === null) supabaseRef.current = createClient();
@@ -36,9 +49,132 @@ function SignupContent() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submittedEmail, setSubmittedEmail] = useState("");
 
+  const [authReady, setAuthReady] = useState(false);
+  const [sessionUser, setSessionUser] = useState<User | null>(null);
+  const [myProfile, setMyProfile] = useState<MyProfileRow | null>(null);
+  const [trainerCard, setTrainerCard] = useState<TrainerCardRow | null>(null);
+  const [joining, setJoining] = useState(false);
+
   useEffect(() => {
     setRole(roleFromSearchParams(searchParams));
   }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAuthAndInviteContext() {
+      const r = roleFromSearchParams(searchParams);
+      const tid = searchParams.get("trainer_id")?.trim() || null;
+
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData.user ?? null;
+
+      if (cancelled) return;
+
+      if (!user) {
+        if (tid && r === "client") {
+          router.replace(
+            `/login?role=client&trainer_id=${encodeURIComponent(tid)}`
+          );
+          return;
+        }
+        setSessionUser(null);
+        setMyProfile(null);
+        setTrainerCard(null);
+        setAuthReady(true);
+        return;
+      }
+
+      setSessionUser(user);
+
+      const { data: me } = await supabase
+        .from("profiles")
+        .select("role, trainer_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+      setMyProfile((me ?? null) as MyProfileRow | null);
+
+      if (tid && r === "client") {
+        const { data: tr } = await supabase
+          .from("profiles")
+          .select("full_name, display_name, role")
+          .eq("id", tid)
+          .maybeSingle();
+        if (cancelled) return;
+        const row = tr as TrainerCardRow | null;
+        if (row?.role === "trainer") {
+          setTrainerCard(row);
+        } else {
+          setTrainerCard(null);
+        }
+      } else {
+        setTrainerCard(null);
+      }
+
+      setAuthReady(true);
+    }
+
+    void loadAuthAndInviteContext();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void loadAuthAndInviteContext();
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [searchParams, supabase, router]);
+
+  const showTrainerInviteJoin =
+    authReady &&
+    !!sessionUser &&
+    !!trainerIdFromUrl &&
+    role === "client";
+
+  async function handleJoinTrainer() {
+    if (!trainerIdFromUrl || !sessionUser) return;
+    setJoining(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) {
+        toast.error("Сессия недействительна. Войдите снова.");
+        return;
+      }
+
+      const res = await fetch("/api/link-trainer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ trainerId: trainerIdFromUrl }),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+
+      if (!res.ok) {
+        toast.error(data.error ?? "Не удалось присоединиться к тренеру");
+        return;
+      }
+
+      toast.success("Вы стали клиентом тренера!");
+      router.push("/client/me");
+      router.refresh();
+    } catch (e) {
+      console.error("handleJoinTrainer:", e);
+      toast.error("Ошибка сети. Попробуйте позже.");
+    } finally {
+      setJoining(false);
+    }
+  }
 
   async function handleSignUp(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -138,6 +274,135 @@ function SignupContent() {
           >
             <Link href="/login">Вернуться к логину</Link>
           </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black px-4">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-100" />
+      </div>
+    );
+  }
+
+  const trainerInviteTitle =
+    trainerCard?.display_name?.trim() ||
+    trainerCard?.full_name?.trim() ||
+    "тренера";
+
+  if (showTrainerInviteJoin && myProfile?.role === "trainer") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black px-4">
+        <div className="absolute left-4 top-4 sm:left-6 sm:top-6">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+          >
+            <Link href="/">На главную</Link>
+          </Button>
+        </div>
+        <div className="w-full max-w-md space-y-6 text-center">
+          <div className="rounded-2xl border border-amber-900/40 bg-amber-950/20 px-5 py-6">
+            <h1 className="text-lg font-semibold text-zinc-50">Это приглашение для клиентов</h1>
+            <p className="mt-2 text-sm text-zinc-400">
+              Вы вошли как тренер. Чтобы стать клиентом, выйдите из аккаунта и зарегистрируйтесь или войдите
+              клиентским профилем.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Button asChild variant="outline" className="rounded-xl border-zinc-700 bg-zinc-950 text-zinc-100">
+              <Link href="/dashboard">Кабинет тренера</Link>
+            </Button>
+            <Button asChild className="rounded-xl bg-zinc-100 text-black hover:bg-white">
+              <Link href="/login?role=client">Войти как клиент</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (showTrainerInviteJoin && myProfile?.trainer_id === trainerIdFromUrl) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black px-4">
+        <div className="absolute left-4 top-4 sm:left-6 sm:top-6">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+          >
+            <Link href="/">На главную</Link>
+          </Button>
+        </div>
+        <div className="w-full max-w-md space-y-6 text-center">
+          <div className="rounded-2xl border border-emerald-900/40 bg-emerald-950/20 px-5 py-6">
+            <h1 className="text-lg font-semibold text-zinc-50">Вы уже у этого тренера</h1>
+            <p className="mt-2 text-sm text-zinc-400">
+              Откройте личный кабинет клиента — программы и тренировки уже привязаны к вам.
+            </p>
+          </div>
+          <Button asChild className="w-full rounded-xl bg-zinc-100 py-2.5 text-sm font-medium text-black hover:bg-white">
+            <Link href="/client/me">Перейти в кабинет</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (showTrainerInviteJoin) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black px-4">
+        <div className="absolute left-4 top-4 sm:left-6 sm:top-6">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="rounded-full text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-100"
+          >
+            <Link href="/">На главную</Link>
+          </Button>
+        </div>
+        <div className="w-full max-w-sm space-y-8">
+          <div className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900">
+              <UserPlus className="size-6 text-zinc-200" aria-hidden />
+            </div>
+            <h1 className="text-xl font-semibold tracking-tight text-zinc-50">Приглашение тренера</h1>
+            <p className="mt-2 text-sm text-zinc-400">
+              Вы вошли как{" "}
+              <span className="text-zinc-200">{sessionUser?.email ?? "пользователь"}</span>. Подтвердите, что хотите
+              стать клиентом <span className="font-medium text-zinc-200">{trainerInviteTitle}</span>.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 shadow-xl">
+            <p className="mb-4 text-center text-xs text-zinc-500">
+              Новый аккаунт не нужен — достаточно одного нажатия. Данные профиля останутся вашими.
+            </p>
+            <Button
+              type="button"
+              disabled={joining}
+              onClick={() => void handleJoinTrainer()}
+              className="w-full rounded-xl bg-zinc-100 py-2.5 text-sm font-medium text-black hover:bg-white disabled:opacity-50"
+            >
+              {joining ? "Подключаем..." : "Стать клиентом тренера"}
+            </Button>
+            <p className="mt-4 text-center text-xs text-zinc-500">
+              Нужен другой аккаунт?{" "}
+              <button
+                type="button"
+                className="font-medium text-zinc-300 underline-offset-2 hover:text-zinc-100 hover:underline"
+                onClick={() => void supabase.auth.signOut().then(() => router.refresh())}
+              >
+                Выйти
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     );

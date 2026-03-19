@@ -144,6 +144,13 @@ export default function TrainerSettingsPage() {
     setError(null);
     setSuccess(null);
 
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    const authUserId = authData.user?.id ?? null;
+    if (authErr || !authUserId || authUserId !== trainerId) {
+      setError("Не удалось подтвердить аккаунт. Войдите снова.");
+      return;
+    }
+
     const normalizedFullName = fullName.trim();
     const normalizedDisplayName = displayName.trim();
     const normalizedTelegramLink = telegramLink.trim();
@@ -169,7 +176,7 @@ export default function TrainerSettingsPage() {
           .from("profiles")
           .select("id")
           .eq("slug", nextSlug)
-          .neq("id", trainerId)
+          .neq("id", authUserId)
           .maybeSingle();
 
         if (slugErr) {
@@ -191,6 +198,16 @@ export default function TrainerSettingsPage() {
         is_public: isPublic,
       };
 
+      const sessionUserId = authData.user?.id ?? null;
+      console.log("[trainer/settings] перед profiles.update (основное сохранение)", {
+        updatePayload: { ...updatePayload },
+        eqId: authUserId,
+        sessionUserIdFromGetUser: sessionUserId,
+        idsMatch: sessionUserId != null && authUserId === sessionUserId,
+        payloadHasUndefined: Object.values(updatePayload).some((v) => v === undefined),
+        payloadKeys: Object.keys(updatePayload),
+      });
+
       const { error: updateError } = await supabase
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
@@ -198,7 +215,7 @@ export default function TrainerSettingsPage() {
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         .update(updatePayload as Record<string, unknown>)
-        .eq("id", trainerId);
+        .eq("id", authUserId);
 
       if (updateError) {
         console.error("settings: profile update failed:", updateError);
@@ -218,6 +235,13 @@ export default function TrainerSettingsPage() {
     if (!trainerId) return;
     setError(null);
     setSuccess(null);
+
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    const authUserId = authData.user?.id ?? null;
+    if (authErr || !authUserId || authUserId !== trainerId) {
+      setError("Не удалось подтвердить аккаунт. Войдите снова.");
+      return;
+    }
 
     const maxSizeBytes = 5 * 1024 * 1024;
     if (file.size > maxSizeBytes) {
@@ -250,14 +274,25 @@ export default function TrainerSettingsPage() {
       return;
     }
 
+    const logoUpdatePayload: Record<string, unknown> = { team_logo_url: publicUrl };
+    const sessionUserIdLogo = authData.user?.id ?? null;
+    console.log("[trainer/settings] перед profiles.update (логотип)", {
+      updatePayload: { ...logoUpdatePayload },
+      eqId: authUserId,
+      sessionUserIdFromGetUser: sessionUserIdLogo,
+      idsMatch: sessionUserIdLogo != null && authUserId === sessionUserIdLogo,
+      payloadHasUndefined: Object.values(logoUpdatePayload).some((v) => v === undefined),
+      payloadKeys: Object.keys(logoUpdatePayload),
+    });
+
     const { error: updateError } = await supabase
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       .from("profiles")
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
-      .update({ team_logo_url: publicUrl } as Record<string, unknown>)
-      .eq("id", trainerId);
+      .update(logoUpdatePayload as Record<string, unknown>)
+      .eq("id", authUserId);
 
     setUploading(false);
     if (updateError) {
