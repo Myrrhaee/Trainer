@@ -8,18 +8,18 @@ export default function ClientDashboardRedirect() {
   const router = useRouter();
 
   useEffect(() => {
-    const supabase = createClient();
     async function go() {
+      const supabase = createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        router.replace("/login?type=client");
+        router.replace("/login?role=client");
         return;
       }
-      router.replace(`/client/${user.id}`);
+      router.replace("/client/me");
     }
-    go();
+    void go();
   }, [router]);
 
   return (
@@ -28,4 +28,3 @@ export default function ClientDashboardRedirect() {
     </div>
   );
 }
-

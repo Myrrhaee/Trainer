@@ -110,8 +110,7 @@ export async function POST(req: Request) {
 
     await supabaseAdmin
       .from("profiles")
-      // @ts-ignore - last_reminder_at exists on profiles; generated types omit it
-      .update({ last_reminder_at: new Date().toISOString() })
+      .update({ last_reminder_at: new Date().toISOString() } as never)
       .eq("id", clientId);
 
     return NextResponse.json({ ok: true });

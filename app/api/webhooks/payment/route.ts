@@ -117,14 +117,13 @@ export async function POST(req: Request) {
       // Покупка программы: открываем доступ в client_programs
       const { error: insertError } = await supabaseAdmin
         .from("client_programs")
-        // @ts-ignore - client_programs row type may be missing in generated schema
         .upsert(
-          {
+          ({
             client_id: clientId,
             template_id: programId,
             status: "active",
-          },
-          { onConflict: ["client_id", "template_id"] }
+          } as never),
+          { onConflict: "client_id,template_id" }
         );
 
       if (insertError) {
@@ -181,11 +180,10 @@ export async function POST(req: Request) {
 
     const { data: profile, error: updateError } = await supabaseAdmin
       .from("profiles")
-      // @ts-ignore - profiles columns may be missing in generated schema
-      .update({
+      .update(({
         is_paid: true,
         subscription_ends_at: subscriptionEndsAt,
-      })
+      } as never))
       .eq("id", clientId)
       .select("telegram_id, full_name")
       .single();

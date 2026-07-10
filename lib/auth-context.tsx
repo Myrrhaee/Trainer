@@ -10,6 +10,12 @@ import {
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-client";
 import type { User } from "@supabase/supabase-js";
+import {
+  clearDemoSession,
+  createDemoSupabaseUser,
+  isDemoModeEnabled,
+  readDemoSession,
+} from "@/lib/demo-mode";
 
 type TrainerContextValue = {
   trainerId: string | null;
@@ -30,11 +36,23 @@ export function useTrainer() {
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const demoMode = isDemoModeEnabled();
+  const [user, setUser] = useState<User | null>(() => {
+    if (!demoMode) return null;
+    const session = readDemoSession();
+    return session ? createDemoSupabaseUser(session.role) : null;
+  });
+  const [loading, setLoading] = useState(() => !demoMode);
   const supabase = createClient();
 
   useEffect(() => {
+    if (demoMode) {
+      if (!user) {
+        router.replace("/login");
+      }
+      return;
+    }
+
     let mounted = true;
 
     async function init() {
@@ -66,12 +84,18 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [demoMode, router, supabase, user]);
 
   const signOut = useCallback(async () => {
+    if (demoMode) {
+      clearDemoSession();
+      router.replace("/login");
+      return;
+    }
+
     await supabase.auth.signOut();
     router.replace("/login");
-  }, [router]);
+  }, [demoMode, router, supabase]);
 
   if (loading) {
     return (

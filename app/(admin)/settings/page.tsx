@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ExternalLink, Eye, EyeOff, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase-client";
 import { useTrainer } from "@/lib/auth-context";
+import { isDemoModeEnabled } from "@/lib/demo-mode";
+import { DemoTrainerSettingsPage } from "@/components/demo/demo-pages";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +41,14 @@ function isValidTelegramLink(value: string): boolean {
 }
 
 export default function TrainerSettingsPage() {
+  if (isDemoModeEnabled()) {
+    return <DemoTrainerSettingsPage />;
+  }
+
+  return <TrainerSettingsSupabasePage />;
+}
+
+function TrainerSettingsSupabasePage() {
   const router = useRouter();
   const { trainerId } = useTrainer();
   const fileInputRef = useRef<HTMLInputElement | null>(null);

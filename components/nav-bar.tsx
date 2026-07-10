@@ -9,7 +9,7 @@ function NavLink({ href, label }: { href: string; label: string }) {
   const pathname = usePathname();
   const active =
     href === "/dashboard"
-      ? pathname === "/dashboard"
+      ? pathname === "/dashboard" || pathname.startsWith("/dashboard/clients/")
       : pathname.startsWith(href);
 
   return (
@@ -36,15 +36,16 @@ export function NavBar() {
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-2xl bg-zinc-100/95 shadow-sm" />
           <span className="text-sm font-semibold tracking-tight text-zinc-100">
-            Trainer
+            Кабинет тренера
           </span>
         </div>
         <nav className="flex flex-wrap items-center gap-2 rounded-full border border-border/60 bg-zinc-950/60 px-1.5 py-1">
-          <NavLink href="/dashboard" label="Клиенты" />
+          <NavLink href="/dashboard" label="Дашборд" />
+          <NavLink href="/dashboard#roster" label="Клиенты" />
           <NavLink href="/dashboard/library" label="Библиотека" />
           <NavLink href="/dashboard/programs" label="Программы" />
           <NavLink href="/dashboard/analytics" label="Аналитика" />
-          <NavLink href="/trainers" label="Найти тренера" />
+          <NavLink href="/trainers" label="Маркетплейс" />
           <NavLink href="/settings" label="Настройки" />
         </nav>
         <Button
@@ -60,4 +61,3 @@ export function NavBar() {
     </header>
   );
 }
-

@@ -5,6 +5,11 @@ import { useParams } from "next/navigation";
 import { Dumbbell } from "lucide-react";
 
 import { createClient } from "@/lib/supabase-client";
+import { useTrainer } from "@/lib/auth-context";
+import {
+  loadVisibleExerciseLibrary,
+  type ExerciseLibraryRow,
+} from "@/lib/exercise-library";
 import {
   Card,
   CardContent,
@@ -16,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn, createSafeId } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -31,6 +36,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 
 type ExerciseInstance = {
   id: string;
@@ -93,19 +99,14 @@ type LibraryExercise = {
   title: string;
   muscle_group: string | null;
   video_url: string | null;
+  is_system: boolean;
 };
 
 const supabase = createClient();
 
-function createId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 export default function ProgramBuilderPage() {
   const params = useParams<{ id: string }>();
+  const { trainerId } = useTrainer();
   const programId = params?.id;
 
   const [program, setProgram] = useState<Program | null>(null);
@@ -146,8 +147,8 @@ export default function ProgramBuilderPage() {
         if (loadedProgram.plan_json && loadedProgram.plan_json.weeks) {
           initialPlan = loadedProgram.plan_json;
         } else {
-          const weekId = createId();
-          const dayId = createId();
+          const weekId = createSafeId();
+          const dayId = createSafeId();
           initialPlan = {
             weeks: [
               {
@@ -198,7 +199,7 @@ export default function ProgramBuilderPage() {
   function addWeek() {
     if (!plan) return;
     const index = plan.weeks.length;
-    const id = createId();
+    const id = createSafeId();
     const newWeek: Week = {
       id,
       name: `Week ${index + 1}`,
@@ -215,7 +216,7 @@ export default function ProgramBuilderPage() {
     const nextWeeks = plan.weeks.map((week) => {
       if (week.id !== weekId) return week;
       const index = week.days.length;
-      const id = createId();
+      const id = createSafeId();
       const newDay: Day = {
         id,
         name: `Day ${index + 1}`,
@@ -255,7 +256,7 @@ export default function ProgramBuilderPage() {
   function addExerciseFromLibrary(ex: LibraryExercise) {
     if (!plan || !activeWeek || !activeDay) return;
 
-    const instanceId = createId();
+    const instanceId = createSafeId();
     const instance: ExerciseInstance = {
       id: instanceId,
       exercise_id: ex.id,
@@ -283,14 +284,21 @@ export default function ProgramBuilderPage() {
   }
 
   async function loadLibraryExercises() {
+    if (!trainerId) return;
+    const currentTrainerId = trainerId;
     setLibraryLoading(true);
-    const { data, error } = await supabase
-      .from("exercises")
-      .select("id, title, muscle_group, video_url")
-      .order("title", { ascending: true });
+    const { data, error } = await loadVisibleExerciseLibrary(supabase, currentTrainerId);
 
     if (!error && data) {
-      setLibraryExercises(data as LibraryExercise[]);
+      setLibraryExercises(
+        data.map((exercise: ExerciseLibraryRow) => ({
+          id: exercise.id,
+          title: exercise.title,
+          muscle_group: exercise.muscle_group,
+          video_url: exercise.video_url,
+          is_system: exercise.is_system,
+        }))
+      );
     }
     setLibraryLoading(false);
   }
@@ -590,7 +598,7 @@ export default function ProgramBuilderPage() {
                 Библиотека упражнений
               </SheetTitle>
               <SheetDescription className="text-xs text-muted-foreground">
-                Найдите упражнение и добавьте его в текущий день программы.
+                Найдите упражнение из общей или личной библиотеки и добавьте его в текущий день программы.
               </SheetDescription>
             </SheetHeader>
             <div className="flex h-full flex-col gap-3 px-4 pb-6 pt-2">
@@ -623,11 +631,16 @@ export default function ProgramBuilderPage() {
                           <CardTitle className="text-xs font-medium text-zinc-50">
                             {ex.title}
                           </CardTitle>
-                          {ex.muscle_group && (
-                            <p className="text-[11px] text-zinc-500">
-                              {ex.muscle_group}
-                            </p>
-                          )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            {ex.muscle_group ? (
+                              <p className="text-[11px] text-zinc-500">
+                                {ex.muscle_group}
+                              </p>
+                            ) : null}
+                            <Badge className="rounded-full border border-zinc-700 bg-zinc-900 text-zinc-300">
+                              {ex.is_system ? "Системное" : "Моё"}
+                            </Badge>
+                          </div>
                         </CardHeader>
                       </Card>
                     </button>
@@ -710,10 +723,11 @@ export default function ProgramBuilderPage() {
                             "focus:outline-none focus:ring-2 focus:ring-zinc-400/50"
                           )}
                         >
-                          <option value="">Не указано</option>
-                          <option value="beginner">Новичок</option>
-                          <option value="intermediate">Средний</option>
-                          <option value="advanced">Профи</option>
+                          {DIFFICULTY_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -728,10 +742,11 @@ export default function ProgramBuilderPage() {
                           "focus:outline-none focus:ring-2 focus:ring-zinc-400/50"
                         )}
                       >
-                        <option value="">Не указано</option>
-                        <option value="weight_loss">Похудение</option>
-                        <option value="muscle_gain">Масса</option>
-                        <option value="strength">Сила</option>
+                        {GOAL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
 
@@ -858,4 +873,3 @@ export default function ProgramBuilderPage() {
     </div>
   );
 }
-

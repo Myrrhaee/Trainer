@@ -1,14 +1,39 @@
 import { NextResponse } from "next/server";
-import { getSupabaseClient } from "@/lib/supabase-client";
-
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const WEBAPP_BASE_URL =
   process.env.NEXT_PUBLIC_WEBAPP_BASE_URL ??
   "https://trainer-two-iota.vercel.app";
 
+type TelegramStartMessage = {
+  text?: string;
+  chat?: {
+    id?: number;
+  };
+  from?: {
+    id?: number;
+  };
+};
+
+type TelegramUpdate = {
+  message?: TelegramStartMessage;
+};
+
+type TelegramExtra = {
+  reply_markup?: {
+    inline_keyboard: Array<
+      Array<{
+        text: string;
+        web_app: {
+          url: string;
+        };
+      }>
+    >;
+  };
+};
+
 export async function POST(request: Request) {
-  let update: any;
+  let update: TelegramUpdate;
 
   try {
     update = await request.json();
@@ -26,11 +51,11 @@ export async function POST(request: Request) {
     }
 
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseAdmin();
 
     // Handle /start command
     const message = update?.message;
-    if (message && typeof message.text === "string") {
+    if (message?.chat?.id && message && typeof message.text === "string") {
       const text: string = message.text;
       const chatId: number = message.chat.id;
       const from = message.from;
@@ -43,8 +68,9 @@ export async function POST(request: Request) {
           .select("id, full_name")
           .eq("telegram_id", telegramId)
           .maybeSingle();
+        const profileRow = profile as { id: string; full_name: string | null } | null;
 
-        if (!profile) {
+        if (!profileRow) {
           await sendTelegramMessage(
             botToken,
             chatId,
@@ -53,8 +79,8 @@ export async function POST(request: Request) {
           return NextResponse.json({ ok: true });
         }
 
-        const clientUrl = `${WEBAPP_BASE_URL}/client/${profile.id}`;
-        const name = profile.full_name || "атлет";
+        const clientUrl = `${WEBAPP_BASE_URL}/client/${profileRow.id}`;
+        const name = profileRow.full_name || "атлет";
 
         await sendTelegramMessage(botToken, chatId, `Привет, ${name}!`, {
           reply_markup: {
@@ -84,7 +110,7 @@ async function sendTelegramMessage(
   botToken: string,
   chatId: number | string,
   text: string,
-  extra?: any
+  extra?: TelegramExtra
 ) {
   const body = {
     chat_id: chatId,
@@ -109,4 +135,3 @@ async function sendTelegramMessage(
     console.error("Telegram sendMessage error:", errText);
   }
 }
-

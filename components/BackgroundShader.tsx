@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const VERTEX_SHADER = `
   attribute vec2 a_position;
@@ -138,10 +138,10 @@ export function BackgroundShader() {
   const rafRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
   const [debugStatus, setDebugStatus] = useState<string | null>(null);
+  const [debugEnabled, setDebugEnabled] = useState(false);
 
-  const debugEnabled = useMemo(() => {
-    if (typeof window === "undefined") return false;
-    return new URLSearchParams(window.location.search).get("shaderDebug") === "1";
+  useEffect(() => {
+    setDebugEnabled(new URLSearchParams(window.location.search).get("shaderDebug") === "1");
   }, []);
 
   useEffect(() => {
@@ -230,7 +230,7 @@ export function BackgroundShader() {
       glCtx.deleteProgram(program);
       glCtx.deleteBuffer(buffer);
     };
-  }, []);
+  }, [debugEnabled]);
 
   return (
     <>

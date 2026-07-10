@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
 import { cn } from "@/lib/utils";
@@ -37,13 +37,13 @@ export function ShareCard({
   qrUrl,
   className,
 }: ShareCardProps) {
-  const dateLabel = useMemo(() => {
+  const dateLabel = (() => {
     if (!date) return formatDate(new Date());
     if (date instanceof Date) return formatDate(date);
     const parsed = new Date(date);
     if (Number.isNaN(parsed.getTime())) return String(date);
     return formatDate(parsed);
-  }, [date]);
+  })();
 
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
@@ -71,12 +71,12 @@ export function ShareCard({
     };
   }, [qrUrl]);
 
-  const progressLabel = useMemo(() => {
+  const progressLabel = (() => {
     if (!progress) return null;
     const sign = progress.deltaKg > 0 ? "+" : progress.deltaKg < 0 ? "−" : "";
     const abs = Math.abs(progress.deltaKg);
     return `${progress.exerciseTitle}: ${sign}${abs} кг 📈`;
-  }, [progress]);
+  })();
 
   return (
     <div
@@ -211,4 +211,3 @@ export function ShareCard({
     </div>
   );
 }
-

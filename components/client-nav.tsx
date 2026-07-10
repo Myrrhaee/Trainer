@@ -39,7 +39,7 @@ export function ClientNav() {
         .maybeSingle();
 
       const role = (data as { role?: string | null } | null)?.role ?? null;
-      const href = role === "trainer" ? "/trainer/dashboard" : "/client/dashboard";
+      const href = role === "trainer" ? "/trainer/dashboard" : "/client/me";
       if (!cancelled) setCabinetHref(href);
     }
 

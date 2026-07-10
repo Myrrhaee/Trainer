@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowRight, Dumbbell, Lock, Sparkles, X } from "lucide-react";
 import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
@@ -253,10 +254,12 @@ export default function ExplorePage() {
                 {/* Cover: image or gradient */}
                 <div className="relative h-40 w-full overflow-hidden">
                   {program.cover_url?.trim() ? (
-                    <img
+                    <Image
                       src={program.cover_url}
                       alt=""
-                      className="h-full w-full object-cover"
+                      fill
+                      sizes="(max-width: 768px) 100vw, 33vw"
+                      className="object-cover"
                     />
                   ) : (
                     <div className="h-full w-full bg-gradient-to-br from-zinc-800 to-zinc-950" />

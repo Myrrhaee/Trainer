@@ -31,6 +31,7 @@ export function WeightTracker({ clientId }: { clientId: string }) {
   const [range, setRange] = useState<RangeKey>("1m");
   const [rows, setRows] = useState<WeightLogRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [referenceNow] = useState(() => Date.now());
 
   const [weightInput, setWeightInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -62,13 +63,12 @@ export function WeightTracker({ clientId }: { clientId: string }) {
     if (rows.length === 0) return rows;
     if (range === "all") return rows;
 
-    const now = Date.now();
     const days =
       range === "1w" ? 7 : range === "1m" ? 30 : range === "3m" ? 90 : 3650;
-    const cutoff = now - days * 24 * 60 * 60 * 1000;
+    const cutoff = referenceNow - days * 24 * 60 * 60 * 1000;
 
     return rows.filter((r) => new Date(r.created_at).getTime() >= cutoff);
-  }, [rows, range]);
+  }, [range, referenceNow, rows]);
 
   const chartData = useMemo(() => {
     return filteredRows.map((r) => {
@@ -103,7 +103,7 @@ export function WeightTracker({ clientId }: { clientId: string }) {
     const last = rows[rows.length - 1];
     const current = last.weight;
 
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const cutoff = referenceNow - 30 * 24 * 60 * 60 * 1000;
     let monthBase = first;
     for (let i = rows.length - 1; i >= 0; i--) {
       const t = new Date(rows[i].created_at).getTime();
@@ -118,7 +118,7 @@ export function WeightTracker({ clientId }: { clientId: string }) {
       monthDelta: current - monthBase.weight,
       totalDelta: current - first.weight,
     };
-  }, [rows]);
+  }, [referenceNow, rows]);
 
   async function addWeight() {
     const normalized = weightInput.replace(",", ".").trim();
@@ -225,7 +225,10 @@ export function WeightTracker({ clientId }: { clientId: string }) {
                     cursor={{ stroke: "rgba(244,244,245,0.12)", strokeWidth: 1 }}
                     content={({ active, payload }) => {
                       if (!active || !payload?.length) return null;
-                      const p: any = payload[0].payload;
+                      const p = payload[0]?.payload as
+                        | { weight: number; fullDate: string }
+                        | undefined;
+                      if (!p) return null;
                       return (
                         <div className="rounded-2xl border border-border/60 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-100 shadow-[0_18px_60px_rgba(0,0,0,0.85)]">
                           <div className="font-semibold">{p.weight} кг</div>
@@ -327,4 +330,3 @@ function DeltaCard({ label, delta }: { label: string; delta: number | null }) {
     </Card>
   );
 }
-

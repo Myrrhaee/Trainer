@@ -543,7 +543,6 @@ export default function ClientWorkoutPage() {
       template_id: template.id,
       exercise_id: exercise.exercise_id ?? exercise.id,
       exercise_instance_id: exercise.id,
-      set_index: setIndex,
       performed_weight: entry.weight || null,
       performed_reps: entry.reps || null,
       completed: entry.done,

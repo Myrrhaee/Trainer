@@ -9,11 +9,6 @@ import { Button } from "@/components/ui/button";
 
 const supabase = createClient();
 
-type Profile = {
-  id: string;
-  full_name: string | null;
-};
-
 type WorkoutTemplate = {
   id: string;
   title: string;
@@ -24,23 +19,19 @@ export default function ClientProgramPage() {
   const router = useRouter();
   const clientId = params?.id as string | undefined;
   const programId = params?.programId as string | undefined;
+  const missingParams = !clientId || !programId;
 
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [template, setTemplate] = useState<WorkoutTemplate | null>(null);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!missingParams);
   const [paymentLoading, setPaymentLoading] = useState(false);
 
   useEffect(() => {
-    if (!clientId || !programId) {
-      setHasAccess(false);
-      setLoading(false);
-      return;
-    }
+    if (!clientId || !programId) return;
 
     async function checkAccess() {
       setLoading(true);
-      const [profileRes, templateRes, assignedRes, clientProgramsRes] =
+      const [, templateRes, assignedRes, clientProgramsRes] =
         await Promise.all([
           supabase
             .from("profiles")
@@ -68,7 +59,6 @@ export default function ClientProgramPage() {
             .maybeSingle(),
         ]);
 
-      if (profileRes.data) setProfile(profileRes.data as Profile);
       if (templateRes.data) setTemplate(templateRes.data as WorkoutTemplate);
       const access =
         !!assignedRes.data || !!clientProgramsRes.data;
@@ -76,8 +66,22 @@ export default function ClientProgramPage() {
       setLoading(false);
     }
 
-    checkAccess();
+    void checkAccess();
   }, [clientId, programId]);
+
+  useEffect(() => {
+    if (hasAccess && clientId && programId) {
+      router.replace(`/client/${clientId}?program=${programId}`);
+    }
+  }, [clientId, hasAccess, programId, router]);
+
+  if (missingParams) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center px-4 text-foreground">
+        <div className="text-center text-zinc-400">Программа не найдена.</div>
+      </div>
+    );
+  }
 
   async function handleBuyProgram() {
     if (!clientId || !programId) return;
@@ -121,7 +125,6 @@ export default function ClientProgramPage() {
   }
 
   if (hasAccess) {
-    router.replace(`/client/${clientId}?program=${programId}`);
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-foreground">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-100" />

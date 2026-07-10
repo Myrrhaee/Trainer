@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import { ArrowLeft, Dumbbell, Lock } from "lucide-react";
 import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
@@ -48,18 +49,16 @@ type Program = {
 export default function ExploreProgramPage() {
   const params = useParams<{ id: string }>();
   const programId = params?.id;
+  const missingProgramId = !programId;
 
   const [program, setProgram] = useState<Program | null>(null);
   const [authorName, setAuthorName] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!missingProgramId);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!programId) {
-      setLoading(false);
-      return;
-    }
+    if (!programId) return;
 
     async function load() {
       const { data: template, error } = await supabase
@@ -89,7 +88,7 @@ export default function ExploreProgramPage() {
       setLoading(false);
     }
 
-    load();
+    void load();
   }, [programId]);
 
   useEffect(() => {
@@ -126,6 +125,16 @@ export default function ExploreProgramPage() {
   })();
 
   const isFree = program?.price == null || program.price === 0;
+
+  if (missingProgramId) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 pb-20 pt-6">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 py-16 text-center">
+          <p className="text-zinc-400">Программа не найдена или недоступна.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -174,10 +183,12 @@ export default function ExploreProgramPage() {
       <header className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80">
         <div className="relative aspect-[2/1] w-full sm:aspect-[21/9]">
           {program.cover_url?.trim() ? (
-            <img
+            <Image
               src={program.cover_url}
               alt=""
-              className="h-full w-full object-cover"
+              fill
+              sizes="(max-width: 640px) 100vw, 768px"
+              className="object-cover"
             />
           ) : (
             <div className="h-full w-full bg-gradient-to-br from-zinc-800 to-zinc-950" />

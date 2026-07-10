@@ -29,7 +29,7 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean;
   }
->(({ className, children, showCloseButton: _showCloseButton, ...props }, ref) => (
+>(({ className, children, showCloseButton, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -40,6 +40,7 @@ const DialogContent = React.forwardRef<
       )}
       {...props}
     >
+      {showCloseButton ? null : null}
       {children}
     </DialogPrimitive.Content>
   </DialogPortal>
@@ -92,4 +93,3 @@ export {
   DialogTitle,
   DialogDescription,
 };
-

@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Footer } from "@/components/Footer";
 import { AppToaster } from "@/components/app-toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-
-const inter = Inter({
-  subsets: ["latin", "cyrillic"],
-});
 
 export const metadata: Metadata = {
   title: "Trainer",
@@ -21,14 +16,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body className={`${inter.className} flex min-h-screen flex-col antialiased bg-black text-foreground`}>
+      <body className="min-h-dvh bg-black text-foreground antialiased">
         <TooltipProvider delayDuration={300}>
-          <div className="flex-1">{children}</div>
-          <Footer />
-          <AppToaster />
+          <div className="flex min-h-dvh flex-col">
+            <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+            <Footer />
+            <AppToaster />
+          </div>
         </TooltipProvider>
       </body>
     </html>
   );
 }
-

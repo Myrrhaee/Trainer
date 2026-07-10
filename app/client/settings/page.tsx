@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase-client";
+import { isDemoModeEnabled } from "@/lib/demo-mode";
+import { DemoClientSettingsPage } from "@/components/demo/demo-client-cabinet";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +50,14 @@ function parseOptionalNumber(raw: string): number | null | number {
 }
 
 export default function ClientSettingsPage() {
+  if (isDemoModeEnabled()) {
+    return <DemoClientSettingsPage />;
+  }
+
+  return <ClientSettingsSupabasePage />;
+}
+
+function ClientSettingsSupabasePage() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);

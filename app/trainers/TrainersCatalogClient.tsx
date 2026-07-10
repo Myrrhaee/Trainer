@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,9 +22,7 @@ function firstLetter(value: string | null): string {
 }
 
 export function TrainersCatalogClient() {
-  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
-  if (supabaseRef.current === null) supabaseRef.current = createClient();
-  const supabase = supabaseRef.current;
+  const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -177,4 +175,3 @@ export function TrainersCatalogClient() {
     </div>
   );
 }
-

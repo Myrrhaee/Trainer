@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const VERTEX_SHADER = `
   attribute vec2 a_position;
@@ -153,10 +153,7 @@ export function BackgroundFluid({
       const now = performance.now();
       const time = (now - startTimeRef.current) / 1000;
 
-      // Visible proof in DevTools that the loop is alive.
-      // Throttled to ~1 log/sec to avoid freezing the tab.
       if (debugEnabled && now - lastLogRef.current > 1000) {
-        // eslint-disable-next-line no-console
         console.log("Shader is running");
         lastLogRef.current = now;
       }
@@ -200,4 +197,3 @@ export function BackgroundFluid({
     />
   );
 }
-

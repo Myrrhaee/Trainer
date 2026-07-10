@@ -17,7 +17,7 @@ export function Footer() {
   ] as const;
 
   return (
-    <footer className="relative mt-16 border-t border-zinc-900 bg-zinc-950">
+    <footer className="relative mt-auto shrink-0 overflow-hidden border-t border-zinc-900 bg-zinc-950">
       {/* decorative floating glows */}
       {glows.map((g, idx) => (
         <div
@@ -55,4 +55,3 @@ export function Footer() {
     </footer>
   );
 }
-

@@ -8,6 +8,11 @@ import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  isDemoModeEnabled,
+  resolveDemoLogin,
+  writeDemoSession,
+} from "@/lib/demo-mode";
 
 type LoginType = "trainer" | "client";
 const TEST_ADMIN_LOGIN = "admin";
@@ -128,32 +133,35 @@ function LoginContent() {
       const normalizedEmail = resolveLoginEmail(email, loginType);
       const normalizedName = fullName.trim();
 
+      if (isDemoModeEnabled()) {
+        if (isSignUp) {
+          setError("В demo-режиме регистрация отключена. Используйте тестовый вход.");
+          return;
+        }
+
+        const resolved = resolveDemoLogin(email, loginType);
+        if (!resolved) {
+          setError("В demo-режиме доступны только тестовые аккаунты admin.trainer@local.test и admin.client@local.test");
+          return;
+        }
+
+        if (password !== "0000") {
+          setError("Неверный пароль. Для demo-режима используйте пароль 0000");
+          return;
+        }
+
+        writeDemoSession(resolved.role);
+        router.refresh();
+        router.push(resolved.role === "trainer" ? "/dashboard" : "/client/me");
+        return;
+      }
+
       // If user enters any test login, ensure test users + profiles exist.
       if (!isSignUp && TEST_LOGIN_SET.has(typedLogin)) {
         try {
           await fetch("/api/seed-test-users", { method: "POST" });
         } catch (seedErr) {
           console.error("seed-test-users call failed:", seedErr);
-        }
-      }
-
-      // 1) Pre-check email existence in profiles
-      if (!isSignUp) {
-        const { data: existing, error: existsErr } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("email", normalizedEmail)
-          .maybeSingle();
-
-        if (existsErr && !existing) {
-          console.error("login profiles email check failed:", existsErr);
-          setError("Не удалось проверить почту. Попробуйте позже.");
-          return;
-        }
-
-        if (!existing) {
-          setError("Пользователь с такой почтой не зарегистрирован");
-          return;
         }
       }
 
