@@ -10,11 +10,11 @@ import {
 
 import type { AthleteProfile } from "./types";
 
-export const athleteProfiles: AthleteProfile[] = [
-  {
+const artemProfile: AthleteProfile = {
     id: "artem-smirnov",
     name: "Артём Смирнов",
     initials: "АС",
+    career: { completedWorkouts: 512, weightChange: "+11.8 кг", streakDays: 82 },
     goal: "Набор массы",
     about: "Работает в офисе, тренируется вечером. Хочет набрать мышечную массу без резкого роста талии и сохранить плечи здоровыми.",
     trainingExperience: "3 года регулярных тренировок, уверенно работает со свободными весами",
@@ -525,9 +525,283 @@ export const athleteProfiles: AthleteProfile[] = [
       { id: "t6", title: "Вес обновлён", detail: "74.2 кг, тренд набора идёт ровно.", time: "Вчера", icon: Weight, tone: "good" },
       { id: "t7", title: "Фото прогресса", detail: "Добавлены фронт, профиль и спина.", time: "Неделя 4", icon: Camera, tone: "muted" },
     ],
-  },
+};
+
+const olgaProfile = createDemoProfile({
+  id: "olga-sokolova",
+  name: "Ольга Соколова",
+  initials: "ОС",
+  goal: "Сила и здоровая осанка",
+  about: "Работает дизайнером и тренируется три раза в неделю. Хочет укрепить спину и плечевой пояс без тренировок через боль.",
+  status: "Нужна корректировка",
+  phase: "Техника и контроль нагрузки",
+  currentWeight: "61.4 кг",
+  targetWeight: "Стабильный вес",
+  lastActivity: "сегодня",
+  issue: "После тяговой тренировки появилось напряжение в плече.",
+  programName: "Сильная спина · 6 недель",
+  nextWorkout: "Мобильность и лёгкий верх",
+  accessStatus: "enabled",
+  subscriptionStatus: "active",
+  progress: [62.1, 61.9, 61.7, 61.6, 61.4],
+  exercise: "Тяга верхнего блока",
+  exerciseValues: [38, 40, 42, 42, 44],
+  career: { completedWorkouts: 86, weightChange: "-0.7 кг", streakDays: 19 },
+  title: "Гармония движения",
+  rankId: "SPORTSMAN_III",
+  reputationScore: 1480,
+});
+
+const egorProfile = createDemoProfile({
+  id: "egor-nikitin",
+  name: "Егор Никитин",
+  initials: "ЕН",
+  goal: "Вернуться к тренировкам после паузы",
+  about: "Возвращается к регулярным тренировкам после длинного перерыва. Предпочитает короткие понятные сессии без резкого роста нагрузки.",
+  status: "Нужна следующая тренировка",
+  phase: "Старт после паузы",
+  currentWeight: "78.6 кг",
+  targetWeight: "Рабочий ритм",
+  lastActivity: "вчера",
+  issue: "Последняя вводная тренировка завершена, следующая ещё не назначена.",
+  nextWorkout: "",
+  accessStatus: "enabled",
+  subscriptionStatus: "active",
+  progress: [],
+  exercise: "",
+  exerciseValues: [],
+  career: { completedWorkouts: 3, weightChange: "без данных", streakDays: 2 },
+  rankId: "CONTENDER_I",
+  reputationScore: 80,
+});
+
+const mariaProfile = createDemoProfile({
+  id: "maria-volkova",
+  name: "Мария Волкова",
+  initials: "МВ",
+  goal: "Снижение веса без потери силы",
+  about: "Тренируется утром, любит силовые упражнения и стабильный план. Сейчас спокойно движется к цели без открытых вопросов.",
+  status: "По плану",
+  phase: "Силовой дефицит",
+  currentWeight: "68.4 кг",
+  targetWeight: "64 кг",
+  lastActivity: "сегодня",
+  issue: "",
+  programName: "Сила на дефиците · 8 недель",
+  nextWorkout: "Низ тела",
+  accessStatus: "enabled",
+  subscriptionStatus: "active",
+  progress: [70.2, 69.8, 69.4, 69.0, 68.7, 68.4],
+  exercise: "Жим ногами",
+  exerciseValues: [118, 126, 135, 144, 155, 167],
+  career: { completedWorkouts: 134, weightChange: "-5.2 кг", streakDays: 46 },
+  title: "Железная дисциплина",
+  rankId: "ATHLETE_I",
+  reputationScore: 2210,
+});
+
+const kseniaProfile = createDemoProfile({
+  id: "ksenia-belyaeva",
+  name: "Ксения Беляева",
+  initials: "КБ",
+  goal: "Сохранить форму в период высокой нагрузки",
+  about: "Поставила сопровождение на паузу из-за рабочего проекта. Планирует вернуться к коротким тренировкам после завершения сезона.",
+  status: "Сопровождение на паузе",
+  phase: "Пауза",
+  currentWeight: "не обновлён",
+  targetWeight: "Поддержание",
+  lastActivity: "9 дней назад",
+  issue: "Доступ ограничен на время паузы.",
+  nextWorkout: "",
+  accessStatus: "limited",
+  subscriptionStatus: "paused",
+  progress: [],
+  exercise: "",
+  exerciseValues: [],
+  career: { completedWorkouts: 41, weightChange: "без данных", streakDays: 0 },
+  rankId: "SPORTSMAN_I",
+  reputationScore: 720,
+});
+
+const alexandraProfile = createDemoProfile({
+  id: "alexandra-konstantinova",
+  name: "Александра Константинова-Виноградова",
+  initials: "АК",
+  goal: "Подготовиться к первому силовому старту без потери уверенности в технике",
+  about: "Совмещает подготовку к первому старту с плотным рабочим графиком и предпочитает заранее видеть понятный план недели.",
+  status: "По плану",
+  phase: "Базовая силовая подготовка",
+  currentWeight: "72.1 кг",
+  targetWeight: "Стабильная категория",
+  lastActivity: "сегодня",
+  issue: "",
+  programName: "Первый старт · 10 недель",
+  nextWorkout: "Техника соревновательных движений",
+  accessStatus: "enabled",
+  subscriptionStatus: "active",
+  progress: [72.5, 72.3, 72.2, 72.1],
+  exercise: "Присед",
+  exerciseValues: [62.5, 65, 67.5, 70],
+  career: { completedWorkouts: 29, weightChange: "-0.4 кг", streakDays: 14 },
+  rankId: "CONTENDER_III",
+  reputationScore: 430,
+});
+
+export const athleteProfiles: AthleteProfile[] = [
+  artemProfile,
+  olgaProfile,
+  egorProfile,
+  mariaProfile,
+  kseniaProfile,
+  alexandraProfile,
 ];
 
-export function getAthleteProfile(clientId?: string): AthleteProfile {
-  return athleteProfiles.find((profile) => profile.id === clientId) ?? athleteProfiles[0];
+export function getAthleteProfile(clientId?: string): AthleteProfile | undefined {
+  return athleteProfiles.find((profile) => profile.id === clientId);
+}
+
+type DemoProfileConfig = {
+  id: string;
+  name: string;
+  initials: string;
+  goal: string;
+  about: string;
+  status: string;
+  phase: string;
+  currentWeight: string;
+  targetWeight: string;
+  lastActivity: string;
+  issue: string;
+  programName?: string;
+  nextWorkout: string;
+  accessStatus: AthleteProfile["membership"]["accessStatus"];
+  subscriptionStatus: AthleteProfile["membership"]["status"];
+  progress: number[];
+  exercise: string;
+  exerciseValues: number[];
+  career: AthleteProfile["career"];
+  title?: string;
+  rankId: AthleteProfile["reputation"]["rankId"];
+  reputationScore: number;
+};
+
+function createDemoProfile(config: DemoProfileConfig): AthleteProfile {
+  const hasProgram = Boolean(config.programName);
+  const hasProgress = config.progress.length > 0 && config.exerciseValues.length > 0;
+  const hasUpcomingWorkout = Boolean(config.nextWorkout);
+  const completedWorkout = config.id === "egor-nikitin" ? "Вводная тренировка" : "Силовая тренировка";
+  const titleId = config.title ? `TITLE-${config.id.toUpperCase()}` : "";
+  const latestWeight = config.progress.at(-1);
+  const latestExerciseValue = config.exerciseValues.at(-1);
+  const membership: AthleteProfile["membership"] = {
+    ...artemProfile.membership,
+    status: config.subscriptionStatus,
+    purchaseName: config.subscriptionStatus === "paused" ? "Сопровождение приостановлено" : "Персональное ведение",
+    subscriptionEndDate: config.subscriptionStatus === "paused" ? "2026-06-30" : "2026-08-31",
+    accessStatus: config.accessStatus,
+    addedAt: config.id === "egor-nikitin" ? "2026-06-01" : "2026-03-10",
+  };
+
+  return {
+    ...artemProfile,
+    id: config.id,
+    name: config.name,
+    initials: config.initials,
+    career: config.career,
+    goal: config.goal,
+    about: config.about,
+    trainingExperience: config.id === "egor-nikitin" ? "Возвращается после паузы" : "Регулярно тренируется по персональному плану",
+    limitations: config.issue
+      ? [{ id: `${config.id}-context`, label: "Текущий контекст", detail: config.issue, severity: "medium" }]
+      : [],
+    preferredTrainingDays: config.subscriptionStatus === "paused" ? [] : ["Понедельник", "Среда", "Пятница"],
+    currentProgram: {
+      id: hasProgram ? `${config.id}-program` : `${config.id}-no-program`,
+      name: config.programName ?? "Нет активной программы",
+      phase: hasProgram ? config.phase : "Без активной программы",
+      week: hasProgram ? 3 : 0,
+      totalWeeks: hasProgram ? 8 : 1,
+      startedAt: hasProgram ? "2026-06-01" : "",
+      endsAt: hasProgram ? "2026-07-27" : "",
+      status: hasProgram ? "active" : config.subscriptionStatus === "paused" ? "paused" : "completed",
+    },
+    adherence: {
+      workouts: config.subscriptionStatus === "paused" ? 62 : config.id === "egor-nikitin" ? 100 : 87,
+      checkIns: config.subscriptionStatus === "paused" ? 54 : 82,
+      measurements: hasProgress ? 76 : 0,
+      overall: config.subscriptionStatus === "paused" ? 58 : 86,
+      label: config.subscriptionStatus === "paused" ? "Пауза" : config.id === "egor-nikitin" ? "Новый старт" : "Стабильный ритм",
+    },
+    reputation: {
+      score: config.reputationScore,
+      rankId: config.rankId,
+      progress: Math.min(96, Math.max(8, Math.round((config.reputationScore % 500) / 5))),
+    },
+    membership,
+    coachNotes: config.issue
+      ? [{ id: `${config.id}-note`, title: "Контекст сопровождения", body: config.issue, createdAt: "2026-06-22", pinned: true }]
+      : [],
+    calendarEvents: hasUpcomingWorkout
+      ? [{ id: `${config.id}-next`, type: "workout", title: config.nextWorkout, date: "2026-06-24", status: "planned", detail: config.phase }]
+      : [],
+    analyticsCards: hasProgress
+      ? [{ id: `${config.id}-rhythm`, label: "Ритм", value: "стабильно", detail: "Рабочая динамика текущего цикла.", tone: "good" }]
+      : [],
+    bestResults: hasProgress
+      ? [{ id: `${config.id}-best`, exercise: config.exercise, value: `${latestExerciseValue} кг`, date: "Текущий цикл", delta: "личный ориентир", tone: "good" }]
+      : [],
+    progressPhotos: [],
+    achievements: config.title ? artemProfile.achievements.slice(0, 2) : [],
+    titles: config.title
+      ? [{ id: titleId, name: config.title, category: "discipline", description: "Титул текущего тренировочного пути.", asset: "/titles/v1/151-zheleznaya-distsiplina.png", unlockedAt: "Текущий цикл", isUnlocked: true }]
+      : [],
+    activeTitleId: titleId,
+    profilePosts: [{ id: `${config.id}-post`, type: "post", author: "client", title: "Текущий тренировочный фокус", body: config.issue || `Продолжает движение к цели «${config.goal}».`, time: config.lastActivity, tone: config.issue ? "warning" : "good" }],
+    management: {
+      ...artemProfile.management,
+      addedAt: membership.addedAt,
+      subscriptionStatus: config.subscriptionStatus,
+      purchaseName: membership.purchaseName,
+      subscriptionEndDate: membership.subscriptionEndDate,
+      nextPaymentDate: config.subscriptionStatus === "paused" ? "" : "2026-08-31",
+      tariffName: config.subscriptionStatus === "paused" ? "Пауза" : "Персональное ведение",
+      tariffAmount: config.subscriptionStatus === "paused" ? "—" : "Доступ активен",
+      accessStatus: config.accessStatus,
+      canMessage: true,
+      canAccessWorkouts: config.accessStatus === "enabled",
+      canUploadProgress: config.accessStatus === "enabled",
+      inviteLink: `https://app.ai-strength.coach/join/${config.id}`,
+      purchasedPrograms: [],
+      paymentHistory: [],
+      dangerActions: [],
+    },
+    currentWeight: config.currentWeight,
+    targetWeight: config.targetWeight,
+    status: config.status,
+    lastActivity: config.lastActivity,
+    phase: config.phase,
+    nextWorkout: config.nextWorkout || "Не назначена",
+    lastWorkout: completedWorkout,
+    openIssues: config.issue ? [config.issue] : [],
+    upcomingWorkouts: hasUpcomingWorkout
+      ? [{ id: `${config.id}-upcoming`, title: config.nextWorkout, date: "24 июня", meta: "55 мин · персональный план", status: "Назначена", tone: "good" }]
+      : [],
+    workoutHistory: [{ id: `${config.id}-history`, title: completedWorkout, date: config.lastActivity, meta: config.issue || "Завершена по плану", status: "Разобрана", tone: config.issue ? "warning" : "good" }],
+    previousLoads: hasProgress
+      ? [{ exercise: config.exercise, last: `${latestExerciseValue} кг`, best: `${Math.max(...config.exerciseValues)} кг`, trend: "растёт", tone: "good" }]
+      : [],
+    progression: hasProgress
+      ? [{ label: "Текущая динамика", value: `${latestWeight} кг`, detail: config.phase, tone: "good" }]
+      : [],
+    measurements: hasProgress
+      ? [{ label: "Вес", value: `${latestWeight} кг`, delta: `${((latestWeight ?? 0) - config.progress[0]).toFixed(1)} кг` }]
+      : [],
+    weightTrend: config.progress,
+    exerciseTrends: hasProgress
+      ? [{ id: `${config.id}-trend`, exercise: config.exercise, description: "Рабочая сила по завершённым тренировкам.", values: config.exerciseValues, unit: "кг", start: `${config.exerciseValues[0]} кг`, current: `${latestExerciseValue} кг`, increase: `+${Math.round((((latestExerciseValue ?? 0) / config.exerciseValues[0]) - 1) * 100)}%`, bestSet: `${latestExerciseValue} кг`, tone: "good" }]
+      : [],
+    photos: [],
+    checkIns: [],
+    timeline: [{ id: `${config.id}-timeline`, title: config.issue ? "Нужен следующий шаг тренера" : "Тренировочный ритм обновлён", detail: config.issue || `Последнее событие по цели «${config.goal}».`, time: config.lastActivity, icon: config.issue ? MessageSquareText : CheckCircle2, tone: config.issue ? "warning" : "good" }],
+  };
 }

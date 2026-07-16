@@ -2,17 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  ArrowLeft,
   CalendarDays,
   CheckCircle2,
   Dumbbell,
   Flame,
   Lock,
   Trophy,
+  UserRoundSearch,
+  UsersRound,
   Weight,
 } from "lucide-react";
 
@@ -29,33 +29,49 @@ import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-as
 import { WorkoutReviewDrawer } from "@/components/trainer-os/workout-review/workout-review-drawer";
 import { cn } from "@/lib/utils";
 
-import { getAthleteProfile } from "./mock-data";
+import {
+  buildTrainerAthleteProfileView,
+  toProfileTeamClient,
+  type ClientProfileTab,
+  type ProfileEntryInput,
+} from "./profile-read-model";
+import { ProfileWorkflowBar } from "./profile-workflow-bar";
 import { athleteReputationRanks, getAthleteReputationView } from "./reputation-ranks";
 import type { AthleteProfile } from "./types";
-import type { TeamClient } from "@/components/trainer-os/home/types";
 import { formatProfileDate } from "./client-profile-ui";
 import { ManagementTab } from "./management-tab";
 import { OverviewTab } from "./overview-tab";
 import { ProgressTab } from "./progress-tab";
 import { TrainingTab } from "./training-tab";
 
-type ClientProfileTab = "overview" | "training" | "progress" | "finance";
-
 const profileTabs: Array<{ value: ClientProfileTab; label: string }> = [
   { value: "overview", label: "Обзор" },
   { value: "training", label: "Тренировки" },
   { value: "progress", label: "Прогресс" },
-  { value: "finance", label: "Финансы и доступ" },
+  { value: "finance", label: "Доступ и оплата" },
 ];
 
-export function ClientProfilePage() {
-  const params = useParams<{ clientId: string }>();
-  const athlete = getAthleteProfile(params.clientId);
-  const teamClient = toTeamClient(athlete);
+type ClientProfilePageProps = {
+  clientId: string;
+  entry: ProfileEntryInput;
+};
+
+export function ClientProfilePage({ clientId, entry }: ClientProfilePageProps) {
+  const view = buildTrainerAthleteProfileView(clientId, entry);
+
+  if (!view) return <UnknownClientProfile clientId={clientId} />;
+
+  return <KnownClientProfile view={view} />;
+}
+
+function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buildTrainerAthleteProfileView>> }) {
+  const athlete = view.athlete;
+  const teamClient = toProfileTeamClient(view);
   const [quickAssignOpen, setQuickAssignOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [rankDialogOpen, setRankDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<ClientProfileTab>("overview");
+  const [activeTab, setActiveTab] = useState<ClientProfileTab>(view.defaultTab);
+  const [actionReceipt, setActionReceipt] = useState<string | null>(null);
   const shouldReduceMotion = useReducedMotion();
   const isOverviewTab = activeTab === "overview";
   const headerTransition = shouldReduceMotion
@@ -69,16 +85,17 @@ export function ClientProfilePage() {
     <TrainerShell
       eyebrow="Профиль спортсмена"
       title={athlete.name}
-      description="Публичная витрина клиента и рабочие вкладки тренера."
+      description="Тренировочный путь спортсмена и текущий рабочий контекст."
     >
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(190,242,100,0.08),transparent_28%),linear-gradient(180deg,#050505_0%,#09090b_46%,#050505_100%)] px-4 py-6 text-zinc-100 sm:px-6 lg:px-8">
+      <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(190,242,100,0.08),transparent_28%),linear-gradient(180deg,#050505_0%,#09090b_46%,#050505_100%)] px-4 py-6 pb-28 text-zinc-100 sm:px-6 lg:px-8 lg:pb-8">
         <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5">
-          <Button asChild variant="ghost" className="w-fit rounded-full text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100">
-            <Link href="/trainer/dashboard">
-              <ArrowLeft className="size-4" />
-              Назад к команде
-            </Link>
-          </Button>
+          <ProfileWorkflowBar
+            view={view}
+            receipt={actionReceipt}
+            onAssign={() => setQuickAssignOpen(true)}
+            onReview={() => setReviewOpen(true)}
+            onOpenPlan={() => setActiveTab("training")}
+          />
 
           <motion.div layout className="relative" transition={headerTransition}>
             <AnimatePresence initial={false} mode="popLayout">
@@ -133,6 +150,7 @@ export function ClientProfilePage() {
                           isActive ? "bg-zinc-100 text-black" : "text-zinc-400 hover:text-zinc-100"
                         )}
                         onClick={() => setActiveTab(tab.value)}
+                        onKeyDown={(event) => handleTabKeyDown(event, tab.value, setActiveTab)}
                       >
                         {tab.label}
                       </button>
@@ -167,23 +185,93 @@ export function ClientProfilePage() {
       <QuickAssignDrawer
         client={teamClient}
         open={quickAssignOpen}
-        onOpenChange={setQuickAssignOpen}
-        onAssign={() => setQuickAssignOpen(false)}
-        onAssignNext={() => setQuickAssignOpen(false)}
+        onOpenChange={(open) => {
+          setQuickAssignOpen(open);
+          if (!open) restoreWorkflowFocus();
+        }}
+        onAssign={() => {
+          setQuickAssignOpen(false);
+          setActionReceipt(`Тренировка для ${athlete.name} назначена.`);
+          restoreWorkflowFocus();
+        }}
+        onAssignNext={() => {
+          setQuickAssignOpen(false);
+          setActionReceipt(`Тренировка для ${athlete.name} назначена. Можно перейти к следующему клиенту.`);
+          restoreWorkflowFocus();
+        }}
       />
       <WorkoutReviewDrawer
         client={teamClient}
         open={reviewOpen}
-        onOpenChange={setReviewOpen}
-        onSendReview={() => setReviewOpen(false)}
+        onOpenChange={(open) => {
+          setReviewOpen(open);
+          if (!open) restoreWorkflowFocus();
+        }}
+        onSendReview={() => {
+          setReviewOpen(false);
+          setActionReceipt(`Разбор тренировки ${athlete.name} подготовлен.`);
+          restoreWorkflowFocus();
+        }}
         onSendReviewAndAssign={() => {
           setReviewOpen(false);
+          setActionReceipt(`Разбор тренировки ${athlete.name} подготовлен. Осталось назначить следующий день.`);
           setQuickAssignOpen(true);
         }}
       />
-      <ReputationRankDialog athlete={athlete} open={rankDialogOpen} onOpenChange={setRankDialogOpen} />
+      <ReputationRankDialog
+        athlete={athlete}
+        open={rankDialogOpen}
+        onOpenChange={(open) => {
+          setRankDialogOpen(open);
+          if (!open) window.requestAnimationFrame(() => document.getElementById("profile-rank-trigger")?.focus());
+        }}
+      />
     </TrainerShell>
   );
+}
+
+function UnknownClientProfile({ clientId }: { clientId: string }) {
+  return (
+    <TrainerShell eyebrow="Профиль спортсмена" title="Спортсмен не найден" description="Проверьте ссылку или вернитесь к списку клиентов.">
+      <main className="flex min-h-[76vh] items-center justify-center bg-black px-4 py-10 pb-28 text-zinc-100 lg:pb-10">
+        <section className="w-full max-w-xl rounded-lg border border-zinc-800 bg-zinc-950/90 p-6 text-center">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 text-zinc-400">
+            <UserRoundSearch className="size-6" />
+          </div>
+          <h2 className="mt-5 text-2xl font-semibold text-zinc-50">Такого спортсмена нет в demo-команде</h2>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+            URL не был подменён данными другого клиента. Идентификатор <span className="font-mono text-zinc-400">{clientId}</span> не найден.
+          </p>
+          <Button asChild className="mt-6 rounded-full bg-lime-300 text-black hover:bg-lime-200">
+            <Link href="/trainer/clients"><UsersRound className="size-4" />К списку клиентов</Link>
+          </Button>
+        </section>
+      </main>
+    </TrainerShell>
+  );
+}
+
+function handleTabKeyDown(
+  event: KeyboardEvent<HTMLButtonElement>,
+  currentTab: ClientProfileTab,
+  setActiveTab: (tab: ClientProfileTab) => void
+) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+  event.preventDefault();
+  const currentIndex = profileTabs.findIndex((tab) => tab.value === currentTab);
+  const nextIndex =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? profileTabs.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + profileTabs.length) % profileTabs.length;
+  const nextTab = profileTabs[nextIndex];
+  setActiveTab(nextTab.value);
+  window.requestAnimationFrame(() => document.getElementById(`client-profile-tab-${nextTab.value}`)?.focus());
+}
+
+function restoreWorkflowFocus() {
+  window.requestAnimationFrame(() => document.getElementById("profile-primary-action")?.focus());
 }
 
 function AthleteHeader({
@@ -207,9 +295,9 @@ function AthleteHeader({
         </div>
 
         <div className="min-w-0 self-center">
-          <h1 className="max-w-full text-[2.7rem] font-semibold leading-[0.96] tracking-[-0.035em] text-zinc-50 sm:text-[3.35rem] lg:text-[3.2rem] xl:text-[3.55rem] 2xl:text-[4.05rem]">
+          <h2 className="max-w-full text-[2.7rem] font-semibold leading-[0.96] tracking-[-0.035em] text-zinc-50 sm:text-[3.35rem] lg:text-[3.2rem] xl:text-[3.55rem] 2xl:text-[4.05rem]">
             {athlete.name}
-          </h1>
+          </h2>
 
           <AthleteTitleMark title={activeTitle} className="mt-3" />
 
@@ -253,7 +341,7 @@ function ProfileLine({
       </span>
       <span className="min-w-0">
         <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-600">{label}</span>
-        <span className="mt-1 block truncate text-base font-semibold text-zinc-100">{value}</span>
+        <span className="mt-1 block line-clamp-2 break-words text-base font-semibold text-zinc-100">{value}</span>
       </span>
     </div>
   );
@@ -414,6 +502,7 @@ function SportReputationCard({
   return (
     <aside className="relative flex min-h-[230px] items-center justify-center p-2 lg:min-h-[260px] 2xl:min-h-[292px]">
       <button
+        id="profile-rank-trigger"
         type="button"
         onClick={onOpen}
         className="relative z-10 flex h-full min-h-0 w-full flex-col items-center justify-center rounded-[1.6rem] text-center transition hover:scale-[1.015] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70"
@@ -434,6 +523,7 @@ function SportReputationCard({
             height={196}
             className="relative z-10 h-36 w-auto object-contain drop-shadow-[0_20px_34px_rgba(0,0,0,0.48)] 2xl:h-40"
             sizes="172px"
+            priority
           />
         ) : (
           <Trophy className="relative z-10 size-16 text-lime-200" />
@@ -454,32 +544,25 @@ function CompactClientHeader({
   athlete: AthleteProfile;
   onOpenReputation: () => void;
 }) {
-  const careerStats = getAthleteCareerStats(athlete);
   const reputation = getAthleteReputation(athlete);
   const activeTitle = athlete.titles.find((title) => title.id === athlete.activeTitleId && title.isUnlocked);
 
   return (
     <section className="overflow-hidden rounded-[1.65rem] border border-zinc-800/80 bg-[linear-gradient(135deg,rgba(24,24,27,0.78),rgba(5,5,5,0.9))] px-4 py-3 shadow-[0_20px_64px_rgba(0,0,0,0.24)] sm:px-5">
-      <div className="grid gap-4 lg:grid-cols-[minmax(320px,1.05fr)_minmax(150px,0.48fr)_minmax(330px,1fr)_minmax(150px,0.45fr)] lg:items-center">
+      <div className="grid gap-4 lg:grid-cols-[minmax(320px,1.2fr)_minmax(260px,0.8fr)_minmax(170px,0.45fr)] lg:items-center">
         <div className="flex min-w-0 items-center gap-3">
           <AthletePhoto initials={athlete.initials} size="small" />
           <div className="min-w-0">
-            <h1 className="truncate text-2xl font-semibold tracking-[-0.03em] text-zinc-50 sm:text-3xl lg:text-2xl xl:text-3xl">
+            <h2 className="break-words text-2xl font-semibold tracking-[-0.03em] text-zinc-50 sm:text-3xl lg:text-2xl xl:text-3xl">
               {athlete.name}
-            </h1>
+            </h2>
             <AthleteTitleMark title={activeTitle} compact className="mt-1" />
           </div>
         </div>
 
         <div className="grid min-w-0 gap-3 border-zinc-800 lg:border-l lg:pl-4">
           <CompactMeta label="Цель" value={athlete.goal} />
-          <CompactMeta label="В клубе" value={getClubTenureLabel(athlete)} />
-        </div>
-
-        <div className="grid gap-3 border-zinc-800 sm:grid-cols-3 lg:border-l lg:pl-4">
-          {careerStats.map((stat) => (
-            <CompactCareerStat key={stat.label} {...stat} />
-          ))}
+          <CompactMeta label="Статус" value={athlete.status} />
         </div>
 
         <div className="border-zinc-800 lg:border-l lg:pl-4">
@@ -495,29 +578,6 @@ function CompactMeta({ label, value }: { label: string; value: string }) {
     <div className="min-w-0">
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-600">{label}</p>
       <p className="mt-1 truncate text-base font-semibold text-zinc-100">{value}</p>
-    </div>
-  );
-}
-
-function CompactCareerStat({
-  icon: Icon,
-  value,
-  detail,
-}: {
-  icon: typeof Dumbbell;
-  label: string;
-  value: string;
-  detail: string;
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-2.5">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-lime-300/14 bg-lime-300/8 text-lime-200">
-        <Icon className="size-4" />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-xl font-semibold leading-none tracking-tight text-zinc-50">{value}</span>
-        <span className="mt-1 block truncate text-xs text-zinc-500">{detail}</span>
-      </span>
     </div>
   );
 }
@@ -539,6 +599,7 @@ function CompactRankSummary({
 }) {
   return (
     <button
+      id="profile-rank-trigger"
       type="button"
       onClick={onOpen}
       className="flex min-w-[168px] items-center gap-3 rounded-2xl text-left transition hover:scale-[1.015] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70"
@@ -559,6 +620,7 @@ function CompactRankSummary({
             height={64}
             className="relative z-10 h-14 w-auto object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.38)]"
             sizes="58px"
+            priority
           />
         </span>
       ) : (
@@ -791,22 +853,30 @@ function getAthleteCareerStats(athlete: AthleteProfile) {
     {
       icon: Dumbbell,
       label: "Тренировки",
-      value: "512",
+      value: String(athlete.career.completedWorkouts),
       detail: "пройдено всего",
     },
     {
       icon: Weight,
       label: "Вес",
-      value: "+11.8 кг",
+      value: athlete.career.weightChange,
       detail: `${athlete.currentWeight} сейчас`,
     },
     {
       icon: Flame,
       label: "Серия",
-      value: "82 дня",
+      value: `${athlete.career.streakDays} ${getDayWord(athlete.career.streakDays)}`,
       detail: athlete.adherence.label,
     },
   ];
+}
+
+function getDayWord(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return "день";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "дня";
+  return "дней";
 }
 
 function getAthleteReputation(athlete: AthleteProfile) {
@@ -821,23 +891,4 @@ function getClubTenureLabel(athlete: AthleteProfile) {
   const compactExperience = athlete.trainingExperience.match(/^\d+\s+[^\s,]+/u)?.[0];
 
   return compactExperience ?? `с ${formatProfileDate(athlete.membership.addedAt)}`;
-}
-
-function toTeamClient(athlete: AthleteProfile): TeamClient {
-  return {
-    id: athlete.id,
-    name: athlete.name,
-    initials: athlete.initials,
-    goal: athlete.goal,
-    state: "waiting_review",
-    stateLabel: athlete.status,
-    progressTrend: "flat",
-    isOnline: false,
-    priority: "high",
-    lastActivity: athlete.lastActivity,
-    nextWorkout: athlete.lastWorkout,
-    issue: "Тренировка ждёт разбора",
-    context: athlete.openIssues[0],
-    primaryAction: "review",
-  };
 }

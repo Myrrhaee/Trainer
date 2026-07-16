@@ -45,7 +45,12 @@ export function TrainingTab({
         />
 
         <div className="grid gap-5">
-          <LastWorkoutCommentPanel athlete={athlete} comments={clientComments} onReview={onReview} />
+          <LastWorkoutCommentPanel
+            athlete={athlete}
+            comments={clientComments}
+            canReview={waitingReviewWorkouts.length > 0}
+            onReview={onReview}
+          />
           <ReviewQueuePanel workouts={waitingReviewWorkouts} onReview={onReview} />
         </div>
       </div>
@@ -59,6 +64,7 @@ function TrainingProfileHero({ athlete, waitingReviewCount }: { athlete: Athlete
   const nextWorkout = athlete.upcomingWorkouts[0];
   const completedCount = athlete.workoutHistory.length;
   const plannedCount = athlete.upcomingWorkouts.length;
+  const hasActiveProgram = athlete.currentProgram.status === "active";
 
   return (
     <section className="overflow-hidden rounded-[2rem] border border-zinc-800/80 bg-[radial-gradient(circle_at_18%_18%,rgba(190,242,100,0.12),transparent_24%),linear-gradient(135deg,rgba(24,24,27,0.92),rgba(5,5,5,0.94))] p-5 shadow-[0_28px_88px_rgba(0,0,0,0.28)] lg:p-6">
@@ -66,7 +72,9 @@ function TrainingProfileHero({ athlete, waitingReviewCount }: { athlete: Athlete
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">Тренировочный путь</p>
           <h2 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-50 sm:text-4xl">
-            Идёт к {athlete.targetWeight} через {athlete.currentProgram.phase.toLowerCase()}
+            {hasActiveProgram
+              ? `Идёт к ${athlete.targetWeight} через ${athlete.currentProgram.phase.toLowerCase()}`
+              : "Следующая тренировка пока не назначена"}
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-500">
             Здесь тренер видит назначенные дни, историю выполнения и рабочие веса по главным упражнениям.
@@ -136,12 +144,20 @@ function TrainerWorkoutControlStrip({
             <span className={cn("rounded-full border px-3 py-1.5 text-sm", waitingReviewCount > 0 ? toneClass("warning") : toneClass("good"))}>
               {waitingReviewCount > 0 ? `${waitingReviewCount} ждёт разбора` : "Разборов нет"}
             </span>
-            <span className="rounded-full border border-zinc-800 bg-black/20 px-3 py-1.5 text-sm text-zinc-400">
-              {athlete.currentProgram.name}
-            </span>
-            <span className="rounded-full border border-zinc-800 bg-black/20 px-3 py-1.5 text-sm text-zinc-500">
-              {athlete.currentProgram.phase} · неделя {athlete.currentProgram.week}
-            </span>
+            {athlete.currentProgram.status === "active" ? (
+              <>
+                <span className="rounded-full border border-zinc-800 bg-black/20 px-3 py-1.5 text-sm text-zinc-400">
+                  {athlete.currentProgram.name}
+                </span>
+                <span className="rounded-full border border-zinc-800 bg-black/20 px-3 py-1.5 text-sm text-zinc-500">
+                  {athlete.currentProgram.phase} · неделя {athlete.currentProgram.week}
+                </span>
+              </>
+            ) : (
+              <span className="rounded-full border border-amber-300/18 bg-amber-300/8 px-3 py-1.5 text-sm text-amber-100">
+                Активного плана нет
+              </span>
+            )}
           </div>
         </div>
 
@@ -238,10 +254,12 @@ function TopExerciseResultCard({ load, index }: { load: AthleteLoad; index: numb
 function LastWorkoutCommentPanel({
   athlete,
   comments,
+  canReview,
   onReview,
 }: {
   athlete: AthleteProfile;
   comments: AthleteProfile["timeline"];
+  canReview: boolean;
   onReview: () => void;
 }) {
   const latestComment = comments[0];
@@ -257,9 +275,11 @@ function LastWorkoutCommentPanel({
           {latestComment?.detail ?? "Клиент пока не оставил комментарий к последней тренировке."}
         </p>
         <div className="mt-4 grid gap-2">
-          <Button type="button" onClick={onReview} className="rounded-full bg-lime-300 text-black hover:bg-lime-200">
-            Открыть разбор
-          </Button>
+          {canReview ? (
+            <Button type="button" onClick={onReview} className="rounded-full bg-lime-300 text-black hover:bg-lime-200">
+              Открыть разбор
+            </Button>
+          ) : null}
           <Button asChild variant="ghost" className="rounded-full text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">
             <Link href="/trainer/messages">Написать клиенту</Link>
           </Button>

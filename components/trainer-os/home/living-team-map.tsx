@@ -44,7 +44,7 @@ export function LivingTeamMap({
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null;
 
   function openClient(client: TeamClient) {
-    router.push(`/trainer/clients/${client.id}`);
+    router.push(`/trainer/clients/${client.id}?from=dashboard&entry=map`);
   }
 
   return (

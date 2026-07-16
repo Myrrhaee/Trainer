@@ -165,7 +165,7 @@ function AttentionDecisionCard({
 }) {
   const tone = attentionTone[item.kind];
   const SignalIcon = tone.icon;
-  const profileHref = `/trainer/clients/${item.clientId}?from=dashboard&attention=${item.kind}`;
+  const profileHref = `/trainer/clients/${item.clientId}?from=dashboard&attention=${item.kind}&attentionItem=${item.id}`;
 
   return (
     <article

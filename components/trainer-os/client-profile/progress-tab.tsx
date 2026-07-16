@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Camera, ChevronDown, Dumbbell, Weight } from "lucide-react";
+import { BarChart3, Camera, ChevronDown, Dumbbell, Weight } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -20,6 +20,28 @@ import { Panel, toneSurfaceClass } from "./client-profile-ui";
 import type { AthleteProfile } from "./types";
 
 export function ProgressTab({ athlete }: { athlete: AthleteProfile }) {
+  const hasProgressData =
+    athlete.weightTrend.length > 1 ||
+    athlete.exerciseTrends.length > 0 ||
+    athlete.measurements.length > 0 ||
+    athlete.progressPhotos.length > 0;
+
+  if (!hasProgressData) {
+    return (
+      <section className="flex min-h-[420px] items-center justify-center rounded-lg border border-zinc-800/85 bg-zinc-950/88 p-6 text-center">
+        <div className="max-w-lg">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 text-zinc-400">
+            <BarChart3 className="size-6" />
+          </div>
+          <h2 className="mt-5 text-2xl font-semibold text-zinc-50">Прогресс появится после первых данных</h2>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-500">
+            Для {athlete.name} пока нет завершённого ряда тренировок, замеров или фотографий. Графики не подменяются фиктивными значениями.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="grid gap-5">
       <ClientProgressScoreHero athlete={athlete} />

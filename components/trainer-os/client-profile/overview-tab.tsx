@@ -100,12 +100,15 @@ function ClientPortraitPanel({ athlete }: { athlete: AthleteProfile }) {
 
         <div className="grid gap-3">
           <PortraitContextRow label="Опыт" value={athlete.trainingExperience} />
-          <PortraitContextRow label="Тренировочный ритм" value={athlete.preferredTrainingDays.join(", ")} />
+          <PortraitContextRow label="Тренировочный ритм" value={athlete.preferredTrainingDays.join(", ") || "На паузе"} />
           <PortraitContextRow
             label="Оборудование"
             value={availableEquipment.slice(0, 3).map((item) => item.label).join(", ")}
           />
-          <PortraitContextRow label="Программа" value={athlete.currentProgram.name} />
+          <PortraitContextRow
+            label="Программа"
+            value={athlete.currentProgram.status === "active" ? athlete.currentProgram.name : "Активная программа не назначена"}
+          />
         </div>
       </div>
     </Panel>

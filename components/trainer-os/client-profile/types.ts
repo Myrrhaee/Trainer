@@ -263,6 +263,11 @@ export type AthleteProfile = {
   id: string;
   name: string;
   initials: string;
+  career: {
+    completedWorkouts: number;
+    weightChange: string;
+    streakDays: number;
+  };
   goal: string;
   about: string;
   trainingExperience: string;
