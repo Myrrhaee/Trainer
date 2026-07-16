@@ -37,15 +37,15 @@ export function TeamActivityFeed({
   const summary = getActivitySummary(todayItems);
 
   return (
-    <section className="rounded-[2rem] border border-zinc-800/80 bg-zinc-950/90 p-5">
+    <section aria-labelledby="team-activity-heading" className="rounded-lg border border-zinc-800/80 bg-zinc-950/75 p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">Жизнь клуба</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-50">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">Жизнь команды</p>
+          <h2 id="team-activity-heading" className="mt-2 text-xl font-semibold tracking-tight text-zinc-50">
             {todayItems.length > 0 ? `Сегодня произошло ${todayItems.length} событий` : "Сегодня пока тихо"}
           </h2>
         </div>
-        <Button type="button" onClick={onOpenJournal} className="rounded-full bg-lime-300 px-4 text-black hover:bg-lime-200">
+        <Button type="button" variant="outline" onClick={onOpenJournal} className="rounded-full border-zinc-700 bg-black/20 px-4 text-zinc-200 hover:bg-zinc-900">
           Открыть журнал
         </Button>
       </div>
@@ -87,7 +87,7 @@ export function TeamActivityFeed({
                     onFocus={() => onActivityPreview?.(item.clientId)}
                     onBlur={() => onActivityPreview?.(null)}
                     className={cn(
-                      "flex w-full gap-3 rounded-2xl border border-zinc-800/70 bg-black/18 p-3 text-left transition hover:border-zinc-700 hover:bg-zinc-900/60",
+                      "flex w-full gap-3 rounded-lg border border-zinc-800/70 bg-black/18 p-3 text-left transition hover:border-zinc-700 hover:bg-zinc-900/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500",
                       active && "border-lime-300/35 bg-lime-300/[0.035] shadow-[0_14px_34px_rgba(163,230,53,0.055)]",
                       read && "opacity-70"
                     )}

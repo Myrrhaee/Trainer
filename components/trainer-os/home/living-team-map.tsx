@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowRight } from "lucide-react";
+import { useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -40,17 +41,18 @@ export function LivingTeamMap({
   const teamHealth = getTeamHealthVisuals(clients);
   const activityByClientId = new Map(activityItems.map((item) => [item.clientId, item]));
   const placements = getResolvedPlacements(clients, selectedClientId, lifecycleClientId);
+  const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null;
 
   function openClient(client: TeamClient) {
     router.push(`/trainer/clients/${client.id}`);
   }
 
   return (
-    <section className="rounded-[2rem] border border-zinc-800/80 bg-zinc-950/90 p-4 sm:p-5">
+    <section aria-labelledby="team-map-heading" className="rounded-lg border border-zinc-800/80 bg-zinc-950/90 p-4 sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Живая карта команды</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-zinc-50">Спортсмены в текущем ритме</h2>
+          <h2 id="team-map-heading" className="mt-2 text-xl font-semibold tracking-tight text-zinc-50">Спортсмены в текущем ритме</h2>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">
             Видно, кто идет по плану, а кому нужен следующий шаг.
           </p>
@@ -60,7 +62,7 @@ export function LivingTeamMap({
 
       <div
         className={cn(
-          "trainer-team-field relative mt-5 h-[560px] overflow-hidden rounded-[1.7rem] border border-zinc-800/80 bg-[radial-gradient(circle_at_44%_42%,rgba(255,255,255,0.044),transparent_38%),linear-gradient(180deg,rgba(18,18,21,0.98),rgba(7,7,9,0.98))]",
+          "trainer-team-field relative mt-5 h-[420px] overflow-hidden rounded-lg border border-zinc-800/80 bg-[radial-gradient(circle_at_44%_42%,rgba(255,255,255,0.044),transparent_38%),linear-gradient(180deg,rgba(18,18,21,0.98),rgba(7,7,9,0.98))] sm:h-[500px] xl:h-[560px]",
           teamHealth.hasCritical && "trainer-team-field-busy"
         )}
         onClick={onClearSelection}
@@ -119,6 +121,23 @@ export function LivingTeamMap({
           );
         })}
       </div>
+
+      {selectedClient ? (
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-800/70 pt-3" aria-live="polite">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-zinc-100">{selectedClient.name}</p>
+            <p className="mt-0.5 truncate text-xs text-zinc-500">{selectedClient.stateLabel} · {selectedClient.goal}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => openClient(selectedClient)}
+            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full border border-zinc-700 bg-black/25 px-3 text-sm text-zinc-200 transition hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70"
+          >
+            Профиль
+            <ArrowRight className="size-4" />
+          </button>
+        </div>
+      ) : null}
 
       <style>{`
         @keyframes trainerTeamFloat {

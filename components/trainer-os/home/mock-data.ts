@@ -297,6 +297,9 @@ export const trainerHomeClients: TeamClient[] = [
     isOnline: false,
     priority: "low",
     lastActivity: "9 дней назад",
+    issue: "Тренировка не начата",
+    context: "Запланированная тренировка пропущена. Нужен ручной контакт тренера.",
+    primaryAction: "message",
   },
   {
     id: "vadim-larin",
