@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getDefaultReviewSessionId } from "@/components/trainer-os/workout-review/review-model";
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -84,7 +85,8 @@ export function ActivityDrawer({
 
   function openPrimaryAction(item: TeamActivityItem) {
     if (item.type === "completed_workout") {
-      router.push(`/trainer/review/${item.id}`);
+      const sessionId = getDefaultReviewSessionId(item.clientId);
+      router.push(sessionId ? `/trainer/review/${sessionId}?from=history` : `/trainer/clients/${item.clientId}?from=dashboard`);
       return;
     }
 

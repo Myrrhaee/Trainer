@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-assign-drawer";
 import { WorkoutReviewDrawer } from "@/components/trainer-os/workout-review/workout-review-drawer";
+import { getDefaultReviewSessionId } from "@/components/trainer-os/workout-review/review-model";
 import { cn } from "@/lib/utils";
 
 import {
@@ -201,20 +202,19 @@ function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buil
         }}
       />
       <WorkoutReviewDrawer
-        client={teamClient}
+        sessionId={view.reviewSessionId ?? getDefaultReviewSessionId(athlete.id) ?? null}
         open={reviewOpen}
+        source="profile"
         onOpenChange={(open) => {
           setReviewOpen(open);
           if (!open) restoreWorkflowFocus();
         }}
-        onSendReview={() => {
-          setReviewOpen(false);
-          setActionReceipt(`Разбор тренировки ${athlete.name} подготовлен.`);
-          restoreWorkflowFocus();
+        onResolved={(_, kind) => {
+          setActionReceipt(kind === "manual" ? `Разбор ${athlete.name} закрыт без сообщения.` : `Feedback для ${athlete.name} отправлен.`);
         }}
-        onSendReviewAndAssign={() => {
+        onAssignNext={() => {
           setReviewOpen(false);
-          setActionReceipt(`Разбор тренировки ${athlete.name} подготовлен. Осталось назначить следующий день.`);
+          setActionReceipt(`Разбор ${athlete.name} завершён. Можно назначить следующий день.`);
           setQuickAssignOpen(true);
         }}
       />

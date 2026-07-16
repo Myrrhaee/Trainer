@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { TrainerShell } from "@/components/trainer/trainer-shell";
+import { getDefaultReviewSessionId } from "@/components/trainer-os/workout-review/review-model";
 
 import { AttentionWorkspace } from "./attention-workspace";
 import {
@@ -280,17 +281,17 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
 
       {workoutReviewClient ? (
         <WorkoutReviewDrawer
-          client={workoutReviewClient}
+          sessionId={getDefaultReviewSessionId(workoutReviewClient.id) ?? null}
           open
+          source="dashboard"
+          attentionItemId={allAttentionItems.find((item) => item.clientId === workoutReviewClient.id)?.id}
           onOpenChange={(open) => {
             if (!open) setWorkoutReviewClient(null);
           }}
-          onSendReview={(clientId) => {
-            resolveClientAction(clientId, "Разбор отправлен");
-            setWorkoutReviewClient(null);
+          onResolved={(clientId, kind) => {
+            resolveClientAction(clientId, kind === "manual" ? "Задача закрыта с причиной" : "Разбор отправлен");
           }}
-          onSendReviewAndAssign={(client) => {
-            resolveClientAction(client.id, "Разбор отправлен");
+          onAssignNext={(client) => {
             setWorkoutReviewClient(null);
             setQuickAssignClient(client);
           }}

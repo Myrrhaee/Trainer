@@ -1,4 +1,5 @@
 import type { TeamClient } from "@/components/trainer-os/home/types";
+import { getDefaultReviewSessionId } from "@/components/trainer-os/workout-review/review-model";
 
 import { getAthleteProfile } from "./mock-data";
 import type { AthleteProfile } from "./types";
@@ -53,7 +54,7 @@ export function buildTrainerAthleteProfileView(
   const attentionKind = parseAttentionKind(entry.attention);
   const context = buildEntryContext(athlete, source, attentionKind, entry.attentionItem, entry.entry);
   const primaryAction = getPrimaryAction(athlete, attentionKind);
-  const reviewSessionId = clientId === "artem-smirnov" ? "artem-smirnov-2026-06-10" : undefined;
+  const reviewSessionId = getDefaultReviewSessionId(clientId);
 
   return {
     athlete,
