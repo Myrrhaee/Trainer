@@ -1713,7 +1713,7 @@ export default function TrainerBuilderPage() {
 
   return (
     <TrainerShell
-      title="Builder"
+      title="Шаблоны"
       description="Рабочее место тренера для сборки тренировочного дня в контексте клиента."
       headerAction={
         <div className="hidden items-center gap-2 xl:flex">

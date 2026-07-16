@@ -6,27 +6,21 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Bell,
-  BarChart3,
-  Calendar,
   CheckCheck,
   CheckCircle2,
   ClipboardList,
   Dumbbell,
-  ExternalLink,
-  FileText,
   Hammer,
   LayoutDashboard,
   Library,
+  LogOut,
   LucideIcon,
   MessageCircle,
-  RadioTower,
   RotateCcw,
   Search,
   Settings,
-  ShoppingBag,
   Sparkles,
   UserPlus,
-  TrendingUp,
   Users,
 } from "lucide-react";
 
@@ -49,14 +43,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { clearDemoSession, isDemoModeEnabled } from "@/lib/demo-mode";
+import { createClient } from "@/lib/supabase-client";
 import { cn } from "@/lib/utils";
-
-const trainerNav = [
-  { href: "/trainer/dashboard", label: "Главная", icon: LayoutDashboard },
-  { href: "/trainer/clients", label: "Клиенты", icon: Users },
-  { href: "/trainer/library", label: "Библиотека", icon: Library },
-  { href: "/trainer/builder", label: "Шаблоны", icon: ClipboardList },
-] as const;
 
 type SearchItem = {
   title: string;
@@ -65,6 +54,71 @@ type SearchItem = {
   icon: LucideIcon;
   keywords: string[];
 };
+
+type TrainerNavigationItem = SearchItem & {
+  id: "dashboard" | "clients" | "templates" | "library" | "settings";
+  label: string;
+  activeMatch: "exact" | "prefix";
+};
+
+const trainerNavigationItems: TrainerNavigationItem[] = [
+  {
+    id: "dashboard",
+    label: "Главная",
+    title: "Главная",
+    helper: "Очередь решений и состояние команды",
+    href: "/trainer/dashboard",
+    icon: LayoutDashboard,
+    keywords: ["главная", "очередь", "задачи", "dashboard"],
+    activeMatch: "exact",
+  },
+  {
+    id: "clients",
+    label: "Клиенты",
+    title: "Клиенты",
+    helper: "Список спортсменов и их рабочий контекст",
+    href: "/trainer/clients",
+    icon: Users,
+    keywords: ["клиент", "спортсмен", "ростер", "clients"],
+    activeMatch: "prefix",
+  },
+  {
+    id: "templates",
+    label: "Шаблоны",
+    title: "Шаблоны",
+    helper: "Создание и редактирование шаблонов тренировок",
+    href: "/trainer/builder",
+    icon: ClipboardList,
+    keywords: ["шаблон", "тренировка", "builder"],
+    activeMatch: "prefix",
+  },
+  {
+    id: "library",
+    label: "Библиотека",
+    title: "Библиотека",
+    helper: "Упражнения и техника выполнения",
+    href: "/trainer/library",
+    icon: Library,
+    keywords: ["упражнения", "техника", "библиотека", "library"],
+    activeMatch: "prefix",
+  },
+  {
+    id: "settings",
+    label: "Настройки",
+    title: "Настройки",
+    helper: "Профиль, уведомления, правила и доступ",
+    href: "/trainer/settings",
+    icon: Settings,
+    keywords: ["настройки", "профиль", "settings"],
+    activeMatch: "prefix",
+  },
+];
+
+function isTrainerNavigationItemActive(pathname: string | null, item: TrainerNavigationItem) {
+  if (!pathname) return false;
+  if (item.activeMatch === "exact") return pathname === item.href;
+  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+}
 
 type NotificationTone = "risk" | "info" | "success";
 type NotificationFilter = "all" | "unread" | "risk" | "done";
@@ -82,99 +136,13 @@ type TrainerNotification = {
 const commandGroups: Array<{ title: string; items: SearchItem[] }> = [
   {
     title: "Разделы",
-    items: [
-      {
-        title: "Дашборд",
-        helper: "Очередь задач, риски и сводка по клиентам",
-        href: "/trainer/dashboard",
-        icon: LayoutDashboard,
-        keywords: ["главная", "очередь", "задачи", "dashboard"],
-      },
-      {
-        title: "Центр внимания",
-        helper: "Единая очередь Attention Items и действий по клиентам",
-        href: "/trainer/attention",
-        icon: AlertTriangle,
-        keywords: ["внимание", "attention", "задачи", "очередь", "inbox"],
-      },
-      {
-        title: "Клиенты",
-        helper: "Список клиентов, статусы, быстрые действия",
-        href: "/trainer/clients",
-        icon: Users,
-        keywords: ["клиент", "ростер", "анкеты", "clients"],
-      },
-      {
-        title: "Сообщения",
-        helper: "Диалоги, быстрые ответы и рисковые обращения",
-        href: "/trainer/messages",
-        icon: MessageCircle,
-        keywords: ["сообщения", "чат", "диалоги", "inbox", "messages"],
-      },
-      {
-        title: "Программы",
-        helper: "Библиотека программ, назначения и структура недель",
-        href: "/trainer/programs",
-        icon: ClipboardList,
-        keywords: ["программы", "programs", "назначения", "циклы"],
-      },
-      {
-        title: "Конструктор тренировки",
-        helper: "Собрать тренировку, сохранить шаблон, назначить день",
-        href: "/trainer/builder",
-        icon: Hammer,
-        keywords: ["тренировка", "билдер", "builder", "шаблон"],
-      },
-      {
-        title: "Календарь",
-        helper: "Неделя, чек-ины, разборы и события",
-        href: "/trainer/calendar",
-        icon: Calendar,
-        keywords: ["календарь", "слоты", "чек-ин", "calendar"],
-      },
-      {
-        title: "Автоматизация",
-        helper: "Правила follow-up, напоминания и операционные сценарии",
-        href: "/trainer/automation",
-        icon: RadioTower,
-        keywords: ["автоматизация", "напоминания", "follow-up", "rules", "automation"],
-      },
-      {
-        title: "Инсайты",
-        helper: "Риски, удержание, прогресс и действия по клиентам",
-        href: "/trainer/insights",
-        icon: BarChart3,
-        keywords: ["инсайты", "аналитика", "риски", "retention", "прогресс"],
-      },
-      {
-        title: "Отчеты",
-        helper: "Weekly review, прогресс и следующий фокус для клиента",
-        href: "/trainer/reports",
-        icon: FileText,
-        keywords: ["отчеты", "report", "weekly", "прогресс", "review"],
-      },
-      {
-        title: "Библиотека упражнений",
-        helper: "Мои упражнения и базовая библиотека",
-        href: "/trainer/library",
-        icon: Library,
-        keywords: ["упражнения", "библиотека", "library"],
-      },
-      {
-        title: "Продажи",
-        helper: "Витрина, продукты, покупки и ссылки",
-        href: "/trainer/sales",
-        icon: TrendingUp,
-        keywords: ["продажи", "витрина", "sales", "продукты"],
-      },
-      {
-        title: "Настройки",
-        helper: "Профиль, уведомления, правила и безопасность",
-        href: "/trainer/settings",
-        icon: Settings,
-        keywords: ["настройки", "профиль", "settings"],
-      },
-    ],
+    items: trainerNavigationItems.map(({ title, helper, href, icon, keywords }) => ({
+      title,
+      helper,
+      href,
+      icon,
+      keywords,
+    })),
   },
   {
     title: "Клиенты",
@@ -213,32 +181,18 @@ const commandGroups: Array<{ title: string; items: SearchItem[] }> = [
     title: "Действия",
     items: [
       {
-        title: "Создать тренировку",
-        helper: "Открыть конструктор для новой сборки",
+        title: "Создать шаблон",
+        helper: "Открыть рабочую область шаблонов тренировок",
         href: "/trainer/builder",
         icon: Hammer,
-        keywords: ["создать", "тренировка", "новая"],
+        keywords: ["создать", "шаблон", "тренировка", "новая"],
       },
       {
-        title: "Открыть очередь разборов",
-        helper: "Перейти к единому центру внимания",
-        href: "/trainer/attention",
+        title: "Открыть очередь",
+        helper: "Вернуться к следующим решениям на главной",
+        href: "/trainer/dashboard",
         icon: ClipboardList,
         keywords: ["разбор", "очередь", "feedback", "attention"],
-      },
-      {
-        title: "Посмотреть риски клиентов",
-        helper: "Открыть инсайты по удержанию и прогрессу",
-        href: "/trainer/insights",
-        icon: BarChart3,
-        keywords: ["риски", "инсайты", "аналитика", "клиенты"],
-      },
-      {
-        title: "Подготовить отчет",
-        helper: "Собрать weekly review для клиента",
-        href: "/trainer/reports",
-        icon: FileText,
-        keywords: ["отчет", "weekly", "review", "клиент"],
       },
       {
         title: "Добавить клиента",
@@ -246,34 +200,6 @@ const commandGroups: Array<{ title: string; items: SearchItem[] }> = [
         href: "/trainer/clients",
         icon: UserPlus,
         keywords: ["добавить", "пригласить", "клиент"],
-      },
-      {
-        title: "Опубликовать продукт",
-        helper: "Перейти к витрине и продажам",
-        href: "/trainer/sales",
-        icon: RadioTower,
-        keywords: ["опубликовать", "продукт", "витрина"],
-      },
-      {
-        title: "Скопировать ссылку витрины",
-        helper: "Открыть настройки публичного профиля",
-        href: "/trainer/settings",
-        icon: ExternalLink,
-        keywords: ["ссылка", "публичный", "профиль"],
-      },
-      {
-        title: "Настроить напоминания",
-        helper: "Открыть правила автоматизации",
-        href: "/trainer/automation",
-        icon: RadioTower,
-        keywords: ["напоминания", "авто", "правила", "follow-up"],
-      },
-      {
-        title: "Проверить покупки",
-        helper: "Продажи, покупатели и продукты",
-        href: "/trainer/sales",
-        icon: ShoppingBag,
-        keywords: ["покупки", "оплаты", "доход"],
       },
     ],
   },
@@ -297,26 +223,6 @@ const initialNotifications: TrainerNotification[] = [
     href: "/trainer/clients",
     icon: UserPlus,
     tone: "risk",
-    unread: true,
-    time: "Сегодня",
-  },
-  {
-    id: "calendar-ready",
-    title: "Календарь недели готов",
-    helper: "Проверьте чек-ины и свободные слоты",
-    href: "/trainer/calendar",
-    icon: Calendar,
-    tone: "info",
-    unread: false,
-    time: "Вчера",
-  },
-  {
-    id: "storefront-sale",
-    title: "Новая покупка программы",
-    helper: "Ольга купила «Снижение веса 6 недель»",
-    href: "/trainer/sales",
-    icon: ShoppingBag,
-    tone: "success",
     unread: true,
     time: "Сегодня",
   },
@@ -362,6 +268,8 @@ export function TrainerShell({
   const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>("all");
   const [notifications, setNotifications] = useState<TrainerNotification[]>(initialNotifications);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const unreadCount = notifications.filter((item) => item.unread).length;
   const riskCount = notifications.filter((item) => item.tone === "risk").length;
@@ -410,6 +318,24 @@ export function TrainerShell({
     router.push(item.href);
   }
 
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+
+    try {
+      if (isDemoModeEnabled()) {
+        clearDemoSession();
+      } else {
+        await createClient().auth.signOut();
+      }
+    } finally {
+      setAccountOpen(false);
+      router.replace("/login");
+      router.refresh();
+      setSigningOut(false);
+    }
+  }
+
   return (
     <div className="min-h-screen max-w-full overflow-x-hidden bg-black text-zinc-100">
       <div className="flex min-h-screen min-w-0 max-w-full overflow-x-hidden">
@@ -417,51 +343,38 @@ export function TrainerShell({
           <div className="flex min-h-0 flex-1 flex-col items-center gap-6">
             <Link
               href="/trainer/dashboard"
-              className="flex h-12 w-12 items-center justify-center rounded-[1.35rem] border border-zinc-800 bg-zinc-900 text-lime-200 shadow-[0_0_40px_rgba(163,230,53,0.08)]"
+              className="flex h-12 w-12 items-center justify-center rounded-[1.35rem] border border-zinc-800 bg-zinc-900 text-lime-200 shadow-[0_0_40px_rgba(163,230,53,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
               aria-label="Кабинет тренера"
               title="Кабинет тренера"
             >
               <Hammer className="h-5 w-5" />
             </Link>
 
-            <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Навигация тренера">
-              {trainerNav.map(({ href, label, icon: Icon }) => {
-                const active =
-                  pathname === href ||
-                  (href !== "/trainer/dashboard" && pathname?.startsWith(href));
+            <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Основная навигация тренера">
+              {trainerNavigationItems.map((item) => {
+                const Icon = item.icon;
+                const active = isTrainerNavigationItemActive(pathname, item);
                 return (
                   <Link
-                    key={href}
-                    href={href}
-                    aria-label={label}
-                    title={label}
+                    key={item.id}
+                    href={item.href}
+                    aria-label={item.label}
+                    aria-current={active ? "page" : undefined}
+                    title={item.label}
                     className={cn(
-                      "group flex h-12 w-12 items-center justify-center rounded-[1.1rem] border transition",
+                      "group relative flex h-12 w-12 items-center justify-center rounded-[1.1rem] border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
                       active
                         ? "border-lime-300/20 bg-[linear-gradient(180deg,rgba(214,255,128,0.18),rgba(111,255,217,0.1))] text-lime-100 shadow-[0_10px_30px_rgba(163,230,53,0.12)]"
                         : "border-transparent text-zinc-500 hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100"
                     )}
                   >
                     <Icon className="h-4.5 w-4.5" />
+                    {active ? (
+                      <span className="absolute -right-[17px] h-7 w-0.5 rounded-full bg-lime-300" aria-hidden="true" />
+                    ) : null}
                   </Link>
                 );
               })}
-
-              <div className="mt-4 space-y-2 border-t border-zinc-900/80 pt-4">
-                <Link
-                  href="/trainer/settings"
-                  className={cn(
-                    "flex h-12 w-12 items-center justify-center rounded-[1.1rem] border transition",
-                    pathname === "/trainer/settings"
-                      ? "border-lime-300/20 bg-lime-300/10 text-lime-100"
-                      : "border-transparent text-zinc-500 hover:border-zinc-800 hover:bg-zinc-900 hover:text-zinc-100"
-                  )}
-                  aria-label="Настройки"
-                  title="Настройки"
-                >
-                  <Settings className="h-4.5 w-4.5" />
-                </Link>
-              </div>
             </nav>
           </div>
         </aside>
@@ -469,7 +382,7 @@ export function TrainerShell({
         <div className="mx-auto flex min-w-0 max-w-[1560px] flex-1 flex-col">
           <header className="sticky top-0 z-40 border-b border-zinc-900 bg-black/88 backdrop-blur-xl">
             <div className="flex min-w-0 flex-col gap-3 overflow-x-hidden px-4 py-3 lg:px-6 lg:py-3.5">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start justify-between gap-3 lg:items-center">
                 <div className="min-w-0">
                   <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
                     {eyebrow}
@@ -487,7 +400,7 @@ export function TrainerShell({
                   <button
                     type="button"
                     onClick={() => setCommandOpen(true)}
-                    className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-4 py-2 text-sm text-zinc-500 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                    className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-4 py-2 text-sm text-zinc-500 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70"
                   >
                     <Search className="h-4 w-4" />
                     <span>Поиск по кабинету тренера</span>
@@ -495,7 +408,7 @@ export function TrainerShell({
                   <button
                     type="button"
                     onClick={() => setNotificationsOpen(true)}
-                    className="relative flex h-11 w-11 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950/70 text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-100"
+                    className="relative flex h-11 w-11 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950/70 text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70"
                     aria-label="Уведомления"
                   >
                     <Bell className="h-4 w-4" />
@@ -515,71 +428,104 @@ export function TrainerShell({
                       <p className="text-sm font-medium text-zinc-100">{trainerName}</p>
                       <p className="text-xs text-zinc-500">{teamName}</p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSignOut()}
+                      disabled={signingOut}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-800 text-zinc-500 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70 disabled:cursor-wait disabled:opacity-50"
+                      aria-label="Выйти из аккаунта"
+                      title="Выйти"
+                    >
+                      <LogOut className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex min-w-0 w-full max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1 lg:hidden">
-                <button
-                  type="button"
-                  onClick={() => setCommandOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm whitespace-nowrap text-zinc-400 transition"
-                >
-                  <Search className="h-4 w-4" />
-                  <span>Поиск</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNotificationsOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm whitespace-nowrap text-zinc-400 transition"
-                >
-                  <Bell className="h-4 w-4" />
-                  <span>Уведомления</span>
-                  {unreadCount > 0 ? (
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-lime-300 px-1 text-[10px] font-semibold text-black">
-                      {unreadCount}
-                    </span>
-                  ) : null}
-                </button>
-                {trainerNav.map(({ href, label, icon: Icon }) => {
-                  const active =
-                    pathname === href ||
-                    (href !== "/trainer/dashboard" && pathname?.startsWith(href));
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      className={cn(
-                        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm whitespace-nowrap transition",
-                        active
-                          ? "border-lime-300/20 bg-lime-300/10 text-lime-100"
-                          : "border-zinc-800 bg-zinc-950/70 text-zinc-400"
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                      <span>{label}</span>
-                    </Link>
-                  );
-                })}
-                <Link
-                  href="/trainer/settings"
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm whitespace-nowrap transition",
-                    pathname === "/trainer/settings"
-                      ? "border-lime-300/20 bg-lime-300/10 text-lime-100"
-                      : "border-zinc-800 bg-zinc-950/70 text-zinc-400"
-                  )}
-                >
-                  <Settings className="h-4 w-4" />
-                  <span>Настройки</span>
-                </Link>
+                <div className="flex shrink-0 items-center gap-1.5 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setCommandOpen(true)}
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950/70 text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70"
+                    aria-label="Поиск по кабинету"
+                    title="Поиск"
+                  >
+                    <Search className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotificationsOpen(true)}
+                    className="relative flex h-11 w-11 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950/70 text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70"
+                    aria-label="Уведомления"
+                    title="Уведомления"
+                  >
+                    <Bell className="h-4 w-4" />
+                    {unreadCount > 0 ? (
+                      <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-black bg-lime-300 px-1 text-[9px] font-semibold text-black">
+                        {unreadCount}
+                      </span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAccountOpen(true)}
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950/70 transition hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70"
+                    aria-label="Аккаунт тренера"
+                    title="Аккаунт"
+                  >
+                    <Avatar className="h-8 w-8 rounded-full bg-zinc-900">
+                      <AvatarFallback className="bg-zinc-900 text-xs text-zinc-100">
+                        {initials(trainerName)}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                </div>
               </div>
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 overflow-x-hidden px-4 py-4 lg:px-6 lg:py-5">{children}</main>
+          <main className="min-w-0 flex-1 overflow-x-hidden px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-4 lg:px-6 lg:py-5">{children}</main>
         </div>
       </div>
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800/90 bg-black/94 pb-[env(safe-area-inset-bottom)] shadow-[0_-16px_48px_rgba(0,0,0,0.42)] backdrop-blur-xl lg:hidden"
+        aria-label="Основная навигация тренера"
+      >
+        <div className="grid h-[4.5rem] grid-cols-5 px-1.5">
+          {trainerNavigationItems.map((item) => {
+            const Icon = item.icon;
+            const active = isTrainerNavigationItemActive(pathname, item);
+
+            return (
+              <Link
+                key={item.id}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "relative flex min-h-11 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-200/70",
+                  active
+                    ? "bg-white/[0.045] font-semibold text-zinc-50"
+                    : "text-zinc-500 hover:bg-zinc-900/70 hover:text-zinc-200"
+                )}
+              >
+                {active ? (
+                  <span className="absolute top-0 h-0.5 w-8 rounded-full bg-lime-300" aria-hidden="true" />
+                ) : null}
+                <span
+                  className={cn(
+                    "flex h-7 w-9 items-center justify-center rounded-full border transition",
+                    active
+                      ? "border-lime-300/20 bg-lime-300/12 text-lime-100"
+                      : "border-transparent text-zinc-500"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="block max-w-full truncate">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
 
       <CommandDialog
         open={commandOpen}
@@ -629,6 +575,43 @@ export function TrainerShell({
           </CommandList>
         </Command>
       </CommandDialog>
+
+      <Sheet open={accountOpen} onOpenChange={setAccountOpen}>
+        <SheetContent
+          side="right"
+          className="w-full border-l border-zinc-800 bg-zinc-950/98 text-zinc-100 sm:max-w-sm"
+        >
+          <SheetHeader>
+            <SheetTitle className="text-zinc-50">Аккаунт тренера</SheetTitle>
+            <SheetDescription className="text-zinc-400">
+              Профиль команды и выход из кабинета.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4">
+            <div className="flex items-center gap-3 rounded-[1.25rem] border border-zinc-800 bg-black/24 p-4">
+              <Avatar className="h-12 w-12 rounded-full bg-zinc-900">
+                <AvatarFallback className="bg-zinc-900 text-sm text-zinc-100">
+                  {initials(trainerName)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-zinc-100">{trainerName}</p>
+                <p className="mt-1 truncate text-xs text-zinc-500">{teamName}</p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSignOut()}
+              disabled={signingOut}
+              className="mt-4 h-11 w-full rounded-full border-zinc-800 bg-black/18 text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50 disabled:cursor-wait disabled:opacity-50"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              {signingOut ? "Выходим..." : "Выйти"}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={notificationsOpen} onOpenChange={setNotificationsOpen}>
         <SheetContent className="w-full border-l border-zinc-800 bg-zinc-950/98 text-zinc-100 sm:max-w-[430px]">
