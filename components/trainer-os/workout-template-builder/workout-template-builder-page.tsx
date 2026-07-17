@@ -5,6 +5,9 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Dumbbell, Plus } from "lucide-r
 
 import { TrainerShell } from "@/components/trainer/trainer-shell";
 import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-assign-drawer";
+import { safeTrainerReturnPath } from "@/components/trainer-os/demo-runtime/flow-context";
+import { getWorkoutTemplateWorkspace } from "@/components/trainer-os/demo-runtime/selectors";
+import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,7 +23,6 @@ import {
   cloneTemplate,
   createBlankTemplate,
   createDraftRevision,
-  getDemoBuilderTemplates,
   getTemplateExercises,
   publishTemplate,
   validateTemplate,
@@ -35,7 +37,8 @@ import { TemplatesWorkspace, TemplateStatusBadge } from "./templates-workspace";
 type BuilderView = "templates" | "editor" | "unknown";
 
 export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryContext }) {
-  const [templates, setTemplates] = useState<WorkoutTemplateDraft[]>(() => entry.emptyWorkspace ? [] : getDemoBuilderTemplates());
+  const runtime = useTrainerDemoRuntime();
+  const templates = entry.emptyWorkspace ? [] : getWorkoutTemplateWorkspace(runtime.state);
   const initialRequestedTemplate = entry.templateId ? templates.find((template) => template.id === entry.templateId) : undefined;
   const [view, setView] = useState<BuilderView>(() => entry.templateId ? (initialRequestedTemplate ? "editor" : "unknown") : entry.source === "quick-assign" ? "editor" : "templates");
   const [draft, setDraft] = useState<WorkoutTemplateDraft | null>(() => {
@@ -58,17 +61,19 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   const assignableTemplate = useMemo(() => draft ? toQuickAssignTemplate(draft) : undefined, [draft]);
 
   useEffect(() => {
+    runtime.commands.recordPilotEvent({
+      name: "builder_opened",
+      athleteId: entry.athleteId,
+      workoutTemplateId: entry.templateId,
+    });
+  }, [entry.athleteId, entry.templateId, runtime.commands]);
+
+  useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-
-  function upsertTemplate(template: WorkoutTemplateDraft) {
-    setTemplates((current) => current.some((item) => item.id === template.id)
-      ? current.map((item) => item.id === template.id ? template : item)
-      : [template, ...current]);
-  }
 
   function openTemplate(template: WorkoutTemplateDraft) {
     setDraft(template);
@@ -89,13 +94,21 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
 
   function duplicateAndOpen(template: WorkoutTemplateDraft) {
     const copy = cloneTemplate(template);
-    upsertTemplate(copy);
+    const result = runtime.commands.saveWorkoutTemplateDraft({ actor: runtime.actor, template: copy, athleteId: entry.athleteId });
+    if (!result.ok) {
+      setLocalReceipt(result.error.message);
+      return;
+    }
     openTemplate(copy);
   }
 
   function archiveTemplate(template: WorkoutTemplateDraft) {
     const archived = { ...template, status: "archived" as const, updatedLabel: "только что" };
-    upsertTemplate(archived);
+    const result = runtime.commands.archiveWorkoutTemplatePrototype({ actor: runtime.actor, template: archived, athleteId: entry.athleteId });
+    if (!result.ok) {
+      setLocalReceipt(result.error.message);
+      return;
+    }
     if (draft?.id === template.id) {
       setDraft(archived);
       setBaseline(JSON.stringify(archived));
@@ -121,16 +134,21 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   }
 
   function saveDraft() {
-    if (!draft) return;
+    if (!draft) return false;
     const saved = { ...draft, title: draft.title.trim() || "Новый шаблон", status: "draft" as const, updatedLabel: "только что" };
-    upsertTemplate(saved);
+    const result = runtime.commands.saveWorkoutTemplateDraft({ actor: runtime.actor, template: saved, athleteId: entry.athleteId });
+    if (!result.ok) {
+      setLocalReceipt(result.error.message);
+      return false;
+    }
     setDraft(saved);
     setBaseline(JSON.stringify(saved));
-    setLocalReceipt(`Черновик «${saved.title}» сохранён в памяти текущего frontend flow.`);
+    setLocalReceipt(`Черновик «${saved.title}» сохранён.`);
+    return true;
   }
 
   function saveDraftAndLeave() {
-    saveDraft();
+    if (!saveDraft()) return;
     setUnsavedOpen(false);
     setView("templates");
     setDraft(null);
@@ -145,18 +163,26 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
       return;
     }
     const published = publishTemplate(draft);
-    upsertTemplate(published);
+    const command = runtime.commands.publishWorkoutTemplate({ actor: runtime.actor, template: published, athleteId: entry.athleteId });
+    if (!command.ok) {
+      setLocalReceipt(command.error.message);
+      return;
+    }
     setDraft(published);
     setBaseline(JSON.stringify(published));
     setPublishReceipt({ templateId: published.id, title: published.title, revision: published.revision, athleteId: entry.athleteId });
-    setLocalReceipt(`Published revision ${published.revision} сохранена локально.`);
+    setLocalReceipt(`Published revision ${published.revision} сохранена.`);
     if (andAssign && entry.athleteId) setAssignAfterPublish(true);
   }
 
   function createRevision() {
     if (!draft || draft.status !== "published") return;
     const revision = createDraftRevision(draft);
-    upsertTemplate(revision);
+    const result = runtime.commands.createWorkoutTemplateRevision({ actor: runtime.actor, template: revision, athleteId: entry.athleteId });
+    if (!result.ok) {
+      setLocalReceipt(result.error.message);
+      return;
+    }
     openTemplate(revision);
   }
 
@@ -218,7 +244,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
         </DialogContent>
       </Dialog>
 
-      <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}» из Builder.` : "Переход из WorkoutTemplate Builder.", returnTo: safeReturnTo(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setLocalReceipt(`${receipt.templateTitle} назначена для ${receipt.athleteName}.`)} />
+      <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}» из Builder.` : "Переход из WorkoutTemplate Builder.", returnTo: safeTrainerReturnPath(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setLocalReceipt(`${receipt.templateTitle} назначена для ${receipt.athleteName}.`)} />
     </TrainerShell>
   );
 }
@@ -234,8 +260,4 @@ function TemplatePreviewDialog({ draft, open, onOpenChange }: { draft: WorkoutTe
 
 function PreviewExercise({ index, exercise, compact }: { index: string; exercise: ReturnType<typeof getTemplateExercises>[number]; compact?: boolean }) {
   return <li className="rounded-lg border border-zinc-800 bg-black/20 p-3"><div className="flex items-start gap-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-zinc-700 text-xs text-zinc-400">{index}</span><div className="min-w-0"><h3 className="font-medium text-zinc-100">{exercise.title}</h3><p className="mt-1 text-sm text-zinc-500">{exercise.prescription.type === "duration" ? `${exercise.prescription.sets} × ${exercise.prescription.durationSec} сек` : `${exercise.prescription.sets} × ${exercise.prescription.repetitionsMin}${exercise.prescription.repetitionMode === "range" ? `–${exercise.prescription.repetitionsMax}` : ""} повт.`}{exercise.prescription.restSec ? ` · отдых ${exercise.prescription.restSec} сек` : ""}</p>{exercise.perSetMode && !compact ? <p className="mt-1 text-xs text-zinc-600">{exercise.setOverrides.map((set) => `${set.kind === "warmup" ? "Разминка" : "Рабочий"} #${set.order}`).join(" · ")}</p> : null}{exercise.trainerNote ? <p className="mt-2 text-sm text-zinc-300">{exercise.trainerNote}</p> : null}</div></div></li>;
-}
-
-function safeReturnTo(value?: string) {
-  return value?.startsWith("/trainer/") && !value.startsWith("//") ? value : undefined;
 }

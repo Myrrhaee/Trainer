@@ -2,6 +2,8 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
+import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
+
 import type { TrainerFeedbackRecord, WorkoutReviewDetails } from "./review-model";
 
 export type ReviewFeedbackMode = "detailed" | "acknowledgement";
@@ -61,6 +63,7 @@ function update(sessionId: string, updater: (current: ReviewWorkflowState) => Re
 }
 
 export function useReviewWorkflow(review: WorkoutReviewDetails) {
+  const runtime = useTrainerDemoRuntime();
   const sessionId = review.session.id;
   ensureState(review);
 
@@ -113,6 +116,31 @@ export function useReviewWorkflow(review: WorkoutReviewDetails) {
         author: "Алексей Романов",
         sentAt,
       };
+      const result = kind === "follow-up"
+        ? runtime.commands.createFollowUpFeedback({
+            actor: runtime.actor,
+            athleteId: review.athlete.id,
+            workoutSessionId: sessionId,
+            feedback: record,
+          })
+        : (kind === "acknowledgement"
+            ? runtime.commands.resolveAttentionItemWithAcknowledgement
+            : runtime.commands.resolveAttentionItemWithFeedback)({
+              actor: runtime.actor,
+              athleteId: review.athlete.id,
+              workoutSessionId: sessionId,
+              attentionItemId: review.attentionContext?.id,
+              feedback: record,
+            });
+      if (!result.ok) {
+        update(sessionId, (current) => ({
+          ...current,
+          attempts: current.attempts + 1,
+          saveStatus: "failed",
+          saveError: result.error.message,
+        }));
+        return false;
+      }
       update(sessionId, (current) => ({
         ...current,
         attempts: current.attempts + 1,
@@ -128,6 +156,22 @@ export function useReviewWorkflow(review: WorkoutReviewDetails) {
       if (!reason.trim()) return false;
       update(sessionId, (current) => ({ ...current, saveStatus: "saving", saveError: undefined }));
       await wait(350);
+      const attentionItemId = review.attentionContext?.id;
+      if (!attentionItemId) {
+        update(sessionId, (current) => ({ ...current, saveStatus: "failed", saveError: "Для этой сессии нет активной задачи разбора." }));
+        return false;
+      }
+      const result = runtime.commands.resolveAttentionItemManually({
+        actor: runtime.actor,
+        athleteId: review.athlete.id,
+        attentionItemId,
+        workoutSessionId: sessionId,
+        reason,
+      });
+      if (!result.ok) {
+        update(sessionId, (current) => ({ ...current, saveStatus: "failed", saveError: result.error.message }));
+        return false;
+      }
       update(sessionId, (current) => ({ ...current, resolution: { kind: "manual", reason: reason.trim(), resolvedAt: formatTimestamp(new Date()) }, saveStatus: "idle" }));
       return true;
     },

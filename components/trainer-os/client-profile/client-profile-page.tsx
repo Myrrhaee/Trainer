@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   CalendarDays,
@@ -27,14 +27,11 @@ import {
 } from "@/components/ui/dialog";
 import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-assign-drawer";
 import { WorkoutReviewDrawer } from "@/components/trainer-os/workout-review/workout-review-drawer";
-import { getDefaultReviewSessionId } from "@/components/trainer-os/workout-review/review-model";
+import { getAthleteProfileView, getDefaultWorkoutReviewSessionId } from "@/components/trainer-os/demo-runtime/selectors";
+import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
 import { cn } from "@/lib/utils";
 
-import {
-  buildTrainerAthleteProfileView,
-  type ClientProfileTab,
-  type ProfileEntryInput,
-} from "./profile-read-model";
+import type { ClientProfileTab, ProfileEntryInput, TrainerAthleteProfileView } from "./profile-read-model";
 import { ProfileWorkflowBar } from "./profile-workflow-bar";
 import { athleteReputationRanks, getAthleteReputationView } from "./reputation-ranks";
 import type { AthleteProfile } from "./types";
@@ -57,14 +54,16 @@ type ClientProfilePageProps = {
 };
 
 export function ClientProfilePage({ clientId, entry }: ClientProfilePageProps) {
-  const view = buildTrainerAthleteProfileView(clientId, entry);
+  const runtime = useTrainerDemoRuntime();
+  const view = getAthleteProfileView(runtime.state, clientId, entry);
 
   if (!view) return <UnknownClientProfile clientId={clientId} />;
 
   return <KnownClientProfile view={view} />;
 }
 
-function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buildTrainerAthleteProfileView>> }) {
+function KnownClientProfile({ view }: { view: TrainerAthleteProfileView }) {
+  const runtime = useTrainerDemoRuntime();
   const athlete = view.athlete;
   const [quickAssignOpen, setQuickAssignOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -79,6 +78,10 @@ function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buil
   const headerPresenceTransition = shouldReduceMotion
     ? { duration: 0 }
     : { duration: 0.24, ease: [0.22, 1, 0.36, 1] as const };
+
+  useEffect(() => {
+    runtime.commands.recordPilotEvent({ name: "profile_opened", athleteId: athlete.id });
+  }, [athlete.id, runtime.commands]);
 
   return (
     <TrainerShell
@@ -186,6 +189,7 @@ function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buil
         context={{
           source: "profile",
           reason: view.context?.detail ?? "Плановое назначение из профиля спортсмена.",
+          attentionItemId: runtime.state.attentionItems.find((item) => item.athleteId === athlete.id && item.status === "active")?.id,
           returnTo: `/trainer/clients/${athlete.id}`,
         }}
         open={quickAssignOpen}
@@ -199,12 +203,12 @@ function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buil
         onOpenAssignment={(receipt) => {
           setQuickAssignOpen(false);
           setActiveTab("training");
-          setActionReceipt(`${receipt.templateTitle} добавлена в локальный список предстоящих тренировок.`);
+          setActionReceipt(`${receipt.templateTitle} добавлена в предстоящие тренировки.`);
           restoreWorkflowFocus();
         }}
       />
       <WorkoutReviewDrawer
-        sessionId={view.reviewSessionId ?? getDefaultReviewSessionId(athlete.id) ?? null}
+        sessionId={view.reviewSessionId ?? getDefaultWorkoutReviewSessionId(runtime.state, athlete.id) ?? null}
         open={reviewOpen}
         source="profile"
         onOpenChange={(open) => {

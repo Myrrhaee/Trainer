@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -40,10 +40,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { getQuickAssignView } from "@/components/trainer-os/demo-runtime/selectors";
+import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
 import { cn } from "@/lib/utils";
 
 import {
-  buildQuickAssignView,
   createAssignmentReceipt,
   getBuilderHref,
   isTemplateSuitable,
@@ -86,16 +87,17 @@ export function QuickAssignDrawer({
   onOpenAssignment,
 }: QuickAssignDrawerProps) {
   const router = useRouter();
+  const runtime = useTrainerDemoRuntime();
   const [today] = useState(() => toLocalIsoDate(new Date()));
   const defaultDate = useMemo(() => addDays(today, 1), [today]);
   const view = useMemo(() => {
-    const baseView = buildQuickAssignView(athleteId, context, today);
+    const baseView = getQuickAssignView(runtime.state, athleteId, context);
     if (!baseView || !initialTemplate) return baseView;
     const templates = baseView.templates.some((template) => template.id === initialTemplate.id)
       ? baseView.templates.map((template) => template.id === initialTemplate.id ? initialTemplate : template)
       : [initialTemplate, ...baseView.templates];
     return { ...baseView, templates };
-  }, [athleteId, context, initialTemplate, today]);
+  }, [athleteId, context, initialTemplate, runtime.state]);
   const [draft, setDraft] = useState<WorkoutAssignmentDraft>(() => ({
     ...emptyDraft(athleteId, defaultDate),
     templateId: initialTemplate?.id ?? null,
@@ -107,6 +109,17 @@ export function QuickAssignDrawer({
   const [receipt, setReceipt] = useState<AssignmentReceipt | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [pendingBuilderHref, setPendingBuilderHref] = useState<string | null>(null);
+  const [commandError, setCommandError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !athleteId) return;
+    runtime.commands.recordPilotEvent({
+      name: "quick_assign_opened",
+      athleteId,
+      attentionItemId: context.attentionItemId,
+      workoutSessionId: context.reviewSessionId,
+    });
+  }, [athleteId, context.attentionItemId, context.reviewSessionId, open, runtime.commands]);
 
   function resetSession() {
     setDraft({ ...emptyDraft(athleteId, defaultDate), templateId: initialTemplate?.id ?? null });
@@ -117,6 +130,7 @@ export function QuickAssignDrawer({
     setReceipt(null);
     setDiscardOpen(false);
     setPendingBuilderHref(null);
+    setCommandError(null);
   }
 
   const selectedTemplate = view?.templates.find((template) => template.id === draft.templateId) ?? null;
@@ -195,6 +209,12 @@ export function QuickAssignDrawer({
   function submitAssignment() {
     if (!view || !selectedTemplate || submitDisabledReason) return;
     const nextReceipt = createAssignmentReceipt(view, draft, selectedTemplate);
+    const result = runtime.commands.createWorkoutAssignment({ actor: runtime.actor, receipt: nextReceipt });
+    if (!result.ok) {
+      setCommandError(result.error.message);
+      return;
+    }
+    setCommandError(null);
     setReceipt(nextReceipt);
     onAssigned?.(nextReceipt);
   }
@@ -340,7 +360,7 @@ export function QuickAssignDrawer({
                 {view.constraints.assignmentAllowed ? (
                   <div className="mx-auto flex w-full max-w-[860px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p id="quick-assign-disabled-reason" aria-live="polite" className="text-xs text-zinc-500">
-                      {submitDisabledReason ?? "Будет создан локальный snapshot назначения. Исходный шаблон не изменится."}
+                      {commandError ?? submitDisabledReason ?? "Будет создан snapshot назначения. Исходный шаблон не изменится."}
                     </p>
                     <Button
                       type="button"
@@ -738,14 +758,14 @@ function AssignmentConfirmation({
         <div className="flex size-12 items-center justify-center rounded-full border border-lime-300/30 bg-lime-300/10 text-lime-200">
           <CheckCircle2 className="size-6" />
         </div>
-        <p className="mt-5 text-xs font-medium uppercase text-lime-200/70">Назначено локально</p>
+        <p className="mt-5 text-xs font-medium uppercase text-lime-200/70">Назначено</p>
         <h2 className="mt-2 text-2xl font-semibold text-zinc-50">{receipt.templateTitle}</h2>
         <p className="mt-2 text-base text-zinc-300">{receipt.athleteName} · {formatDate(receipt.scheduledDate)}</p>
         <div className="mt-5 grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950/74 p-4 text-sm">
           <PreviewRow label="Упражнений" value={String(receipt.snapshotExercises.length)} />
           <PreviewRow label="Индивидуальных изменений" value={String(receipt.overrideCount)} />
           <PreviewRow label="Версия шаблона" value={`rev ${receipt.sourceTemplateRevision}`} />
-          <PreviewRow label="Что дальше" value="Назначение появится только в локальном demo-состоянии текущего экрана." />
+          <PreviewRow label="Что дальше" value="Назначение уже доступно в профиле спортсмена и Dashboard." />
         </div>
         <div className="mt-6 grid gap-2 sm:grid-cols-2">
           {onNext && (view.context.source === "dashboard" || view.context.source === "review") ? (

@@ -5,19 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { TrainerShell } from "@/components/trainer/trainer-shell";
-import { getDefaultReviewSessionId } from "@/components/trainer-os/workout-review/review-model";
+import { getDefaultWorkoutReviewSessionId, getTrainerDashboardView } from "@/components/trainer-os/demo-runtime/selectors";
+import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
 
 import { AttentionWorkspace } from "./attention-workspace";
-import {
-  buildTrainerAttentionQueue,
-  buildTrainerDashboardSummary,
-  getDashboardClientsForMode,
-  type TrainerAttentionQueueItem,
-  type TrainerDashboardDemoMode,
-} from "./dashboard-read-model";
+import type { TrainerAttentionQueueItem, TrainerDashboardDemoMode } from "./dashboard-read-model";
 import { DashboardStatusHeader } from "./dashboard-status-header";
 import { EmptyTeamState } from "./empty-team-state";
-import { getTeamSummary, teamActivityItems, trainerHomeClients } from "./mock-data";
 import { TeamActivityFeed } from "./team-activity-feed";
 import type { TeamActivityItem, TeamClient } from "./types";
 
@@ -49,9 +43,7 @@ type TrainerHomePageProps = {
 };
 
 export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
-  const [clients, setClients] = useState<TeamClient[]>(() => getDashboardClientsForMode(trainerHomeClients, demoMode));
-  const [resolvedAttentionIds, setResolvedAttentionIds] = useState<Set<string>>(() => new Set());
-  const [currentAttentionId, setCurrentAttentionId] = useState<string | null>(null);
+  const runtime = useTrainerDemoRuntime();
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [previewClientId, setPreviewClientId] = useState<string | null>(null);
   const [resolutionReceipt, setResolutionReceipt] = useState<string | null>(null);
@@ -66,22 +58,11 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
   const attentionSectionRef = useRef<HTMLElement | null>(null);
   const lifecycleTimeout = useRef<number | null>(null);
 
-  const allAttentionItems = useMemo(() => buildTrainerAttentionQueue(clients), [clients]);
-  const attentionItems = useMemo(
-    () => allAttentionItems.filter((item) => !resolvedAttentionIds.has(item.id)),
-    [allAttentionItems, resolvedAttentionIds]
-  );
-  const currentAttentionItem = useMemo(
-    () => attentionItems.find((item) => item.id === currentAttentionId) ?? attentionItems[0] ?? null,
-    [attentionItems, currentAttentionId]
-  );
-  const summary = useMemo(
-    () => buildTrainerDashboardSummary(getTeamSummary(clients), attentionItems),
-    [attentionItems, clients]
-  );
+  const dashboard = getTrainerDashboardView(runtime.state, demoMode);
+  const { clients, attentionItems, selectedAttentionItem: currentAttentionItem, summary } = dashboard;
   const visibleActivityItems = useMemo(
-    () => teamActivityItems.filter((item) => !hiddenActivityIds.has(item.id)),
-    [hiddenActivityIds]
+    () => dashboard.teamActivity.filter((item) => !hiddenActivityIds.has(item.id)),
+    [dashboard.teamActivity, hiddenActivityIds]
   );
   const unreadActivityItems = useMemo(
     () => visibleActivityItems.filter((item) => !isActivityRead(item, readActivityIds)),
@@ -95,21 +76,22 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
   const mapSelectedClientId = previewClientId ?? selectedClientId ?? currentAttentionItem?.clientId ?? null;
 
   useEffect(() => {
+    runtime.commands.recordPilotEvent({ name: "flow_started" });
     return () => {
       if (lifecycleTimeout.current) window.clearTimeout(lifecycleTimeout.current);
     };
-  }, []);
+  }, [runtime.commands]);
 
   function focusAttentionQueue() {
     if (currentAttentionItem) {
-      setCurrentAttentionId(currentAttentionItem.id);
+      runtime.commands.selectAttentionItem(currentAttentionItem.id);
       setSelectedClientId(currentAttentionItem.clientId);
     }
     attentionSectionRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
   }
 
   function selectAttentionItem(item: TrainerAttentionQueueItem) {
-    setCurrentAttentionId(item.id);
+    runtime.commands.selectAttentionItem(item.id);
     setSelectedClientId(item.clientId);
     setResolutionReceipt(null);
   }
@@ -126,38 +108,23 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
     const remainingItems = attentionItems.filter((candidate) => candidate.id !== item.id);
     const nextItem = remainingItems[Math.min(Math.max(currentIndex, 0), remainingItems.length - 1)] ?? remainingItems[0] ?? null;
 
-    setResolvedAttentionIds((currentIds) => new Set(currentIds).add(item.id));
-    setCurrentAttentionId(nextItem?.id ?? null);
+    const result = runtime.commands.resolveAttentionItemManually({
+      actor: runtime.actor,
+      athleteId: item.clientId,
+      attentionItemId: item.id,
+      workoutSessionId: runtime.state.attentionItems.find((candidate) => candidate.id === item.id)?.workoutSessionId,
+      reason: outcome,
+    });
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
     setSelectedClientId(nextItem?.clientId ?? null);
     setResolutionReceipt(`${item.client.name}: ${outcome}. ${nextItem ? `Дальше — ${nextItem.client.name}.` : "Открытых задач больше нет."}`);
 
-    if (item.client.state !== "inactive") {
-      setClients((currentClients) =>
-        currentClients.map((client) =>
-          client.id === item.clientId
-            ? {
-                ...client,
-                state: "on_track",
-                stateLabel: "По плану",
-                progressTrend: "up",
-                priority: "low",
-                issue: undefined,
-                context: undefined,
-                primaryAction: undefined,
-                lastActivity: "сейчас",
-              }
-            : client
-        )
-      );
-      showLifecycle(item.clientId);
-    }
+    if (item.client.state !== "inactive") showLifecycle(item.clientId);
 
     toast.success(nextItem ? "Задача закрыта. Открыта следующая." : "Все задачи обработаны");
-  }
-
-  function resolveClientAction(clientId: string, outcome: string) {
-    const item = attentionItems.find((candidate) => candidate.clientId === clientId);
-    if (item) resolveAttentionItem(item, outcome);
   }
 
   function showLifecycle(clientId: string) {
@@ -172,7 +139,7 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
   function selectMapClient(client: TeamClient) {
     setSelectedClientId(client.id);
     const relatedItem = attentionItems.find((item) => item.clientId === client.id);
-    if (relatedItem) setCurrentAttentionId(relatedItem.id);
+    if (relatedItem) runtime.commands.selectAttentionItem(relatedItem.id);
   }
 
   function selectActivityEvent(item: TeamActivityItem) {
@@ -200,10 +167,7 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
   }
 
   function openDemoTeam() {
-    setClients(trainerHomeClients);
-    setResolvedAttentionIds(new Set());
-    setCurrentAttentionId(null);
-    setSelectedClientId(null);
+    window.location.assign("/trainer/dashboard");
   }
 
   return (
@@ -267,7 +231,7 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
           context={{
             source: "dashboard",
             reason: quickAssignClient.context ?? quickAssignClient.issue,
-            attentionItemId: allAttentionItems.find((item) => item.clientId === quickAssignClient.id)?.id,
+            attentionItemId: runtime.state.attentionItems.find((item) => item.athleteId === quickAssignClient.id && item.status === "active")?.id,
             returnTo: "/trainer/dashboard#attention-heading",
           }}
           open
@@ -275,10 +239,8 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
             if (!open) setQuickAssignClient(null);
           }}
           onAssigned={(receipt) => {
-            const assignmentItem = attentionItems.find(
-              (item) => item.clientId === receipt.athleteId && item.primaryAction === "assign"
-            );
-            if (assignmentItem) resolveAttentionItem(assignmentItem, `${receipt.templateTitle} назначена`);
+            setResolutionReceipt(`${receipt.athleteName}: ${receipt.templateTitle} назначена.`);
+            showLifecycle(receipt.athleteId);
           }}
           onNextAthlete={(receipt) => {
             const nextAssignment = attentionItems.find(
@@ -292,15 +254,16 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
 
       {workoutReviewClient ? (
         <WorkoutReviewDrawer
-          sessionId={getDefaultReviewSessionId(workoutReviewClient.id) ?? null}
+          sessionId={getDefaultWorkoutReviewSessionId(runtime.state, workoutReviewClient.id) ?? null}
           open
           source="dashboard"
-          attentionItemId={allAttentionItems.find((item) => item.clientId === workoutReviewClient.id)?.id}
+          attentionItemId={runtime.state.attentionItems.find((item) => item.athleteId === workoutReviewClient.id && item.status === "active")?.id}
           onOpenChange={(open) => {
             if (!open) setWorkoutReviewClient(null);
           }}
           onResolved={(clientId, kind) => {
-            resolveClientAction(clientId, kind === "manual" ? "Задача закрыта с причиной" : "Разбор отправлен");
+            setResolutionReceipt(`${workoutReviewClient.name}: ${kind === "manual" ? "задача закрыта с причиной" : "feedback отправлен"}.`);
+            showLifecycle(clientId);
           }}
           onAssignNext={(client) => {
             setWorkoutReviewClient(null);

@@ -207,6 +207,14 @@ const athleteTemplateAccess: Record<string, string[] | undefined> = {
   "alexandra-konstantinova": [],
 };
 
+export function getDemoQuickAssignTemplates() {
+  return workoutTemplates.map((template) => ({
+    ...template,
+    focus: [...template.focus],
+    exercises: template.exercises.map((exercise) => ({ ...exercise })),
+  }));
+}
+
 export function buildQuickAssignView(
   athleteId: string | null,
   context: QuickAssignEntryContext,

@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Dumbbell, UserRound } from "lucide-react";
 
 import { TrainerShell } from "@/components/trainer/trainer-shell";
+import { getWorkoutReviewDetails as getRuntimeWorkoutReviewDetails } from "@/components/trainer-os/demo-runtime/selectors";
+import { safeTrainerReturnPath } from "@/components/trainer-os/demo-runtime/flow-context";
+import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
 import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-assign-drawer";
 import { Button } from "@/components/ui/button";
 
 import { ReviewFeedbackPanel } from "./review-feedback-panel";
-import { getWorkoutReviewDetails } from "./review-model";
+import type { WorkoutReviewDetails } from "./review-model";
 import { ReviewClientComment, ReviewExerciseList, ReviewSessionSummary, ReviewSignals } from "./review-shared";
 
 export type ReviewEntryInput = {
@@ -18,19 +21,33 @@ export type ReviewEntryInput = {
   queue?: string;
   position?: string;
   next?: string;
+  returnTo?: string;
 };
 
 export function WorkoutReviewPage({ workoutId, entry }: { workoutId: string; entry: ReviewEntryInput }) {
-  const review = getWorkoutReviewDetails(workoutId);
+  const runtime = useTrainerDemoRuntime();
+  const review = getRuntimeWorkoutReviewDetails(runtime.state, workoutId);
+  const reviewAthleteId = review?.athlete.id;
+  const reviewAttentionItemId = review?.attentionContext?.id;
+  const reviewSessionId = review?.session.id;
+  useEffect(() => {
+    if (!reviewAthleteId || !reviewSessionId) return;
+    runtime.commands.recordPilotEvent({
+      name: "review_opened",
+      athleteId: reviewAthleteId,
+      attentionItemId: reviewAttentionItemId,
+      workoutSessionId: reviewSessionId,
+    });
+  }, [reviewAthleteId, reviewAttentionItemId, reviewSessionId, runtime.commands]);
   if (!review) return <UnknownWorkoutReview workoutId={workoutId} />;
   return <KnownWorkoutReview review={review} entry={entry} />;
 }
 
-function KnownWorkoutReview({ review, entry }: { review: NonNullable<ReturnType<typeof getWorkoutReviewDetails>>; entry: ReviewEntryInput }) {
+function KnownWorkoutReview({ review, entry }: { review: WorkoutReviewDetails; entry: ReviewEntryInput }) {
   const [quickAssignOpen, setQuickAssignOpen] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   const source = parseSource(entry.from);
-  const returnTarget = getReturnTarget(source, review);
+  const returnTarget = getReturnTarget(source, review, entry.returnTo);
   const nextSessionId = safeSessionId(entry.next) ?? review.attentionContext?.nextSessionId;
   const profileHref = `${review.athlete.profileHref}?from=review`;
   const queuePosition = Number(entry.position) || review.attentionContext?.position;
@@ -152,7 +169,9 @@ function parseSource(value?: string): "dashboard" | "profile" | "history" | "dir
   return value === "dashboard" || value === "profile" || value === "history" ? value : "direct";
 }
 
-function getReturnTarget(source: ReturnType<typeof parseSource>, review: NonNullable<ReturnType<typeof getWorkoutReviewDetails>>) {
+function getReturnTarget(source: ReturnType<typeof parseSource>, review: WorkoutReviewDetails, returnTo?: string) {
+  const safeReturnTo = safeTrainerReturnPath(returnTo);
+  if (safeReturnTo) return { href: safeReturnTo, label: "Вернуться" };
   if (source === "dashboard") return { href: "/trainer/dashboard#attention-heading", label: "Вернуться к очереди" };
   if (source === "profile" || source === "history") return { href: `${review.athlete.profileHref}?from=review`, label: "Вернуться в профиль" };
   return { href: review.athlete.profileHref, label: "К профилю" };

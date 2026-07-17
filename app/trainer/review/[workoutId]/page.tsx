@@ -14,6 +14,7 @@ export default async function TrainerWorkoutReviewPage({
     queue: firstValue(query.queue),
     position: firstValue(query.position),
     next: firstValue(query.next),
+    returnTo: firstValue(query.returnTo),
   };
 
   return <WorkoutReviewPage workoutId={workoutId} entry={entry} />;

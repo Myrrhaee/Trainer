@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { getWorkoutReviewDetails as getRuntimeWorkoutReviewDetails } from "@/components/trainer-os/demo-runtime/selectors";
+import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 import { ReviewFeedbackPanel } from "./review-feedback-panel";
-import { getWorkoutReviewDetails, toReviewTeamClient } from "./review-model";
+import { toReviewTeamClient, type WorkoutReviewDetails } from "./review-model";
 import { ReviewClientComment, ReviewExerciseList, ReviewSessionSummary, ReviewSignals } from "./review-shared";
 import { useReviewWorkflow } from "./review-store";
 
@@ -24,11 +26,24 @@ type WorkoutReviewDrawerProps = {
 };
 
 export function WorkoutReviewDrawer(props: WorkoutReviewDrawerProps) {
-  const review = props.sessionId ? getWorkoutReviewDetails(props.sessionId) : null;
+  const runtime = useTrainerDemoRuntime();
+  const review = props.sessionId ? getRuntimeWorkoutReviewDetails(runtime.state, props.sessionId) : null;
+  const reviewAthleteId = review?.athlete.id;
+  const reviewAttentionItemId = review?.attentionContext?.id;
+  const reviewSessionId = review?.session.id;
+  useEffect(() => {
+    if (!props.open || !reviewAthleteId || !reviewSessionId) return;
+    runtime.commands.recordPilotEvent({
+      name: "review_opened",
+      athleteId: reviewAthleteId,
+      attentionItemId: reviewAttentionItemId,
+      workoutSessionId: reviewSessionId,
+    });
+  }, [props.open, reviewAthleteId, reviewAttentionItemId, reviewSessionId, runtime.commands]);
   return review ? <KnownReviewDrawer {...props} review={review} /> : <UnknownReviewDrawer {...props} />;
 }
 
-function KnownReviewDrawer({ review, open, source, attentionItemId, onOpenChange, onResolved, onAssignNext }: WorkoutReviewDrawerProps & { review: NonNullable<ReturnType<typeof getWorkoutReviewDetails>> }) {
+function KnownReviewDrawer({ review, open, source, attentionItemId, onOpenChange, onResolved, onAssignNext }: WorkoutReviewDrawerProps & { review: WorkoutReviewDetails }) {
   const workflow = useReviewWorkflow(review);
   const [discardOpen, setDiscardOpen] = useState(false);
   const teamClient = toReviewTeamClient(review);
