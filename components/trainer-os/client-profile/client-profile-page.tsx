@@ -32,7 +32,6 @@ import { cn } from "@/lib/utils";
 
 import {
   buildTrainerAthleteProfileView,
-  toProfileTeamClient,
   type ClientProfileTab,
   type ProfileEntryInput,
 } from "./profile-read-model";
@@ -67,7 +66,6 @@ export function ClientProfilePage({ clientId, entry }: ClientProfilePageProps) {
 
 function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buildTrainerAthleteProfileView>> }) {
   const athlete = view.athlete;
-  const teamClient = toProfileTeamClient(view);
   const [quickAssignOpen, setQuickAssignOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [rankDialogOpen, setRankDialogOpen] = useState(false);
@@ -184,20 +182,24 @@ function KnownClientProfile({ view }: { view: NonNullable<ReturnType<typeof buil
       </main>
 
       <QuickAssignDrawer
-        client={teamClient}
+        athleteId={athlete.id}
+        context={{
+          source: "profile",
+          reason: view.context?.detail ?? "Плановое назначение из профиля спортсмена.",
+          returnTo: `/trainer/clients/${athlete.id}`,
+        }}
         open={quickAssignOpen}
         onOpenChange={(open) => {
           setQuickAssignOpen(open);
           if (!open) restoreWorkflowFocus();
         }}
-        onAssign={() => {
-          setQuickAssignOpen(false);
-          setActionReceipt(`Тренировка для ${athlete.name} назначена.`);
-          restoreWorkflowFocus();
+        onAssigned={(receipt) => {
+          setActionReceipt(`${receipt.templateTitle} назначена для ${athlete.name} на ${receipt.scheduledDate}.`);
         }}
-        onAssignNext={() => {
+        onOpenAssignment={(receipt) => {
           setQuickAssignOpen(false);
-          setActionReceipt(`Тренировка для ${athlete.name} назначена. Можно перейти к следующему клиенту.`);
+          setActiveTab("training");
+          setActionReceipt(`${receipt.templateTitle} добавлена в локальный список предстоящих тренировок.`);
           restoreWorkflowFocus();
         }}
       />

@@ -262,19 +262,30 @@ export function TrainerHomePage({ demoMode = "team" }: TrainerHomePageProps) {
 
       {quickAssignClient ? (
         <QuickAssignDrawer
-          client={quickAssignClient}
+          key={quickAssignClient.id}
+          athleteId={quickAssignClient.id}
+          context={{
+            source: "dashboard",
+            reason: quickAssignClient.context ?? quickAssignClient.issue,
+            attentionItemId: allAttentionItems.find((item) => item.clientId === quickAssignClient.id)?.id,
+            returnTo: "/trainer/dashboard#attention-heading",
+          }}
           open
           onOpenChange={(open) => {
             if (!open) setQuickAssignClient(null);
           }}
-          onAssign={(clientId) => {
-            resolveClientAction(clientId, "Тренировка назначена");
-            setQuickAssignClient(null);
+          onAssigned={(receipt) => {
+            const assignmentItem = attentionItems.find(
+              (item) => item.clientId === receipt.athleteId && item.primaryAction === "assign"
+            );
+            if (assignmentItem) resolveAttentionItem(assignmentItem, `${receipt.templateTitle} назначена`);
           }}
-          onAssignNext={(clientId) => {
-            resolveClientAction(clientId, "Тренировка назначена");
-            const nextAssignment = attentionItems.find((item) => item.clientId !== clientId && item.primaryAction === "assign");
-            setQuickAssignClient(nextAssignment?.client ?? null);
+          onNextAthlete={(receipt) => {
+            const nextAssignment = attentionItems.find(
+              (item) => item.clientId !== receipt.athleteId && item.primaryAction === "assign"
+            );
+            if (nextAssignment) setQuickAssignClient(nextAssignment.client);
+            else setQuickAssignClient(null);
           }}
         />
       ) : null}

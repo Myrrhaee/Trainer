@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner";
 
 import { TrainerShell } from "@/components/trainer/trainer-shell";
+import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-assign-drawer";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -585,6 +586,7 @@ export default function TrainerClientsPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [messageClient, setMessageClient] = useState<TrainerClient | null>(null);
   const [actionsClient, setActionsClient] = useState<TrainerClient | null>(null);
+  const [quickAssignClient, setQuickAssignClient] = useState<TrainerClient | null>(null);
   const [localClients, setLocalClients] = useState<TrainerClient[]>([]);
   const [newClientName, setNewClientName] = useState("");
   const [newClientGoal, setNewClientGoal] = useState("");
@@ -1274,11 +1276,18 @@ export default function TrainerClientsPage() {
                 Открыть карточку
               </Link>
             </Button>
-            <Button asChild variant="outline" className="h-11 justify-start rounded-full border-zinc-800 bg-black/18 text-zinc-200 hover:bg-zinc-900">
-              <Link href={actionsClient ? `/trainer/builder?clientId=${actionsClient.id}` : "/trainer/builder"}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 justify-start rounded-full border-zinc-800 bg-black/18 text-zinc-200 hover:bg-zinc-900"
+              onClick={() => {
+                setQuickAssignClient(actionsClient);
+                setActionsClient(null);
+              }}
+              disabled={!actionsClient}
+            >
                 <Dumbbell className="mr-2 h-4 w-4" />
                 Назначить тренировку
-              </Link>
             </Button>
             <Button
               type="button"
@@ -1307,6 +1316,22 @@ export default function TrainerClientsPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <QuickAssignDrawer
+        athleteId={quickAssignClient?.id ?? null}
+        context={{
+          source: "clients",
+          reason: quickAssignClient ? `Быстрое действие для ${quickAssignClient.name} из списка клиентов.` : undefined,
+          returnTo: "/trainer/clients",
+        }}
+        open={Boolean(quickAssignClient)}
+        onOpenChange={(open) => {
+          if (!open) setQuickAssignClient(null);
+        }}
+        onAssigned={(receipt) => {
+          toast.success(`${receipt.templateTitle} назначена для ${receipt.athleteName}`);
+        }}
+      />
     </TrainerShell>
   );
 }

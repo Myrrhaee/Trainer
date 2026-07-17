@@ -9,7 +9,7 @@ import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-as
 import { Button } from "@/components/ui/button";
 
 import { ReviewFeedbackPanel } from "./review-feedback-panel";
-import { getWorkoutReviewDetails, toReviewTeamClient } from "./review-model";
+import { getWorkoutReviewDetails } from "./review-model";
 import { ReviewClientComment, ReviewExerciseList, ReviewSessionSummary, ReviewSignals } from "./review-shared";
 
 export type ReviewEntryInput = {
@@ -29,7 +29,6 @@ export function WorkoutReviewPage({ workoutId, entry }: { workoutId: string; ent
 function KnownWorkoutReview({ review, entry }: { review: NonNullable<ReturnType<typeof getWorkoutReviewDetails>>; entry: ReviewEntryInput }) {
   const [quickAssignOpen, setQuickAssignOpen] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
-  const teamClient = toReviewTeamClient(review);
   const source = parseSource(entry.from);
   const returnTarget = getReturnTarget(source, review);
   const nextSessionId = safeSessionId(entry.next) ?? review.attentionContext?.nextSessionId;
@@ -112,7 +111,22 @@ function KnownWorkoutReview({ review, entry }: { review: NonNullable<ReturnType<
         </div>
       </main>
 
-      <QuickAssignDrawer client={teamClient} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssign={() => { setQuickAssignOpen(false); setReceipt(`Тренировка для ${review.athlete.displayName} назначена локально.`); }} onAssignNext={() => { setQuickAssignOpen(false); setReceipt(`Тренировка для ${review.athlete.displayName} назначена. Можно перейти к следующему клиенту.`); }} />
+      <QuickAssignDrawer
+        athleteId={review.athlete.id}
+        context={{
+          source: "review",
+          reason: `Следующий шаг после разбора «${review.sessionTitle}». Назначение не влияет на закрытие разбора.`,
+          reviewSessionId: review.session.id,
+          returnTo: returnTarget.href,
+        }}
+        open={quickAssignOpen}
+        onOpenChange={setQuickAssignOpen}
+        onAssigned={(assignment) => setReceipt(`${assignment.templateTitle} назначена для ${review.athlete.displayName} на ${assignment.scheduledDate}.`)}
+        onNextAthlete={() => {
+          setQuickAssignOpen(false);
+          if (nextSessionId) window.location.assign(`/trainer/review/${nextSessionId}?from=dashboard&queue=review`);
+        }}
+      />
     </TrainerShell>
   );
 }
