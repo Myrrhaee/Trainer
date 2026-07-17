@@ -60,6 +60,7 @@ import {
 type QuickAssignDrawerProps = {
   athleteId: string | null;
   context?: QuickAssignEntryContext;
+  initialTemplate?: WorkoutTemplateListItem;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAssigned?: (receipt: AssignmentReceipt) => void;
@@ -77,6 +78,7 @@ const groupLabels: Record<TemplateGroup, string> = {
 export function QuickAssignDrawer({
   athleteId,
   context = defaultContext,
+  initialTemplate,
   open,
   onOpenChange,
   onAssigned,
@@ -86,10 +88,20 @@ export function QuickAssignDrawer({
   const router = useRouter();
   const [today] = useState(() => toLocalIsoDate(new Date()));
   const defaultDate = useMemo(() => addDays(today, 1), [today]);
-  const view = useMemo(() => buildQuickAssignView(athleteId, context, today), [athleteId, context, today]);
-  const [draft, setDraft] = useState<WorkoutAssignmentDraft>(() => emptyDraft(athleteId, defaultDate));
+  const view = useMemo(() => {
+    const baseView = buildQuickAssignView(athleteId, context, today);
+    if (!baseView || !initialTemplate) return baseView;
+    const templates = baseView.templates.some((template) => template.id === initialTemplate.id)
+      ? baseView.templates.map((template) => template.id === initialTemplate.id ? initialTemplate : template)
+      : [initialTemplate, ...baseView.templates];
+    return { ...baseView, templates };
+  }, [athleteId, context, initialTemplate, today]);
+  const [draft, setDraft] = useState<WorkoutAssignmentDraft>(() => ({
+    ...emptyDraft(athleteId, defaultDate),
+    templateId: initialTemplate?.id ?? null,
+  }));
   const [query, setQuery] = useState("");
-  const [group, setGroup] = useState<TemplateGroup>("suitable");
+  const [group, setGroup] = useState<TemplateGroup>(() => initialTemplate ? "all" : "suitable");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [adjustingExerciseIds, setAdjustingExerciseIds] = useState<Set<string>>(() => new Set());
   const [receipt, setReceipt] = useState<AssignmentReceipt | null>(null);
@@ -97,9 +109,9 @@ export function QuickAssignDrawer({
   const [pendingBuilderHref, setPendingBuilderHref] = useState<string | null>(null);
 
   function resetSession() {
-    setDraft(emptyDraft(athleteId, defaultDate));
+    setDraft({ ...emptyDraft(athleteId, defaultDate), templateId: initialTemplate?.id ?? null });
     setQuery("");
-    setGroup("suitable");
+    setGroup(initialTemplate ? "all" : "suitable");
     setDetailsOpen(false);
     setAdjustingExerciseIds(new Set());
     setReceipt(null);
