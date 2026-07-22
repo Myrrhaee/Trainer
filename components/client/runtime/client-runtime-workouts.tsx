@@ -34,8 +34,8 @@ export function ClientRuntimeWorkouts({ actorId, assignmentId, sessionId, viewMo
   const [discomfortText, setDiscomfortText] = useState(view?.session?.discomfort?.originalText ?? "");
   const [discomfortArea, setDiscomfortArea] = useState(view?.session?.discomfort?.area ?? "");
 
-  if (!view || !history) return <SafeWorkoutState title="Клиент не найден" detail={`Demo actor ${actorId} не существует.`} />;
-  if (view.notFound) return <SafeWorkoutState title={view.notFound === "session" ? "Тренировка не найдена" : "Назначение не найдено"} detail="Запрошенный ID не принадлежит текущему клиенту. Другие данные не подставлены." />;
+  if (!view || !history) return <SafeWorkoutState actorId={actorId} title="Клиент не найден" detail={`Demo actor ${actorId} не существует.`} />;
+  if (view.notFound) return <SafeWorkoutState actorId={actorId} title={view.notFound === "session" ? "Тренировка не найдена" : "Назначение не найдено"} detail="Запрошенный ID не принадлежит текущему клиенту или был сброшен после reload. Другие данные не подставлены." />;
 
   const actor: ClientDemoActor = { id: actorId, role: "client" };
   const actorQuery = `actor=${encodeURIComponent(actorId)}`;
@@ -249,4 +249,19 @@ function HistoryPanel({ actorId, history, onFeedbackViewed }: { actorId: string;
 
 function historyState(state: "scheduled" | "in_progress" | "completed" | "completed_with_omissions" | "feedback_received") { return { scheduled: "Запланирована", in_progress: "В процессе", completed: "Завершена", completed_with_omissions: "Завершена с пропусками", feedback_received: "Получен отзыв" }[state]; }
 function EmptyWorkout() { return <section className="rounded-lg border border-dashed border-zinc-800 p-8 text-center"><Dumbbell className="mx-auto h-8 w-8 text-zinc-600" /><h2 className="mt-4 text-xl font-semibold text-zinc-100">Активного назначения нет</h2><p className="mt-2 text-sm text-zinc-500">Фиктивная тренировка не создаётся.</p></section>; }
-function SafeWorkoutState({ title, detail }: { title: string; detail: string }) { return <main className="flex min-h-dvh items-center justify-center bg-black px-4 text-center text-zinc-100"><div><h1 className="text-2xl font-semibold">{title}</h1><p className="mt-3 max-w-md text-sm text-zinc-400">{detail}</p></div></main>; }
+function SafeWorkoutState({ actorId, title, detail }: { actorId: string; title: string; detail: string }) {
+  const knownActor = actorId && actorId !== "unknown-athlete";
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-black px-4 text-center text-zinc-100">
+      <div>
+        <h1 className="text-2xl font-semibold">{title}</h1>
+        <p className="mt-3 max-w-md text-sm text-zinc-400">{detail}</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {knownActor ? <Button asChild className="rounded-lg bg-lime-200 text-black hover:bg-lime-100"><Link href={`/client/me?actor=${encodeURIComponent(actorId)}`}>На главную</Link></Button> : null}
+          {knownActor ? <Button asChild variant="outline" className="rounded-lg border-zinc-700"><Link href={`/client/workouts?actor=${encodeURIComponent(actorId)}`}>К назначениям</Link></Button> : null}
+          {!knownActor ? <Button asChild className="rounded-lg bg-lime-200 text-black hover:bg-lime-100"><Link href="/">К началу</Link></Button> : null}
+        </div>
+      </div>
+    </main>
+  );
+}

@@ -52,21 +52,22 @@ const profileTabs: Array<{ value: ClientProfileTab; label: string }> = [
 type ClientProfilePageProps = {
   clientId: string;
   entry: ProfileEntryInput;
+  initialQuickAssignOpen?: boolean;
 };
 
-export function ClientProfilePage({ clientId, entry }: ClientProfilePageProps) {
+export function ClientProfilePage({ clientId, entry, initialQuickAssignOpen = false }: ClientProfilePageProps) {
   const runtime = useTrainerDemoRuntime();
   const view = getAthleteProfileView(runtime.state, clientId, entry);
 
   if (!view) return <UnknownClientProfile clientId={clientId} />;
 
-  return <KnownClientProfile view={view} />;
+  return <KnownClientProfile view={view} initialQuickAssignOpen={initialQuickAssignOpen} />;
 }
 
-function KnownClientProfile({ view }: { view: TrainerAthleteProfileView }) {
+function KnownClientProfile({ view, initialQuickAssignOpen }: { view: TrainerAthleteProfileView; initialQuickAssignOpen: boolean }) {
   const runtime = useTrainerDemoRuntime();
   const athlete = view.athlete;
-  const [quickAssignOpen, setQuickAssignOpen] = useState(false);
+  const [quickAssignOpen, setQuickAssignOpen] = useState(initialQuickAssignOpen);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [rankDialogOpen, setRankDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ClientProfileTab>(view.defaultTab);

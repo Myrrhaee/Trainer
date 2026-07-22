@@ -31,8 +31,12 @@ import {
   startWorkoutSession,
 } from "./client-commands";
 import { createInitialTrainerDemoState } from "./seed";
+import { createDemoFixtureState } from "./fixtures";
+import { resetDemoTransientState } from "./transient-reset";
 import {
   TRAINER_DEMO_ACTOR_ID,
+  type DemoBuildMetadata,
+  type DemoFixtureId,
   type TrainerDemoActor,
   type TrainerDemoCommandReceipt,
   type TrainerDemoCommandResult,
@@ -45,17 +49,26 @@ const TrainerDemoRuntimeContext = createContext<TrainerDemoRuntimeValue | null>(
 
 const actor: TrainerDemoActor = { id: TRAINER_DEMO_ACTOR_ID, role: "trainer" };
 
-export function TrainerDemoRuntimeProvider({ children }: { children: ReactNode }) {
+const localBuild: DemoBuildMetadata = { label: "trainer-core-pilot-v1", stage: "Stage 14", commit: "local" };
+
+export function TrainerDemoRuntimeProvider({ children, build = localBuild }: { children: ReactNode; build?: DemoBuildMetadata }) {
   const [state, setState] = useState<TrainerDemoState>(createInitialTrainerDemoState);
+  const [fixtureId, setFixtureId] = useState<DemoFixtureId | null>(null);
+  const [researchEnabled, setResearchEnabled] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [revision, setRevision] = useState(0);
   const stateRef = useRef(state);
+  const fixtureRef = useRef<DemoFixtureId | null>(null);
 
   const apply = useCallback(<TReceipt extends TrainerDemoCommandReceipt>(
-    command: (current: TrainerDemoState) => { state: TrainerDemoState; result: TrainerDemoCommandResult<TReceipt> }
+    command: (current: TrainerDemoState) => { state: TrainerDemoState; result: TrainerDemoCommandResult<TReceipt> },
+    marksFixtureDirty = true
   ): TrainerDemoCommandResult<TReceipt> => {
     const execution = command(stateRef.current);
     if (execution.state !== stateRef.current) {
       stateRef.current = execution.state;
       setState(execution.state);
+      if (marksFixtureDirty) setIsDirty(true);
       logLatestPilotEvent(execution.state);
     }
     if (!execution.result.ok) {
@@ -72,6 +85,28 @@ export function TrainerDemoRuntimeProvider({ children }: { children: ReactNode }
       logPilotError(execution.result.error.code);
     }
     return execution.result;
+  }, []);
+
+  const loadFixture = useCallback((nextFixtureId: DemoFixtureId) => {
+    resetDemoTransientState();
+    const next = createDemoFixtureState(nextFixtureId);
+    stateRef.current = next;
+    fixtureRef.current = nextFixtureId;
+    setState(next);
+    setFixtureId(nextFixtureId);
+    setResearchEnabled(true);
+    setIsDirty(false);
+    setRevision((current) => current + 1);
+  }, []);
+
+  const resetFixture = useCallback((requestedFixtureId?: DemoFixtureId) => {
+    const nextFixtureId = requestedFixtureId ?? fixtureRef.current;
+    if (nextFixtureId) loadFixture(nextFixtureId);
+  }, [loadFixture]);
+
+  const clearTransientState = useCallback(() => {
+    resetDemoTransientState();
+    setRevision((current) => current + 1);
   }, []);
 
   const recordPilotEvent = useCallback((event: Omit<TrainerPilotEvent, "id" | "at">) => {
@@ -106,11 +141,21 @@ export function TrainerDemoRuntimeProvider({ children }: { children: ReactNode }
     saveClientSessionComment: (input) => apply((current) => saveClientSessionComment(current, input)),
     setDiscomfortSignal: (input) => apply((current) => setDiscomfortSignal(current, input)),
     completeWorkoutSession: (input) => apply((current) => completeWorkoutSession(current, input)),
-    selectAttentionItem: (attentionItemId) => apply((current) => selectAttentionItem(current, attentionItemId)),
+    selectAttentionItem: (attentionItemId) => apply((current) => selectAttentionItem(current, attentionItemId), false),
     recordPilotEvent,
   }), [apply, recordPilotEvent]);
 
-  const value = useMemo<TrainerDemoRuntimeValue>(() => ({ actor, state, commands }), [commands, state]);
+  const research = useMemo<TrainerDemoRuntimeValue["research"]>(() => ({
+    enabled: researchEnabled,
+    fixtureId,
+    isDirty,
+    revision,
+    build,
+    loadFixture,
+    resetFixture,
+    clearTransientState,
+  }), [build, clearTransientState, fixtureId, isDirty, loadFixture, researchEnabled, resetFixture, revision]);
+  const value = useMemo<TrainerDemoRuntimeValue>(() => ({ actor, state, commands, research }), [commands, research, state]);
   return <TrainerDemoRuntimeContext.Provider value={value}>{children}</TrainerDemoRuntimeContext.Provider>;
 }
 

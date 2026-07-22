@@ -3,6 +3,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
+import { registerDemoTransientReset } from "@/components/trainer-os/demo-runtime/transient-reset";
 
 import type { TrainerFeedbackRecord, WorkoutReviewDetails } from "./review-model";
 
@@ -25,6 +26,13 @@ export type ReviewWorkflowState = {
 const stateBySession = new Map<string, ReviewWorkflowState>();
 const listenersBySession = new Map<string, Set<() => void>>();
 const hydratedSessionIds = new Set<string>();
+
+registerDemoTransientReset(() => {
+  const activeSessionIds = [...listenersBySession.keys()];
+  stateBySession.clear();
+  hydratedSessionIds.clear();
+  activeSessionIds.forEach(emit);
+});
 
 function initialState(review: WorkoutReviewDetails): ReviewWorkflowState {
   const existing = review.feedback.existing;

@@ -142,7 +142,12 @@ test.describe("Trainer core flow integration", () => {
 });
 
 async function selectQueueAthlete(page: Page, name: string) {
-  await page.getByRole("list", { name: "Очередь внимания" }).getByRole("button", { name: new RegExp(name) }).click();
+  const athlete = page.getByRole("list", { name: "Очередь внимания" }).getByRole("button", { name: new RegExp(name) });
+  await athlete.focus();
+  await athlete.click();
+  await expect(
+    page.getByRole("region", { name: "Следующее решение" }).getByRole("heading", { name, exact: true })
+  ).toBeVisible();
 }
 
 function trackRemoteWrites(page: Page) {

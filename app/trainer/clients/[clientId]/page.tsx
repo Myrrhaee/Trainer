@@ -15,7 +15,7 @@ export default async function TrainerClientProfileRoute({ params, searchParams }
     entry: firstValue(query.entry),
   };
 
-  return <ClientProfilePage clientId={clientId} entry={entry} />;
+  return <ClientProfilePage clientId={clientId} entry={entry} initialQuickAssignOpen={firstValue(query.research) === "1" && firstValue(query.quickAssign) === "1"} />;
 }
 
 function firstValue(value: string | string[] | undefined) {

@@ -98,6 +98,7 @@ function ClientNotFound({ actorId }: { actorId: string }) {
       <div className="max-w-md text-center">
         <h1 className="text-2xl font-semibold">Клиент не найден</h1>
         <p className="mt-3 text-sm text-zinc-400">Demo actor `{actorId}` не связан ни с одним спортсменом. Данные другого клиента не подставлены.</p>
+        <Button asChild className="mt-6 rounded-lg bg-lime-200 text-black hover:bg-lime-100"><Link href="/">К началу</Link></Button>
       </div>
     </main>
   );

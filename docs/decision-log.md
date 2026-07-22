@@ -136,12 +136,16 @@
 | D-120 | 2026-07-16 | Athlete Header content | Финальный состав always-visible и Overview-only Athlete Header content остаётся proposed. | proposed | Direction is accepted, but exact information hierarchy requires task testing. | Preserve identity/source reason/action/return path and compact non-Overview Header while final composition is validated. | `docs/athlete-profile-ux-review-v1.md`, `docs/trainer-cabinet-open-decisions.md` | Founder/Product Lead |
 | D-121 | 2026-07-16 | Calendar navigation | Возвращение dedicated Calendar в MVP navigation остаётся proposed. | proposed | Existing route proves a concept, not a recurring independent trainer job. | Calendar route/UI remains preserved outside the accepted five-section sidebar pending research. | `docs/trainer-navigation-and-screen-map-v1.md`, `docs/trainer-cabinet-open-decisions.md` | Founder/Product Lead |
 | D-122 | 2026-07-16 | Messages navigation return | Возвращение standalone Messages в core navigation после trainer research остаётся proposed. | proposed | Contextual communication is accepted, but independent inbox behavior may emerge. | Keep standalone Messages experimental through internal pilot unless evidence supports return. | `docs/trainer-navigation-and-screen-map-v1.md`, `docs/trainer-cabinet-open-decisions.md` | Founder/Product Lead |
+| D-123 | 2026-07-23 | External pilot product freeze | Current Stage 13 frontend vertical slice is frozen for the first external trainer pilot; Stage 14 permits only hardening, research-mode, reproducibility, accessibility and honest recovery changes. | accepted | Stage 14 instruction from Founder/Product Lead. | No new product areas or major capabilities enter the pilot build. | `docs/external-trainer-pilot-readiness-v1.md` | Founder/Product Lead |
+| D-124 | 2026-07-23 | Backend integration gate | Backend integration remains deferred during Stage 14 until evidence from the external formative trainer pilot is reviewed. | accepted | Stage 14 explicitly defines stabilization and research as the current stage and excludes backend/API/database work. | Pilot success does not imply beta or backend readiness; database and auth blockers remain separate gates. | `docs/external-trainer-pilot-readiness-v1.md`, `docs/external-trainer-pilot-analysis-framework-v1.md` | Founder/Product Lead |
+| D-125 | 2026-07-23 | Pilot data policy | Real participant, trainer or client personal data must not be entered into the frontend demo. | accepted | Stage 14 security, privacy and go/no-go constraints. | Research uses synthetic fixture identities only; environment preparation and cleanup must enforce the rule. | `docs/external-trainer-pilot-guide-v1.md`, `docs/external-trainer-pilot-environment-checklist-v1.md`, `docs/external-trainer-pilot-readiness-v1.md` | Founder/Product Lead |
+| D-126 | 2026-07-23 | Scenario reset ownership | Fixture selection and reset are moderator-only research controls and are not a production user capability. | accepted | Stage 14 scenario-reset and demo-disclosure constraints. | Controls require research mode and explicit confirmation and do not write to backend storage. | `docs/external-trainer-pilot-readiness-v1.md` | Founder/Product Lead |
 
 ## Empty Template For Future Decisions
 
 | ID | Дата | Область | Решение | Статус | Основание | Последствия | Связанные файлы | Кто принял решение |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| D-123 | YYYY-MM-DD | TBD | TBD | proposed | TBD | TBD | TBD | TBD |
+| D-127 | YYYY-MM-DD | TBD | TBD | proposed | TBD | TBD | TBD | TBD |
 
 ## Notes
 

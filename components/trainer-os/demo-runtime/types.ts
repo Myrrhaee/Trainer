@@ -14,6 +14,20 @@ import type { WorkoutTemplateDraft } from "@/components/trainer-os/workout-templ
 
 export const TRAINER_DEMO_ACTOR_ID = "trainer-alexey-romanov";
 
+export type DemoFixtureId =
+  | "review-required"
+  | "discomfort"
+  | "needs-assignment"
+  | "no-suitable-template"
+  | "calm-team"
+  | "client-execution";
+
+export type DemoBuildMetadata = {
+  label: "trainer-core-pilot-v1";
+  stage: "Stage 14";
+  commit: string;
+};
+
 export type TrainerFlowSource =
   | "dashboard"
   | "clients"
@@ -361,4 +375,14 @@ export type TrainerDemoRuntimeValue = {
   actor: TrainerDemoActor;
   state: TrainerDemoState;
   commands: TrainerDemoCommands;
+  research: {
+    enabled: boolean;
+    fixtureId: DemoFixtureId | null;
+    isDirty: boolean;
+    revision: number;
+    build: DemoBuildMetadata;
+    loadFixture: (fixtureId: DemoFixtureId) => void;
+    resetFixture: (fixtureId?: DemoFixtureId) => void;
+    clearTransientState: () => void;
+  };
 };
