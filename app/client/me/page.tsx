@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   Camera,
@@ -29,6 +29,7 @@ import { loadVisibleExerciseTitles } from "@/lib/exercise-library";
 import { formatSupabaseError, isSupabaseSchemaMismatch, logSupabaseError } from "@/lib/utils";
 import { isDemoModeEnabled } from "@/lib/demo-mode";
 import { DemoClientMePage } from "@/components/demo/demo-client-cabinet";
+import { ClientRuntimeHome } from "@/components/client/runtime/client-runtime-home";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -428,16 +429,16 @@ async function loadTemplates(trainerId: string): Promise<QueryResult<TemplateRow
 }
 
 export default function ClientMePage() {
+  return <Suspense fallback={<div className="min-h-dvh bg-black" />}><ClientMePageContent /></Suspense>;
+}
+
+function ClientMePageContent() {
+  const searchParams = useSearchParams();
+  if (isDemoModeEnabled() && process.env.NEXT_PUBLIC_STAGE13_RUNTIME !== "false") {
+    return <ClientRuntimeHome actorId={searchParams.get("actor") ?? "artem-smirnov"} />;
+  }
   if (isDemoModeEnabled()) {
-    return (
-      <>
-        <DemoClientMePage />
-        <HeaderCopyInjector />
-        <DemoDashboardFlowInjector />
-        <HistoryCompactInjector />
-        <RecommendedProgramsInjector />
-      </>
-    );
+    return <><DemoClientMePage /><HeaderCopyInjector /><DemoDashboardFlowInjector /><HistoryCompactInjector /><RecommendedProgramsInjector /></>;
   }
 
   return (

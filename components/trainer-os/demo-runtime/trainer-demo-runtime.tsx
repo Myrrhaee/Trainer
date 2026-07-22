@@ -21,6 +21,15 @@ import {
   saveWorkoutTemplateDraft,
   selectAttentionItem,
 } from "./commands";
+import {
+  completeWorkoutSession,
+  resumeWorkoutSession,
+  saveClientSessionComment,
+  saveSetLog,
+  setDiscomfortSignal,
+  skipExercise,
+  startWorkoutSession,
+} from "./client-commands";
 import { createInitialTrainerDemoState } from "./seed";
 import {
   TRAINER_DEMO_ACTOR_ID,
@@ -49,12 +58,29 @@ export function TrainerDemoRuntimeProvider({ children }: { children: ReactNode }
       setState(execution.state);
       logLatestPilotEvent(execution.state);
     }
-    if (!execution.result.ok) logPilotError(execution.result.error.code);
+    if (!execution.result.ok) {
+      const current = stateRef.current;
+      const event: TrainerPilotEvent = {
+        id: `pilot-${current.pilotEvents.length + 1}`,
+        name: "command_failed",
+        at: new Date().toISOString(),
+        errorCode: execution.result.error.code,
+      };
+      const next = { ...current, pilotEvents: [...current.pilotEvents, event] };
+      stateRef.current = next;
+      setState(next);
+      logPilotError(execution.result.error.code);
+    }
     return execution.result;
   }, []);
 
   const recordPilotEvent = useCallback((event: Omit<TrainerPilotEvent, "id" | "at">) => {
     const current = stateRef.current;
+    if (event.name === "flow_completed" && current.pilotEvents.some((candidate) =>
+      candidate.name === event.name
+      && candidate.athleteId === event.athleteId
+      && candidate.workoutSessionId === event.workoutSessionId
+    )) return;
     const nextEvent = { ...event, id: `pilot-${current.pilotEvents.length + 1}`, at: new Date().toISOString() };
     const next = { ...current, pilotEvents: [...current.pilotEvents, nextEvent] };
     stateRef.current = next;
@@ -72,6 +98,14 @@ export function TrainerDemoRuntimeProvider({ children }: { children: ReactNode }
     createWorkoutTemplateRevision: (input) => apply((current) => createWorkoutTemplateRevision(current, input)),
     archiveWorkoutTemplatePrototype: (input) => apply((current) => archiveWorkoutTemplate(current, input)),
     createFollowUpFeedback: (input) => apply((current) => createFollowUpFeedback(current, input)),
+    startWorkoutSession: (input) => apply((current) => startWorkoutSession(current, input)),
+    resumeWorkoutSession: (input) => apply((current) => resumeWorkoutSession(current, input)),
+    saveSetLog: (input) => apply((current) => saveSetLog(current, input, "SaveSetLog")),
+    updateSetLog: (input) => apply((current) => saveSetLog(current, input, "UpdateSetLog")),
+    skipExercise: (input) => apply((current) => skipExercise(current, input)),
+    saveClientSessionComment: (input) => apply((current) => saveClientSessionComment(current, input)),
+    setDiscomfortSignal: (input) => apply((current) => setDiscomfortSignal(current, input)),
+    completeWorkoutSession: (input) => apply((current) => completeWorkoutSession(current, input)),
     selectAttentionItem: (attentionItemId) => apply((current) => selectAttentionItem(current, attentionItemId)),
     recordPilotEvent,
   }), [apply, recordPilotEvent]);
@@ -85,6 +119,9 @@ export function useTrainerDemoRuntime() {
   if (!runtime) throw new Error("useTrainerDemoRuntime must be used inside TrainerDemoRuntimeProvider");
   return runtime;
 }
+
+export const ProductDemoRuntimeProvider = TrainerDemoRuntimeProvider;
+export const useProductDemoRuntime = useTrainerDemoRuntime;
 
 function logLatestPilotEvent(state: TrainerDemoState) {
   const event = state.pilotEvents.at(-1);

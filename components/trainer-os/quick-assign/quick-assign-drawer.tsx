@@ -782,6 +782,11 @@ function AssignmentConfirmation({
           <Button asChild type="button" variant="ghost" className="min-h-11 rounded-full text-zinc-300">
             <Link href={`/trainer/clients/${view.athlete.id}`}>Открыть профиль</Link>
           </Button>
+          <Button asChild type="button" variant="ghost" className="min-h-11 rounded-full text-zinc-300">
+            <Link href={`/client/me?actor=${encodeURIComponent(view.athlete.id)}`}>
+              <ExternalLink className="size-4" />Открыть вид клиента
+            </Link>
+          </Button>
           {(view.context.source === "profile" || view.context.source === "review" || view.context.source === "direct") ? (
             <Button asChild type="button" variant="ghost" className="min-h-11 rounded-full text-zinc-400">
               <Link href="/trainer/dashboard">На главную</Link>

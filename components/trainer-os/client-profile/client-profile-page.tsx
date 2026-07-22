@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Dumbbell,
+  ExternalLink,
   Flame,
   Lock,
   Trophy,
@@ -98,6 +99,13 @@ function KnownClientProfile({ view }: { view: TrainerAthleteProfileView }) {
             onReview={() => setReviewOpen(true)}
             onOpenPlan={() => setActiveTab("training")}
           />
+          <div className="flex justify-end">
+            <Button asChild variant="ghost" className="rounded-lg text-zinc-400">
+              <Link href={`/client/me?actor=${encodeURIComponent(athlete.id)}`}>
+                <ExternalLink className="mr-2 h-4 w-4" />Открыть вид клиента
+              </Link>
+            </Button>
+          </div>
 
           <motion.div layout className="relative" transition={headerTransition}>
             <AnimatePresence initial={false} mode="popLayout">

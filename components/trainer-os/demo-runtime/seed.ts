@@ -25,7 +25,9 @@ import {
 } from "@/components/trainer-os/workout-template-builder/builder-model";
 
 import type {
+  RuntimeExerciseLog,
   RuntimeAttentionItem,
+  RuntimeWorkoutSession,
   TrainerDemoState,
 } from "./types";
 
@@ -36,10 +38,11 @@ const attentionSessionByAthlete: Record<string, string | undefined> = {
 
 export function createInitialTrainerDemoState(): TrainerDemoState {
   const attentionItems = buildTrainerAttentionQueue(trainerHomeClients).map(toRuntimeAttentionItem);
-  const workoutSessions = getReviewDemoSessionIds()
+  const reviewSessions = getReviewDemoSessionIds()
     .map((sessionId) => getWorkoutReviewDetails(sessionId))
     .filter((session): session is WorkoutReviewDetails => Boolean(session));
-  workoutSessions.push(createOlgaDiscomfortSession());
+  reviewSessions.push(createOlgaDiscomfortSession());
+  const workoutSessions = reviewSessions.map(toRuntimeWorkoutSession);
 
   const existingTemplates = getDemoBuilderTemplates();
   const existingTemplateIds = new Set(existingTemplates.map((template) => template.id));
@@ -67,6 +70,57 @@ export function createInitialTrainerDemoState(): TrainerDemoState {
     teamActivity: teamActivityItems.map((item) => ({ ...item })),
     selectedAttentionItemId: attentionItems[0]?.id ?? null,
     pilotEvents: [],
+  };
+}
+
+function toRuntimeWorkoutSession(review: WorkoutReviewDetails): RuntimeWorkoutSession {
+  const exerciseLogs: RuntimeExerciseLog[] = review.exercises.map((exercise, exerciseIndex) => {
+    const plannedSets = exercise.planned?.sets ?? exercise.actual.sets.map((set) => ({
+      id: set.id,
+      kind: set.kind,
+      repetitions: set.repetitions,
+      targetWeightKg: set.weightKg,
+      targetRpe: set.rpe,
+    }));
+    return {
+      id: `exercise-log-${review.session.id}-${exercise.id}`,
+      workoutSessionId: review.session.id,
+      assignmentExerciseId: exercise.id,
+      exerciseId: exercise.id,
+      title: exercise.title,
+      order: exerciseIndex + 1,
+      status: exercise.state === "skipped" ? "skipped" : exercise.state === "completed" || exercise.state === "modified" || exercise.state === "added" ? "completed" : "in_progress",
+      skipReason: exercise.state === "skipped" ? exercise.modificationNote ?? exercise.actual.comment : undefined,
+      clientComment: exercise.actual.comment,
+      sets: plannedSets.map((plan, setIndex) => {
+        const actual = exercise.actual.sets.find((set) => set.id === plan.id) ?? exercise.actual.sets[setIndex];
+        return {
+          id: `set-log-${review.session.id}-${exercise.id}-${plan.id}`,
+          workoutSessionId: review.session.id,
+          assignmentExerciseId: exercise.id,
+          order: setIndex + 1,
+          kind: plan.kind,
+          plan: { ...plan },
+          actualRepetitions: actual?.repetitions,
+          actualWeightKg: actual?.weightKg,
+          rpe: actual?.rpe,
+          completed: actual?.completed ?? false,
+          comment: actual?.comment,
+        };
+      }),
+    };
+  });
+  const discomfort = review.signals.find((signal) => signal.kind === "discomfort" && signal.originalText);
+  return {
+    ...review,
+    assignmentEntityId: review.assignment?.id,
+    lifecycleStatus: review.session.status === "partial" || review.summary.hasSkippedWork ? "completed_with_omissions" : "completed",
+    startedAt: review.session.completedAt,
+    exerciseLogs,
+    discomfort: discomfort?.originalText
+      ? { originalText: discomfort.originalText, area: discomfort.area, severity: discomfort.severity }
+      : undefined,
+    completionReceiptId: `legacy-completion-${review.session.id}`,
   };
 }
 

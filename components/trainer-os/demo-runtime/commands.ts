@@ -1,4 +1,5 @@
 import type { TeamActivityItem } from "@/components/trainer-os/home/types";
+import { getTemplateExercises } from "@/components/trainer-os/workout-template-builder/builder-model";
 
 import {
   TRAINER_DEMO_ACTOR_ID,
@@ -145,7 +146,37 @@ export function createWorkoutAssignment(
     templateTitle: template.title,
     scheduledDate: input.receipt.scheduledDate,
     status: "scheduled",
-    snapshotExercises: input.receipt.snapshotExercises.map((exercise) => ({ ...exercise, override: exercise.override ? { ...exercise.override } : undefined })),
+    snapshotExercises: input.receipt.snapshotExercises.map((exercise, index) => {
+      const templateExercise = getTemplateExercises(template).find((candidate) => candidate.instanceId === exercise.id);
+      const group = template.items.find(
+        (item) => item.kind === "superset" && item.exercises.some((candidate) => candidate.instanceId === exercise.id)
+      );
+      const supersetOrder = group?.kind === "superset"
+        ? group.exercises.findIndex((candidate) => candidate.instanceId === exercise.id) + 1
+        : undefined;
+      const effectiveSets = exercise.override?.sets ?? exercise.sets;
+      const defaultRepetitions = exercise.override?.repetitions ?? exercise.repetitions;
+      const defaultWeight = exercise.override?.targetWeightKg ?? exercise.targetWeightKg;
+      const setPlans = Array.from({ length: effectiveSets }, (_, setIndex) => {
+        const source = templateExercise?.setOverrides[setIndex];
+        return {
+          id: source?.id ?? `${input.receipt.id}:exercise:${index + 1}:set:${setIndex + 1}`,
+          kind: source?.kind ?? "working" as const,
+          repetitions: source?.repetitionsMin ? Number(source.repetitionsMin) : defaultRepetitions,
+          targetWeightKg: source?.targetWeightKg ? Number(source.targetWeightKg) : defaultWeight,
+        };
+      });
+      return {
+        ...exercise,
+        assignmentExerciseId: `${input.receipt.id}:exercise:${index + 1}`,
+        supersetId: group?.kind === "superset" ? group.id : undefined,
+        supersetLabel: group?.kind === "superset" ? group.label : undefined,
+        supersetInstruction: group?.kind === "superset" ? group.instruction : undefined,
+        supersetOrder: supersetOrder && supersetOrder > 0 ? supersetOrder : undefined,
+        setPlans,
+        override: exercise.override ? { ...exercise.override } : undefined,
+      };
+    }),
     overrideCount: input.receipt.overrideCount,
     trainerNote: input.receipt.trainerNote,
     generalInstruction: input.receipt.generalInstruction,

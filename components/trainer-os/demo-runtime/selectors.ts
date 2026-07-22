@@ -236,12 +236,14 @@ function toAttentionQueueItem(item: RuntimeAttentionItem, client?: TeamClient): 
 function augmentAthleteProfile(state: TrainerDemoState, base: AthleteProfile): AthleteProfile {
   const assignments: AthleteWorkout[] = state.workoutAssignments
     .filter((item) => item.athleteId === base.id)
+    .filter((assignment) => state.workoutSessions.find((session) => session.assignmentEntityId === assignment.id)?.lifecycleStatus !== "completed"
+      && state.workoutSessions.find((session) => session.assignmentEntityId === assignment.id)?.lifecycleStatus !== "completed_with_omissions")
     .map((assignment) => ({
       id: assignment.id,
       title: assignment.templateTitle,
       date: assignment.scheduledDate,
       meta: `${assignment.snapshotExercises.length} упражнений · rev ${assignment.sourceTemplateRevision}`,
-      status: "Запланирована",
+      status: state.workoutSessions.some((session) => session.assignmentEntityId === assignment.id && session.lifecycleStatus === "active") ? "В процессе" : "Запланирована",
       tone: "good",
     }));
   const runtimeTimeline: AthleteTimelineItem[] = [
@@ -302,9 +304,49 @@ function augmentAthleteProfile(state: TrainerDemoState, base: AthleteProfile): A
       meta: "Без диагноза и AI-интерпретации",
       tone: "warning",
     }));
+  const integratedSessions = state.workoutSessions.filter(
+    (session) => session.athlete.id === base.id && session.assignmentEntityId && state.workoutAssignments.some((assignment) => assignment.id === session.assignmentEntityId)
+  );
+  const completedSessions = integratedSessions.filter((session) => session.lifecycleStatus !== "active");
+  const runtimeHistory: AthleteWorkout[] = completedSessions.map((session) => ({
+    id: session.session.id,
+    title: session.sessionTitle,
+    date: session.session.completedLabel,
+    meta: `${session.summary.completedSets}/${session.summary.totalSets} подходов${session.discomfort ? " · отмечен дискомфорт" : ""}`,
+    status: session.lifecycleStatus === "completed_with_omissions" ? "Завершена с пропусками" : "Завершена",
+    tone: session.discomfort ? "warning" : session.lifecycleStatus === "completed_with_omissions" ? "muted" : "good",
+  }));
+  const runtimeSets = completedSessions.flatMap((session) => session.exerciseLogs.flatMap((exercise) => exercise.sets
+    .filter((set) => set.completed && set.actualRepetitions !== undefined)
+    .map((set) => ({ session, exercise, set }))));
+  const strongest = runtimeSets.sort((a, b) => (b.set.actualWeightKg ?? 0) - (a.set.actualWeightKg ?? 0) || (b.set.actualRepetitions ?? 0) - (a.set.actualRepetitions ?? 0))[0];
+  const runtimeBestResults: AthleteProfile["bestResults"] = strongest ? [{
+    id: `runtime-best-${strongest.set.id}`,
+    exercise: strongest.exercise.title,
+    value: `${strongest.set.actualWeightKg ?? "—"} кг × ${strongest.set.actualRepetitions}`,
+    date: strongest.session.session.completedLabel,
+    delta: "Факт текущей сессии",
+    tone: "good",
+  }] : [];
+  const runtimeExerciseTrends: AthleteProfile["exerciseTrends"] = strongest ? [{
+    id: `runtime-trend-${strongest.exercise.exerciseId}`,
+    exercise: strongest.exercise.title,
+    description: "Фактические рабочие подходы из WorkoutSession",
+    values: runtimeSets.filter((item) => item.exercise.exerciseId === strongest.exercise.exerciseId).map((item) => item.set.actualWeightKg ?? item.set.actualRepetitions ?? 0),
+    unit: strongest.set.actualWeightKg !== undefined ? "кг" : "повт.",
+    start: "Первая запись",
+    current: `${strongest.set.actualWeightKg ?? strongest.set.actualRepetitions ?? 0}`,
+    increase: "Runtime facts",
+    bestSet: `${strongest.set.actualWeightKg ?? "—"} кг × ${strongest.set.actualRepetitions}`,
+    tone: "good",
+  }] : [];
   return {
     ...base,
+    career: { ...base.career, completedWorkouts: base.career.completedWorkouts + completedSessions.length },
     upcomingWorkouts: uniqueById([...assignments, ...base.upcomingWorkouts]),
+    workoutHistory: uniqueById([...runtimeHistory, ...base.workoutHistory]),
+    bestResults: uniqueById([...runtimeBestResults, ...base.bestResults]),
+    exerciseTrends: uniqueById([...runtimeExerciseTrends, ...base.exerciseTrends]),
     timeline: uniqueById([...assignmentTimeline, ...runtimeTimeline, ...base.timeline]),
     profilePosts: uniqueById([...feedbackPosts, ...signalPosts, ...base.profilePosts]),
     nextWorkout: assignments.at(-1)?.title ?? base.nextWorkout,

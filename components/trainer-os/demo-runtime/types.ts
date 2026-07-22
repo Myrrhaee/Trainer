@@ -6,6 +6,7 @@ import type {
   WorkoutTemplateExercise,
 } from "@/components/trainer-os/quick-assign/quick-assign-model";
 import type {
+  ReviewSetPlan,
   TrainerFeedbackRecord,
   WorkoutReviewDetails,
 } from "@/components/trainer-os/workout-review/review-model";
@@ -34,6 +35,11 @@ export type TrainerFlowContext = {
 export type TrainerDemoActor = {
   id: typeof TRAINER_DEMO_ACTOR_ID;
   role: "trainer";
+};
+
+export type ClientDemoActor = {
+  id: string;
+  role: "client";
 };
 
 export type RuntimeAttentionKind = "discomfort" | "review" | "assignment" | "missed_workout";
@@ -72,12 +78,66 @@ export type RuntimeWorkoutAssignment = {
   templateTitle: string;
   scheduledDate: string;
   status: "scheduled";
-  snapshotExercises: Array<WorkoutTemplateExercise & { override?: AssignmentReceipt["snapshotExercises"][number]["override"] }>;
+  snapshotExercises: Array<WorkoutTemplateExercise & {
+    assignmentExerciseId: string;
+    supersetId?: string;
+    supersetLabel?: string;
+    supersetInstruction?: string;
+    supersetOrder?: number;
+    setPlans: ReviewSetPlan[];
+    override?: AssignmentReceipt["snapshotExercises"][number]["override"];
+  }>;
   overrideCount: number;
   trainerNote?: string;
   generalInstruction?: string;
   createdContext: QuickAssignEntryContext;
   createdAt: string;
+};
+
+export type RuntimeSetLog = {
+  id: string;
+  workoutSessionId: string;
+  assignmentExerciseId: string;
+  order: number;
+  kind: "warmup" | "working";
+  plan: ReviewSetPlan;
+  actualRepetitions?: number;
+  actualWeightKg?: number;
+  rpe?: number;
+  completed: boolean;
+  comment?: string;
+};
+
+export type RuntimeExerciseLog = {
+  id: string;
+  workoutSessionId: string;
+  assignmentExerciseId: string;
+  exerciseId: string;
+  title: string;
+  order: number;
+  supersetId?: string;
+  supersetLabel?: string;
+  supersetInstruction?: string;
+  supersetOrder?: number;
+  status: "pending" | "in_progress" | "completed" | "skipped";
+  skipReason?: string;
+  clientComment?: string;
+  sets: RuntimeSetLog[];
+};
+
+export type RuntimeDiscomfortSignal = {
+  originalText: string;
+  area?: string;
+  severity?: "low" | "medium" | "high";
+};
+
+export type RuntimeWorkoutSession = WorkoutReviewDetails & {
+  assignmentEntityId?: string;
+  lifecycleStatus: "active" | "completed" | "completed_with_omissions";
+  startedAt?: string;
+  exerciseLogs: RuntimeExerciseLog[];
+  discomfort?: RuntimeDiscomfortSignal;
+  completionReceiptId?: string;
 };
 
 export type RuntimeTrainerFeedback = TrainerFeedbackRecord & {
@@ -110,7 +170,18 @@ export type TrainerPilotEventName =
   | "assignment_created"
   | "attention_resolved"
   | "flow_completed"
-  | "error_encountered";
+  | "error_encountered"
+  | "client_assignment_viewed"
+  | "session_started"
+  | "session_resumed"
+  | "set_saved"
+  | "exercise_skipped"
+  | "client_comment_saved"
+  | "discomfort_added"
+  | "session_completed"
+  | "review_item_created"
+  | "feedback_viewed"
+  | "command_failed";
 
 export type TrainerPilotEvent = {
   id: string;
@@ -129,7 +200,7 @@ export type TrainerDemoState = {
   athleteProfiles: AthleteProfile[];
   workoutTemplates: RuntimeWorkoutTemplate[];
   workoutAssignments: RuntimeWorkoutAssignment[];
-  workoutSessions: WorkoutReviewDetails[];
+  workoutSessions: RuntimeWorkoutSession[];
   attentionItems: RuntimeAttentionItem[];
   trainerFeedback: RuntimeTrainerFeedback[];
   manualResolutions: RuntimeManualResolution[];
@@ -151,7 +222,14 @@ export type TrainerDemoCommandErrorCode =
   | "INVALID_TEMPLATE_STATE"
   | "ATHLETE_PAUSED"
   | "STALE_ATTENTION_ITEM"
-  | "COMMAND_FAILED";
+  | "COMMAND_FAILED"
+  | "UNKNOWN_ASSIGNMENT"
+  | "UNKNOWN_EXERCISE_LOG"
+  | "UNKNOWN_SET_LOG"
+  | "SESSION_ALREADY_COMPLETED"
+  | "INVALID_SET_RESULT"
+  | "INVALID_DISCOMFORT"
+  | "ACTOR_ATHLETE_MISMATCH";
 
 export type TrainerDemoCommandReceipt = {
   commandId: string;
@@ -200,6 +278,39 @@ export type CreateFollowUpFeedbackInput = {
   feedback: TrainerFeedbackRecord;
 };
 
+export type ClientAssignmentCommandInput = {
+  actor: ClientDemoActor;
+  assignmentId: string;
+};
+
+export type ClientSessionCommandInput = {
+  actor: ClientDemoActor;
+  workoutSessionId: string;
+};
+
+export type SaveSetLogInput = ClientSessionCommandInput & {
+  setLogId: string;
+  repetitions: number;
+  weightKg?: number;
+  rpe?: number;
+  comment?: string;
+};
+
+export type SkipExerciseInput = ClientSessionCommandInput & {
+  exerciseLogId: string;
+  reason?: string;
+};
+
+export type SaveClientSessionCommentInput = ClientSessionCommandInput & {
+  comment: string;
+};
+
+export type SetDiscomfortSignalInput = ClientSessionCommandInput & {
+  originalText: string;
+  area?: string;
+  severity?: "low" | "medium" | "high";
+};
+
 export type TrainerDemoCommands = {
   resolveAttentionItemWithFeedback: (
     input: ResolveAttentionWithFeedbackInput
@@ -228,6 +339,20 @@ export type TrainerDemoCommands = {
   createFollowUpFeedback: (
     input: CreateFollowUpFeedbackInput
   ) => TrainerDemoCommandResult;
+  startWorkoutSession: (
+    input: ClientAssignmentCommandInput
+  ) => TrainerDemoCommandResult<TrainerDemoCommandReceipt & { session: RuntimeWorkoutSession }>;
+  resumeWorkoutSession: (
+    input: ClientSessionCommandInput
+  ) => TrainerDemoCommandResult<TrainerDemoCommandReceipt & { session: RuntimeWorkoutSession }>;
+  saveSetLog: (input: SaveSetLogInput) => TrainerDemoCommandResult;
+  updateSetLog: (input: SaveSetLogInput) => TrainerDemoCommandResult;
+  skipExercise: (input: SkipExerciseInput) => TrainerDemoCommandResult;
+  saveClientSessionComment: (input: SaveClientSessionCommentInput) => TrainerDemoCommandResult;
+  setDiscomfortSignal: (input: SetDiscomfortSignalInput) => TrainerDemoCommandResult;
+  completeWorkoutSession: (
+    input: ClientSessionCommandInput
+  ) => TrainerDemoCommandResult<TrainerDemoCommandReceipt & { attentionItemId: string; session: RuntimeWorkoutSession }>;
   selectAttentionItem: (attentionItemId: string | null) => TrainerDemoCommandResult;
   recordPilotEvent: (event: Omit<TrainerPilotEvent, "id" | "at">) => void;
 };
