@@ -29,7 +29,7 @@ export function DashboardStatusHeader({ summary, onOpenAttention }: DashboardSta
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Состояние команды</p>
           <h1 id="team-status-heading" className="mt-1 text-xl font-semibold text-zinc-50 sm:text-2xl">
-            {calm ? "Сегодня всё спокойно" : `${summary.attention} ${getClientWord(summary.attention)} требуют решения`}
+            {calm ? "Сегодня всё спокойно" : `${summary.attention} ${getClientWord(summary.attention)} ${summary.attention === 1 ? "требует" : "требуют"} решения`}
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
             {calm

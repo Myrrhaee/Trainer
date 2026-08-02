@@ -104,7 +104,7 @@ test.describe("External trainer pilot readiness", () => {
     await expect(page.getByRole("link", { name: "Открыть стартовый сценарий" })).toBeVisible();
 
     await page.goto(researchUrl("/client/me?actor=unknown-athlete", "client-execution"));
-    await expect(page.getByRole("heading", { name: "Клиент не найден" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Клиент не относится к сценарию" })).toBeVisible();
     await expect(page.getByText("Мария Волкова", { exact: true })).toHaveCount(0);
 
     await page.goto(researchUrl("/client/workouts?actor=maria-volkova&session=unknown-session", "client-execution"));
@@ -117,16 +117,18 @@ test.describe("External trainer pilot readiness", () => {
     await expect(page.getByRole("heading", { name: "Шаблон не найден" })).toBeVisible();
   });
 
-  test("refresh during an active client session gives a safe route back to the restored fixture", async ({ page }) => {
+  test("refresh during an active client session resumes the same saved session", async ({ page }) => {
     await page.goto(researchUrl("/client/me?actor=maria-volkova", "client-execution"));
     await page.getByRole("link", { name: "Начать тренировку" }).click();
     await page.getByRole("button", { name: "Начать тренировку" }).click();
+    const sessionId = new URL(page.url()).searchParams.get("session");
     await page.getByRole("button", { name: "Сохранить" }).first().click();
     await page.reload();
 
-    await expect(page.getByRole("heading", { name: "Тренировка не найдена" })).toBeVisible();
-    await page.getByRole("link", { name: "На главную" }).click();
-    await expect(page.getByRole("link", { name: "Начать тренировку" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`session=${sessionId}`));
+    await expect(page.getByText("1 из 12 подходов сохранено", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Главная" }).click();
+    await expect(page.getByRole("link", { name: "Продолжить тренировку" })).toBeVisible();
   });
 
   test("clean fixture loop completes without remote writes or duplicate context", async ({ page }) => {
@@ -138,7 +140,7 @@ test.describe("External trainer pilot readiness", () => {
     await page.getByRole("button", { name: "Сохранить" }).first().click();
     await page.getByRole("button", { name: "Завершить тренировку" }).click();
     await page.getByRole("button", { name: "Подтвердить завершение" }).click();
-    await page.getByRole("link", { name: "Вид тренера" }).click();
+    await page.goto(researchUrl("/trainer/dashboard", "client-execution"));
 
     const queue = page.getByRole("list", { name: "Очередь внимания" });
     await queue.getByRole("button", { name: /Мария Волкова/ }).click();
@@ -146,11 +148,33 @@ test.describe("External trainer pilot readiness", () => {
     const feedback = "Вижу фактический результат. Следующую тренировку оставляем в спокойном рабочем темпе.";
     await page.getByLabel("Сообщение клиенту").fill(feedback);
     await page.getByRole("button", { name: "Отправить", exact: true }).click();
-    await page.getByRole("link", { name: "К профилю" }).click();
-    await page.getByRole("link", { name: "Открыть вид клиента" }).click();
+    await expect(page.getByText("Задача закрыта", { exact: true })).toBeVisible();
+    await page.goto(researchUrl("/client/me?actor=maria-volkova", "client-execution"));
     await expect(page.getByText(feedback, { exact: true }).first()).toBeVisible();
     expect(writes).toEqual([]);
     expect(errors).toEqual([]);
+  });
+
+  test("invalid persisted demo state is discarded and the requested fixture recovers", async ({ page }) => {
+    await page.goto(researchUrl("/client/me?actor=maria-volkova", "client-execution"));
+    await page.evaluate(() => window.localStorage.setItem("ai-strength-coach:demo-runtime:v1", JSON.stringify({ version: 999, fixtureId: "client-execution" })));
+    await page.reload();
+
+    await expect(page.getByText("Тренировка назначена", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Начать тренировку" })).toBeVisible();
+  });
+
+  test("explicit fixture URL replaces a different persisted scenario without rewriting the URL", async ({ page }) => {
+    await page.goto(researchUrl("/client/me?actor=maria-volkova", "client-execution"));
+    await expect(page.getByText("Demo · F · Client execution", { exact: true })).toBeVisible();
+
+    await page.goto(researchUrl("/trainer/dashboard", "review-required"));
+
+    await expect(page).toHaveURL(/fixture=review-required/);
+    await expect(page.getByText("Demo · A · Review required", { exact: true })).toBeVisible();
+    const queue = page.getByRole("list", { name: "Очередь внимания" });
+    await expect(queue.getByText("Артём Смирнов", { exact: true })).toBeVisible();
+    await expect(queue.getByText("Мария Волкова", { exact: true })).toHaveCount(0);
   });
 
   test("metadata is research-only and mobile fixture has no horizontal overflow", async ({ page }) => {
@@ -161,9 +185,45 @@ test.describe("External trainer pilot readiness", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(researchUrl("/client/me?actor=maria-volkova", "client-execution"));
     await expectNoHorizontalOverflow(page);
+    await expectNoOverlap(
+      page.getByRole("complementary", { name: "Панель модератора" }),
+      page.getByRole("navigation", { name: "Кабинет клиента" })
+    );
     await openModeratorTools(page);
     await expect(page.getByText("trainer-core-pilot-v1", { exact: false })).toBeVisible();
     await expectNoHorizontalOverflow(page);
+    await expectNoOverlap(
+      page.getByRole("complementary", { name: "Панель модератора" }),
+      page.getByRole("navigation", { name: "Кабинет клиента" })
+    );
+  });
+
+  test("trainer client preview keeps role context and returns to the athlete profile", async ({ page }) => {
+    await page.goto("/trainer/clients/maria-volkova?from=dashboard&entry=map");
+    await page.getByRole("link", { name: "Открыть вид клиента" }).click();
+
+    await expect(page.getByRole("complementary", { name: "Режим предпросмотра клиента" })).toBeVisible();
+    await expect(page).toHaveURL(/\/client\/me\?.*actor=maria-volkova.*preview=trainer/);
+
+    await page.getByRole("link", { name: "Активность" }).click();
+    await expect(page).toHaveURL(/\/client\/activity\?.*actor=maria-volkova.*preview=trainer/);
+    await page.getByRole("link", { name: "Вернуться в кабинет тренера" }).click();
+    await expect(page).toHaveURL(/\/trainer\/clients\/maria-volkova\?from=dashboard&entry=map/);
+  });
+
+  test("regular client surface does not expose a trainer account switch", async ({ page }) => {
+    await page.goto("/client/me?actor=maria-volkova");
+    await expect(page.getByRole("complementary", { name: "Режим предпросмотра клиента" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Вернуться в кабинет тренера" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Тренер", exact: true })).toHaveCount(0);
+  });
+
+  test("demo trainer login opens the canonical trainer home", async ({ page }) => {
+    await page.goto("/login?role=trainer");
+    await page.getByLabel("Email").fill("admin");
+    await page.getByRole("textbox", { name: "Пароль", exact: true }).fill("0000");
+    await page.getByRole("button", { name: "Войти", exact: true }).click();
+    await expect(page).toHaveURL(/\/trainer\/dashboard$/);
   });
 });
 
@@ -182,9 +242,9 @@ async function openModeratorTools(page: Page) {
 function captureErrors(page: Page) {
   const errors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    if (message.type() === "error") errors.push(`${new URL(page.url()).pathname}: ${message.text()}`);
   });
-  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("pageerror", (error) => errors.push(`${new URL(page.url()).pathname}: ${error.message}`));
   return errors;
 }
 
@@ -199,4 +259,16 @@ function trackRemoteWrites(page: Page) {
 async function expectNoHorizontalOverflow(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+}
+
+async function expectNoOverlap(first: ReturnType<Page["getByRole"]>, second: ReturnType<Page["getByRole"]>) {
+  const [firstBox, secondBox] = await Promise.all([first.boundingBox(), second.boundingBox()]);
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  if (!firstBox || !secondBox) return;
+  const separated = firstBox.y + firstBox.height <= secondBox.y
+    || secondBox.y + secondBox.height <= firstBox.y
+    || firstBox.x + firstBox.width <= secondBox.x
+    || secondBox.x + secondBox.width <= firstBox.x;
+  expect(separated).toBe(true);
 }

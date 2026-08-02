@@ -64,7 +64,7 @@ export function TemplatesWorkspace({
           </div>
           <h2 className="mt-5 text-3xl font-semibold text-zinc-50">Создайте первый шаблон</h2>
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-zinc-500">
-            Шаблоны сохраняют структуру тренировки и используются повторно. Назначение спортсмену создаётся отдельно через Quick Assign.
+            Сохраните структуру тренировки один раз, чтобы затем быстро назначать её спортсменам.
           </p>
           <Button type="button" onClick={onCreate} className="mt-6 min-h-11 rounded-full bg-lime-300 px-5 text-black hover:bg-lime-200">
             <Plus className="size-4" />Создать первый шаблон
@@ -79,9 +79,9 @@ export function TemplatesWorkspace({
       <div className="mx-auto w-full max-w-[1440px]">
         <header className="flex flex-col gap-4 border-b border-zinc-800 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-medium uppercase text-lime-200/70">WorkoutTemplate workspace</p>
+            <p className="text-xs font-medium uppercase text-lime-200/70">Библиотека шаблонов</p>
             <h2 className="mt-2 text-3xl font-semibold text-zinc-50">Шаблоны тренировок</h2>
-            <p className="mt-2 max-w-2xl text-sm text-zinc-500">Создавайте переиспользуемые тренировки без привязки к Program или календарю.</p>
+            <p className="mt-2 max-w-2xl text-sm text-zinc-500">Создавайте тренировки, которые можно повторно назначать разным спортсменам.</p>
           </div>
           <Button type="button" onClick={onCreate} className="min-h-11 rounded-full bg-lime-300 px-5 text-black hover:bg-lime-200">
             <Plus className="size-4" />Новый шаблон
@@ -92,7 +92,7 @@ export function TemplatesWorkspace({
           <div className="mt-5 flex flex-col gap-3 rounded-lg border border-lime-300/20 bg-lime-300/[0.055] p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-medium uppercase text-lime-200/70">Контекст спортсмена сохранён</p>
-              <p className="mt-1 text-sm text-zinc-300">После публикации можно вернуться в Quick Assign для этого спортсмена.</p>
+              <p className="mt-1 text-sm text-zinc-300">После публикации можно сразу назначить тренировку этому спортсмену.</p>
             </div>
             <span className="text-xs text-zinc-500">Без автоматического назначения</span>
           </div>
@@ -102,7 +102,7 @@ export function TemplatesWorkspace({
           <div className="relative min-w-0">
             <Label htmlFor="template-search" className="sr-only">Поиск шаблонов</Label>
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-600" />
-            <Input id="template-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по названию, focus или категории" className="h-11 min-w-0 border-zinc-800 bg-zinc-950 pl-10 text-zinc-100" />
+            <Input id="template-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по названию, цели или категории" className="h-11 min-w-0 border-zinc-800 bg-zinc-950 pl-10 text-zinc-100" />
           </div>
           <div role="tablist" aria-label="Статус шаблона" className="flex gap-2 overflow-x-auto">
             {(["all", "draft", "published", "archived"] as TemplateFilter[]).map((value) => (
@@ -125,7 +125,7 @@ export function TemplatesWorkspace({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <TemplateStatusBadge status={summary.status} />
-                      <span className="text-xs text-zinc-600">revision {summary.revision}</span>
+                      <span className="text-xs text-zinc-600">версия {summary.revision}</span>
                     </div>
                     <h2 className="mt-3 line-clamp-2 text-xl font-semibold text-zinc-50">{summary.title || "Без названия"}</h2>
                   </div>
@@ -135,7 +135,7 @@ export function TemplatesWorkspace({
                 <dl className="mt-4 grid grid-cols-2 gap-2 text-sm">
                   <Metric label="Состав" value={`${summary.exerciseCount} упр.`} />
                   <Metric label="Время" value={`${summary.estimatedDurationMin} мин`} />
-                  <Metric label="Focus" value={summary.category || "Не задан"} />
+                  <Metric label="Цель" value={summary.category || "Не задана"} />
                   <Metric label="Использований" value={String(summary.usageCount)} />
                 </dl>
                 <p className="mt-3 text-xs text-zinc-600">Обновлён {summary.updatedLabel}</p>
@@ -145,7 +145,7 @@ export function TemplatesWorkspace({
                   </Button>
                   <Button type="button" size="icon-lg" variant="outline" onClick={() => onDuplicate(template)} aria-label={`Дублировать ${summary.title}`} title="Дублировать" className="rounded-full border-zinc-700 text-zinc-300"><Copy className="size-4" /></Button>
                   {summary.status !== "archived" ? (
-                    <Button type="button" size="icon-lg" variant="outline" onClick={() => onArchive(template)} aria-label={`Архивировать ${summary.title}`} title="Архивировать prototype" className="rounded-full border-zinc-700 text-zinc-400"><Archive className="size-4" /></Button>
+                    <Button type="button" size="icon-lg" variant="outline" onClick={() => onArchive(template)} aria-label={`Архивировать ${summary.title}`} title="Архивировать шаблон" className="rounded-full border-zinc-700 text-zinc-400"><Archive className="size-4" /></Button>
                   ) : <span className="size-9" />}
                 </div>
                 {athleteId && summary.status === "published" ? (
@@ -170,7 +170,7 @@ export function TemplatesWorkspace({
 }
 
 export function TemplateStatusBadge({ status }: { status: TemplateStatus }) {
-  return <span className={cn("rounded-full border px-2.5 py-1 text-xs font-medium", status === "published" ? "border-lime-300/25 bg-lime-300/10 text-lime-100" : status === "archived" ? "border-zinc-700 bg-zinc-900 text-zinc-500" : "border-amber-300/25 bg-amber-300/10 text-amber-100")}>{filterLabel(status)}</span>;
+  return <span className={cn("rounded-full border px-2.5 py-1 text-xs font-medium", status === "published" ? "border-lime-300/25 bg-lime-300/10 text-lime-100" : status === "archived" ? "border-zinc-700 bg-zinc-900 text-zinc-500" : "border-amber-300/25 bg-amber-300/10 text-amber-100")}>{statusLabel(status)}</span>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -179,7 +179,13 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function filterLabel(value: TemplateFilter) {
   if (value === "all") return "Все";
-  if (value === "draft") return "Draft";
-  if (value === "published") return "Published";
-  return "Archived";
+  if (value === "draft") return "Черновики";
+  if (value === "published") return "Опубликованные";
+  return "Архив";
+}
+
+function statusLabel(status: TemplateStatus) {
+  if (status === "draft") return "Черновик";
+  if (status === "published") return "Опубликован";
+  return "Архив";
 }

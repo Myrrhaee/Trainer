@@ -315,7 +315,7 @@ function SignupContent() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
             <Button asChild variant="outline" className="rounded-xl border-zinc-700 bg-zinc-950 text-zinc-100">
-              <Link href="/dashboard">Кабинет тренера</Link>
+              <Link href="/trainer/dashboard">Кабинет тренера</Link>
             </Button>
             <Button asChild className="rounded-xl bg-zinc-100 text-black hover:bg-white">
               <Link href="/login?role=client">Войти как клиент</Link>

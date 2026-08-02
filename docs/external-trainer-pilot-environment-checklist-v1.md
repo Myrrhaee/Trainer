@@ -4,7 +4,8 @@
 
 - [ ] Branch is `release/external-trainer-pilot-v1`.
 - [ ] Commit hash recorded: `________________`.
-- [ ] Build label is `trainer-core-pilot-v1`; Stage is `Stage 14`.
+- [ ] Annotated tag is `external-trainer-pilot-v1-rc1`.
+- [ ] Build label is `trainer-core-pilot-v1`; release candidate is `RC1`.
 - [ ] `npm run lint`, production build, and full Playwright suite pass.
 - [ ] No uncommitted or unexpected files are present.
 - [ ] No remote backend, API, Supabase, or PostgreSQL writes are enabled.
@@ -60,7 +61,9 @@
 
 ## Known Limitations Acknowledged
 
-- [ ] Full reload restores the fixture rather than durable in-progress state.
+- [ ] Demo state survives reload only through browser-local storage and is not a backend record.
+- [ ] Browser data clearing, another device, or another browser profile does not preserve progress.
+- [ ] Builder and Review drafts are local to the current browser session.
 - [ ] Actor switching is a research mechanism, not production authorization.
 - [ ] Receipts and feedback are local frontend simulation.
 - [ ] AI drafts are prototypes and not a quality or safety claim.

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -13,6 +13,7 @@ import {
   Dumbbell,
   ExternalLink,
   FileEdit,
+  Loader2,
   RotateCcw,
   Search,
   UserRound,
@@ -41,7 +42,9 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { getQuickAssignView } from "@/components/trainer-os/demo-runtime/selectors";
+import { TrainerClientPreviewLink } from "@/components/trainer-os/demo-runtime/trainer-client-preview-link";
 import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
+import type { RuntimeWorkoutAssignment } from "@/components/trainer-os/demo-runtime/types";
 import { cn } from "@/lib/utils";
 
 import {
@@ -110,6 +113,9 @@ export function QuickAssignDrawer({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [pendingBuilderHref, setPendingBuilderHref] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "failed">("idle");
+  const [wasAlreadyAssigned, setWasAlreadyAssigned] = useState(false);
+  const submitInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!open || !athleteId) return;
@@ -131,6 +137,9 @@ export function QuickAssignDrawer({
     setDiscardOpen(false);
     setPendingBuilderHref(null);
     setCommandError(null);
+    setSubmitStatus("idle");
+    setWasAlreadyAssigned(false);
+    submitInFlightRef.current = false;
   }
 
   const selectedTemplate = view?.templates.find((template) => template.id === draft.templateId) ?? null;
@@ -163,18 +172,24 @@ export function QuickAssignDrawer({
     : draft.scheduledDate < today
       ? "Нельзя назначить тренировку в прошлом."
       : null;
+  const exactAssignment = view?.recentAssignments.find(
+    (assignment) => assignment.scheduledDate === draft.scheduledDate && assignment.templateId === draft.templateId
+  );
   const conflictingAssignment = view?.recentAssignments.find(
-    (assignment) => assignment.scheduledDate === draft.scheduledDate
+    (assignment) => assignment.scheduledDate === draft.scheduledDate && assignment.id !== exactAssignment?.id
   );
   const submitDisabledReason = getSubmitDisabledReason(
     view,
     selectedTemplate,
     dateError,
+    Boolean(exactAssignment),
     Boolean(conflictingAssignment),
     draft.conflictAccepted
   );
+  const isSubmitting = submitStatus === "submitting";
 
   function requestClose() {
+    if (submitInFlightRef.current) return;
     if (receipt || !isDirty) {
       resetSession();
       onOpenChange(false);
@@ -206,17 +221,26 @@ export function QuickAssignDrawer({
     }));
   }
 
-  function submitAssignment() {
-    if (!view || !selectedTemplate || submitDisabledReason) return;
+  async function submitAssignment() {
+    if (!view || !selectedTemplate || submitDisabledReason || submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
+    setSubmitStatus("submitting");
+    setCommandError(null);
     const nextReceipt = createAssignmentReceipt(view, draft, selectedTemplate);
+    await wait(350);
     const result = runtime.commands.createWorkoutAssignment({ actor: runtime.actor, receipt: nextReceipt });
     if (!result.ok) {
       setCommandError(result.error.message);
+      setSubmitStatus("failed");
+      submitInFlightRef.current = false;
       return;
     }
-    setCommandError(null);
-    setReceipt(nextReceipt);
-    onAssigned?.(nextReceipt);
+    const confirmedReceipt = assignmentToReceipt(result.receipt.assignment, view.athlete.displayName);
+    setWasAlreadyAssigned(result.receipt.alreadyApplied);
+    setReceipt(confirmedReceipt);
+    setSubmitStatus("idle");
+    submitInFlightRef.current = false;
+    onAssigned?.(confirmedReceipt);
   }
 
   function openBuilder(href: string) {
@@ -249,6 +273,10 @@ export function QuickAssignDrawer({
           side="right"
           showCloseButton={false}
           onEscapeKeyDown={(event) => {
+            if (isSubmitting) {
+              event.preventDefault();
+              return;
+            }
             if (isDirty && !receipt) {
               event.preventDefault();
               setDiscardOpen(true);
@@ -269,6 +297,7 @@ export function QuickAssignDrawer({
                 size="icon-lg"
                 variant="ghost"
                 onClick={requestClose}
+                disabled={isSubmitting}
                 aria-label="Закрыть быстрое назначение"
                 className="shrink-0 rounded-full text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
               >
@@ -281,6 +310,7 @@ export function QuickAssignDrawer({
             <AssignmentConfirmation
               receipt={receipt}
               view={view}
+              wasAlreadyAssigned={wasAlreadyAssigned}
               onClose={() => {
                 resetSession();
                 onOpenChange(false);
@@ -293,7 +323,7 @@ export function QuickAssignDrawer({
             />
           ) : view ? (
             <>
-              <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 sm:px-5 sm:py-5">
+              <div aria-busy={isSubmitting} className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 transition-opacity sm:px-5 sm:py-5", isSubmitting && "pointer-events-none opacity-70")}>
                 <div className="mx-auto grid w-full min-w-0 max-w-[860px] gap-5">
                   <AthleteContext view={view} />
 
@@ -344,6 +374,7 @@ export function QuickAssignDrawer({
                         today={today}
                         draft={draft}
                         dateError={dateError}
+                        exactAssignment={exactAssignment}
                         conflictingAssignment={conflictingAssignment}
                         onChange={setDraft}
                       />
@@ -360,17 +391,22 @@ export function QuickAssignDrawer({
                 {view.constraints.assignmentAllowed ? (
                   <div className="mx-auto flex w-full max-w-[860px] flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p id="quick-assign-disabled-reason" aria-live="polite" className="text-xs text-zinc-500">
-                      {commandError ?? submitDisabledReason ?? "Будет создан snapshot назначения. Исходный шаблон не изменится."}
+                      {isSubmitting
+                        ? `Назначаем ${selectedTemplate?.title ?? "тренировку"} для ${view.athlete.displayName}…`
+                        : commandError ?? submitDisabledReason ?? (selectedTemplate
+                          ? `${selectedTemplate.title} · ${formatDate(draft.scheduledDate)} · ${view.athlete.displayName}`
+                          : "Выберите шаблон и дату.")}
                     </p>
                     <Button
                       type="button"
                       onClick={submitAssignment}
-                      disabled={Boolean(submitDisabledReason)}
+                      disabled={Boolean(submitDisabledReason) || isSubmitting}
+                      aria-busy={isSubmitting}
                       aria-describedby="quick-assign-disabled-reason"
                       className="min-h-11 w-full shrink-0 rounded-full bg-lime-300 px-5 text-black hover:bg-lime-200 sm:w-auto"
                     >
-                      <CheckCircle2 className="size-4" />
-                      Назначить тренировку
+                      {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+                      {isSubmitting ? "Назначаем…" : submitStatus === "failed" ? "Повторить назначение" : "Назначить тренировку"}
                     </Button>
                   </div>
                 ) : null}
@@ -464,7 +500,7 @@ function TemplateSelection({
         <Dumbbell className="mx-auto size-6 text-zinc-500" />
         <h3 className="mt-3 text-lg font-semibold text-zinc-50">Сохранённых шаблонов пока нет</h3>
         <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-zinc-500">
-          Quick Assign работает только с опубликованными WorkoutTemplate. Создайте и сохраните шаблон в конструкторе.
+          Чтобы назначить тренировку, сначала создайте и опубликуйте шаблон.
         </p>
         <Button type="button" onClick={() => onOpenBuilder(getBuilderHref(view))} className="mt-4 min-h-11 rounded-full bg-lime-300 px-4 text-black hover:bg-lime-200">
           <FileEdit className="size-4" />Создать шаблон
@@ -590,7 +626,7 @@ function SelectedTemplate({
     <section className="w-full min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/72 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs font-medium uppercase text-lime-200/70">Выбранный шаблон · rev {template.revision}</p>
+          <p className="text-xs font-medium uppercase text-lime-200/70">Выбранный шаблон</p>
           <h3 className="mt-1 text-xl font-semibold text-zinc-50">{template.title}</h3>
           <p className="mt-1 text-sm text-zinc-500">{template.focus.join(" · ")} · {template.durationMin} мин · {template.exercises.length} упражнений</p>
           <p className="mt-2 text-sm leading-relaxed text-zinc-300">{template.instruction}</p>
@@ -658,12 +694,14 @@ function AssignmentSchedule({
   today,
   draft,
   dateError,
+  exactAssignment,
   conflictingAssignment,
   onChange,
 }: {
   today: string;
   draft: WorkoutAssignmentDraft;
   dateError: string | null;
+  exactAssignment?: { title: string };
   conflictingAssignment?: { title: string };
   onChange: (value: WorkoutAssignmentDraft | ((current: WorkoutAssignmentDraft) => WorkoutAssignmentDraft)) => void;
 }) {
@@ -677,8 +715,24 @@ function AssignmentSchedule({
         <div className="grid min-w-0 gap-2">
           <Label htmlFor="quick-assign-date" className="text-sm text-zinc-300">Дата тренировки</Label>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={() => onChange((current) => ({ ...current, scheduledDate: today, conflictAccepted: false }))} className="min-h-11 flex-1 rounded-full border-zinc-700 text-zinc-200">Сегодня</Button>
-            <Button type="button" variant="outline" onClick={() => onChange((current) => ({ ...current, scheduledDate: addDays(today, 1), conflictAccepted: false }))} className="min-h-11 flex-1 rounded-full border-zinc-700 text-zinc-200">Завтра</Button>
+            <Button
+              type="button"
+              variant="outline"
+              aria-pressed={draft.scheduledDate === today}
+              onClick={() => onChange((current) => ({ ...current, scheduledDate: today, conflictAccepted: false }))}
+              className={cn("min-h-11 flex-1 rounded-full text-zinc-200", draft.scheduledDate === today ? "border-lime-300/40 bg-lime-300/10 text-lime-100" : "border-zinc-700")}
+            >
+              Сегодня
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              aria-pressed={draft.scheduledDate === addDays(today, 1)}
+              onClick={() => onChange((current) => ({ ...current, scheduledDate: addDays(today, 1), conflictAccepted: false }))}
+              className={cn("min-h-11 flex-1 rounded-full text-zinc-200", draft.scheduledDate === addDays(today, 1) ? "border-lime-300/40 bg-lime-300/10 text-lime-100" : "border-zinc-700")}
+            >
+              Завтра
+            </Button>
           </div>
           <Input
             id="quick-assign-date"
@@ -703,7 +757,17 @@ function AssignmentSchedule({
           </div>
         </div>
       </div>
-      {conflictingAssignment ? (
+      {exactAssignment ? (
+        <div role="alert" className="mt-4 rounded-lg border border-lime-300/20 bg-lime-300/[0.055] p-3">
+          <div className="flex items-start gap-2">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-lime-200" />
+            <div>
+              <p className="text-sm font-medium text-lime-100">{exactAssignment.title} уже назначена на эту дату</p>
+              <p className="mt-1 text-xs leading-relaxed text-lime-100/70">Повторная копия не будет создана. Выберите другой шаблон или дату.</p>
+            </div>
+          </div>
+        </div>
+      ) : conflictingAssignment ? (
         <div role="alert" className="mt-4 rounded-lg border border-amber-300/25 bg-amber-300/[0.07] p-3">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-200" />
@@ -742,12 +806,14 @@ function AssignmentPreview({ view, template, draft }: { view: QuickAssignView; t
 function AssignmentConfirmation({
   receipt,
   view,
+  wasAlreadyAssigned,
   onClose,
   onNext,
   onOpenAssignment,
 }: {
   receipt: AssignmentReceipt;
   view: QuickAssignView;
+  wasAlreadyAssigned: boolean;
   onClose: () => void;
   onNext?: () => void;
   onOpenAssignment?: () => void;
@@ -758,14 +824,14 @@ function AssignmentConfirmation({
         <div className="flex size-12 items-center justify-center rounded-full border border-lime-300/30 bg-lime-300/10 text-lime-200">
           <CheckCircle2 className="size-6" />
         </div>
-        <p className="mt-5 text-xs font-medium uppercase text-lime-200/70">Назначено</p>
+        <p className="mt-5 text-xs font-medium uppercase text-lime-200/70">{wasAlreadyAssigned ? "Уже было назначено" : "Назначено"}</p>
         <h2 className="mt-2 text-2xl font-semibold text-zinc-50">{receipt.templateTitle}</h2>
         <p className="mt-2 text-base text-zinc-300">{receipt.athleteName} · {formatDate(receipt.scheduledDate)}</p>
         <div className="mt-5 grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950/74 p-4 text-sm">
           <PreviewRow label="Упражнений" value={String(receipt.snapshotExercises.length)} />
           <PreviewRow label="Индивидуальных изменений" value={String(receipt.overrideCount)} />
-          <PreviewRow label="Версия шаблона" value={`rev ${receipt.sourceTemplateRevision}`} />
-          <PreviewRow label="Что дальше" value="Назначение уже доступно в профиле спортсмена и Dashboard." />
+          {wasAlreadyAssigned ? <PreviewRow label="Дубликат" value="Не создан" /> : null}
+          <PreviewRow label="Что дальше" value="Тренировка уже доступна в профиле спортсмена и на главной." />
         </div>
         <div className="mt-6 grid gap-2 sm:grid-cols-2">
           {onNext && (view.context.source === "dashboard" || view.context.source === "review") ? (
@@ -783,9 +849,9 @@ function AssignmentConfirmation({
             <Link href={`/trainer/clients/${view.athlete.id}`}>Открыть профиль</Link>
           </Button>
           <Button asChild type="button" variant="ghost" className="min-h-11 rounded-full text-zinc-300">
-            <Link href={`/client/me?actor=${encodeURIComponent(view.athlete.id)}`}>
+            <TrainerClientPreviewLink athleteId={view.athlete.id}>
               <ExternalLink className="size-4" />Открыть вид клиента
-            </Link>
+            </TrainerClientPreviewLink>
           </Button>
           {(view.context.source === "profile" || view.context.source === "review" || view.context.source === "direct") ? (
             <Button asChild type="button" variant="ghost" className="min-h-11 rounded-full text-zinc-400">
@@ -822,7 +888,7 @@ function UnknownAthleteState({ athleteId, onClose }: { athleteId: string | null;
         <AlertTriangle className="mx-auto size-7 text-orange-200" />
         <h2 className="mt-4 text-xl font-semibold text-zinc-50">Спортсмен не найден</h2>
         <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-          {athleteId ? "Этот ID отсутствует в доступной demo-модели. Чужие данные не подставлены." : "Для назначения нужен стабильный ID спортсмена."}
+          {athleteId ? "Проверьте спортсмена и повторите попытку. Данные другого человека не будут показаны." : "Сначала выберите спортсмена, которому нужна тренировка."}
         </p>
         <Button type="button" onClick={onClose} variant="outline" className="mt-5 min-h-11 rounded-full border-zinc-700 text-zinc-100">Закрыть</Button>
       </section>
@@ -852,12 +918,13 @@ function emptyDraft(athleteId: string | null, scheduledDate: string): WorkoutAss
   return { athleteId: athleteId ?? "", templateId: null, scheduledDate, trainerNote: "", generalInstruction: "", exerciseOverrides: {}, conflictAccepted: false };
 }
 
-function getSubmitDisabledReason(view: QuickAssignView | null, template: WorkoutTemplateListItem | null, dateError: string | null, hasConflict: boolean, conflictAccepted: boolean) {
+function getSubmitDisabledReason(view: QuickAssignView | null, template: WorkoutTemplateListItem | null, dateError: string | null, hasExactAssignment: boolean, hasConflict: boolean, conflictAccepted: boolean) {
   if (!view) return "Спортсмен не найден.";
   if (!view.constraints.assignmentAllowed) return view.constraints.reason ?? "Назначение недоступно.";
   if (!template) return "Сначала выберите опубликованный шаблон.";
   if (template.state !== "published") return "Черновики и архивные шаблоны назначать нельзя.";
   if (dateError) return dateError;
+  if (hasExactAssignment) return "Этот шаблон уже назначен спортсмену на выбранную дату.";
   if (hasConflict && !conflictAccepted) return "Подтвердите конфликт даты или выберите другую дату.";
   return null;
 }
@@ -901,4 +968,25 @@ function addDays(isoDate: string, offset: number) {
 function formatDate(isoDate: string) {
   const [year, month, day] = isoDate.split("-").map(Number);
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(new Date(year, month - 1, day));
+}
+
+function assignmentToReceipt(assignment: RuntimeWorkoutAssignment, athleteName: string): AssignmentReceipt {
+  return {
+    id: assignment.id,
+    athleteId: assignment.athleteId,
+    athleteName,
+    templateId: assignment.sourceTemplateId,
+    templateTitle: assignment.templateTitle,
+    scheduledDate: assignment.scheduledDate,
+    sourceTemplateRevision: assignment.sourceTemplateRevision,
+    snapshotExercises: assignment.snapshotExercises,
+    overrideCount: assignment.overrideCount,
+    trainerNote: assignment.trainerNote,
+    generalInstruction: assignment.generalInstruction,
+    createdContext: assignment.createdContext,
+  };
+}
+
+function wait(duration: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, duration));
 }

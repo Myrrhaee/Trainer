@@ -39,7 +39,7 @@ export function WorkoutReviewPage({ workoutId, entry }: { workoutId: string; ent
       workoutSessionId: reviewSessionId,
     });
   }, [reviewAthleteId, reviewAttentionItemId, reviewSessionId, runtime.commands]);
-  if (!review) return <UnknownWorkoutReview workoutId={workoutId} />;
+  if (!review) return <UnknownWorkoutReview />;
   return <KnownWorkoutReview review={review} entry={entry} />;
 }
 
@@ -74,7 +74,6 @@ function KnownWorkoutReview({ review, entry }: { review: WorkoutReviewDetails; e
                   <p className="text-xs text-zinc-500">
                     {sourceLabel[source]}
                     {queuePosition && queueTotal ? ` · задача ${queuePosition} из ${queueTotal}` : ""}
-                    {entry.attentionItem ? ` · ${entry.attentionItem}` : ""}
                   </p>
                   <h2 className="mt-1 truncate text-xl font-semibold text-zinc-50">{review.athlete.displayName}</h2>
                   <p className="mt-1 text-sm text-zinc-500">{review.sessionTitle} · {review.session.completedLabel}</p>
@@ -107,7 +106,7 @@ function KnownWorkoutReview({ review, entry }: { review: WorkoutReviewDetails; e
             </div>
 
             <aside className="xl:sticky xl:top-24">
-              <ReviewFeedbackPanel review={review} onResolved={(kind) => setReceipt(kind === "manual" ? "Задача закрыта без сообщения. Причина сохранена локально." : "Feedback сохранён, задача разбора закрыта.")} onAssign={() => setQuickAssignOpen(true)} />
+              <ReviewFeedbackPanel review={review} onResolved={(kind) => setReceipt(kind === "manual" ? "Задача закрыта без сообщения. Причина сохранена." : "Ответ отправлен, задача разбора закрыта.")} onAssign={() => setQuickAssignOpen(true)} />
               {receipt ? (
                 <div aria-live="polite" className="mt-3 rounded-lg border border-lime-300/20 bg-lime-300/[0.055] p-3 text-sm text-lime-100">
                   <p>{receipt}</p>
@@ -148,13 +147,13 @@ function KnownWorkoutReview({ review, entry }: { review: WorkoutReviewDetails; e
   );
 }
 
-function UnknownWorkoutReview({ workoutId }: { workoutId: string }) {
+function UnknownWorkoutReview() {
   return (
-    <TrainerShell eyebrow="Разбор тренировки" title="Сессия не найдена" description="Ссылка не соответствует доступной demo-сессии.">
+    <TrainerShell eyebrow="Разбор тренировки" title="Тренировка не найдена" description="Проверьте ссылку или вернитесь к очереди.">
       <main className="flex min-h-[76vh] items-center justify-center bg-black px-4 py-10 pb-28 text-zinc-100 lg:pb-10">
         <section className="w-full max-w-xl rounded-lg border border-zinc-800 bg-zinc-950/90 p-6 text-center">
-          <h1 className="text-2xl font-semibold text-zinc-50">Тренировка не найдена</h1>
-          <p className="mt-2 text-sm leading-relaxed text-zinc-500">Идентификатор <span className="font-mono text-zinc-400">{workoutId}</span> не был заменён данными другой сессии.</p>
+          <h2 className="text-2xl font-semibold text-zinc-50">Не удалось открыть тренировку</h2>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-500">Возможно, тренировка была удалена или ссылка устарела. Данные другого спортсмена не будут показаны.</p>
           <div className="mt-6 flex flex-wrap justify-center gap-2">
             <Button asChild className="rounded-full bg-lime-300 text-black hover:bg-lime-200"><Link href="/trainer/dashboard">На главную</Link></Button>
             <Button asChild variant="outline" className="rounded-full border-zinc-700 bg-black/20 text-zinc-100 hover:bg-zinc-900"><Link href="/trainer/clients">К спортсменам</Link></Button>

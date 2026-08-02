@@ -3,9 +3,11 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Dumbbell, Gauge, Home, LineChart, UserRoundCog } from "lucide-react";
+import { Activity, ArrowLeft, Dumbbell, Eye, Home, LineChart } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+
+import { useClientRuntimeNavigation } from "./client-runtime-navigation";
 
 const nav = [
   { href: "/client/me", label: "Главная", icon: Home },
@@ -24,7 +26,7 @@ type ClientRuntimeShellProps = {
 
 export function ClientRuntimeShell({ actorId, actorName, title, description, children }: ClientRuntimeShellProps) {
   const pathname = usePathname();
-  const actorQuery = `actor=${encodeURIComponent(actorId)}`;
+  const navigation = useClientRuntimeNavigation(actorId);
 
   return (
     <div className="min-h-dvh bg-black text-zinc-100">
@@ -37,7 +39,7 @@ export function ClientRuntimeShell({ actorId, actorName, title, description, chi
             {nav.map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
-                href={`${href}?${actorQuery}`}
+                href={navigation.href(href)}
                 aria-label={label}
                 title={label}
                 className={cn(
@@ -64,20 +66,30 @@ export function ClientRuntimeShell({ actorId, actorName, title, description, chi
               <div className="hidden items-center gap-3 sm:flex">
                 <div className="text-right">
                   <p className="text-sm font-medium text-zinc-100">{actorName}</p>
-                  <p className="text-xs text-zinc-500">Demo actor · {actorId}</p>
+                  <p className="text-xs text-zinc-500">Кабинет спортсмена</p>
                 </div>
-                <Link
-                  href="/trainer/dashboard"
-                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-300 hover:bg-zinc-900"
-                >
-                  <UserRoundCog className="h-4 w-4" aria-hidden="true" />
-                  Вид тренера
-                </Link>
               </div>
             </div>
           </header>
 
-          <main className="px-4 py-5 lg:px-6 lg:py-6">{children}</main>
+          <main className="px-4 py-5 lg:px-6 lg:py-6">
+            {navigation.isTrainerPreview ? (
+              <aside className="mb-5 flex flex-col gap-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-4 text-cyan-50 sm:flex-row sm:items-center sm:justify-between" aria-label="Режим предпросмотра клиента">
+                <div className="flex min-w-0 items-start gap-3">
+                  <Eye className="mt-0.5 h-5 w-5 shrink-0 text-cyan-200" aria-hidden="true" />
+                  <div>
+                    <p className="font-medium">Предпросмотр кабинета клиента</p>
+                    <p className="mt-1 text-sm text-cyan-100/65">Вы остаётесь в роли тренера. Это только предпросмотр кабинета спортсмена.</p>
+                  </div>
+                </div>
+                <Link href={navigation.returnTo} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-200/20 px-3 text-sm font-medium text-cyan-50 transition hover:bg-cyan-200/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/70">
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  Вернуться в кабинет тренера
+                </Link>
+              </aside>
+            ) : null}
+            {children}
+          </main>
         </div>
       </div>
 
@@ -86,17 +98,13 @@ export function ClientRuntimeShell({ actorId, actorName, title, description, chi
           {nav.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
-              href={`${href}?${actorQuery}`}
+              href={navigation.href(href)}
               className={cn("flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-2 text-[11px]", pathname === href ? "text-lime-100" : "text-zinc-500")}
             >
               <Icon className="h-5 w-5" aria-hidden="true" />
               <span className="truncate">{label}</span>
             </Link>
           ))}
-          <Link href="/trainer/dashboard" className="flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-2 text-[11px] text-zinc-500">
-            <Gauge className="h-5 w-5" aria-hidden="true" />
-            <span className="truncate">Тренер</span>
-          </Link>
         </div>
       </nav>
     </div>

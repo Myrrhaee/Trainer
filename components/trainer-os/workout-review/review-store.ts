@@ -19,7 +19,6 @@ export type ReviewWorkflowState = {
   resolution?: ReviewResolution;
   saveStatus: "idle" | "saving" | "failed";
   saveError?: string;
-  attempts: number;
   aiStatus: "idle" | "generating" | "ready" | "unavailable" | "failed";
 };
 
@@ -44,7 +43,6 @@ function initialState(review: WorkoutReviewDetails): ReviewWorkflowState {
       ? { kind: "feedback", feedbackId: existing[0].id, resolvedAt: existing[0].sentAt }
       : undefined,
     saveStatus: "idle",
-    attempts: 0,
     aiStatus: review.feedback.aiState === "unavailable" || review.feedback.aiState === "no-context" ? "unavailable" : review.feedback.aiState === "failed" ? "failed" : "idle",
   };
 }
@@ -108,19 +106,15 @@ export function useReviewWorkflow(review: WorkoutReviewDetails) {
     send: async (kind: ReviewFeedbackMode | "follow-up") => {
       const before = ensureState(review);
       if (!before.draft.trim() || before.saveStatus === "saving") return false;
+      const submittedDraft = before.draft.trim();
       update(sessionId, (current) => ({ ...current, saveStatus: "saving", saveError: undefined }));
       await wait(500);
-
-      if (review.feedback.demoSendBehavior === "fail-once" && before.attempts === 0) {
-        update(sessionId, (current) => ({ ...current, attempts: current.attempts + 1, saveStatus: "failed", saveError: "Demo-сохранение не удалось. Черновик сохранён, задача остаётся открытой." }));
-        return false;
-      }
 
       const sentAt = formatTimestamp(new Date());
       const record: TrainerFeedbackRecord = {
         id: `feedback-${sessionId}-${Date.now()}`,
         kind,
-        body: before.draft.trim(),
+        body: submittedDraft,
         author: "Алексей Романов",
         sentAt,
       };
@@ -143,7 +137,6 @@ export function useReviewWorkflow(review: WorkoutReviewDetails) {
       if (!result.ok) {
         update(sessionId, (current) => ({
           ...current,
-          attempts: current.attempts + 1,
           saveStatus: "failed",
           saveError: result.error.message,
         }));
@@ -151,8 +144,7 @@ export function useReviewWorkflow(review: WorkoutReviewDetails) {
       }
       update(sessionId, (current) => ({
         ...current,
-        attempts: current.attempts + 1,
-        draft: "",
+        draft: current.draft.trim() === submittedDraft ? "" : current.draft,
         feedback: [...current.feedback, record],
         resolution: current.resolution ?? { kind: "feedback", feedbackId: record.id, resolvedAt: sentAt },
         saveStatus: "idle",
@@ -188,7 +180,8 @@ export function useReviewWorkflow(review: WorkoutReviewDetails) {
 
 function persistState(sessionId: string, state: ReviewWorkflowState) {
   try {
-    window.sessionStorage.setItem(`workout-review:${sessionId}`, JSON.stringify(state));
+    const persisted = state.saveStatus === "saving" ? { ...state, saveStatus: "idle" as const } : state;
+    window.sessionStorage.setItem(`workout-review:${sessionId}`, JSON.stringify(persisted));
   } catch {
     // The in-memory store remains functional when browser storage is unavailable.
   }

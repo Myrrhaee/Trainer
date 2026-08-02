@@ -14,7 +14,7 @@ export function ClientRuntimeProgress({ actorId }: { actorId: string }) {
   if (!actor || !progress) return <SafeState />;
 
   return (
-    <ClientRuntimeShell actorId={actorId} actorName={actor.displayName} title="Прогресс" description="Только показатели, рассчитанные из сохранённых WorkoutSession и SetLog.">
+    <ClientRuntimeShell actorId={actorId} actorName={actor.displayName} title="Прогресс" description="Динамика по сохранённым тренировкам и подходам.">
       <div className="grid gap-4 sm:grid-cols-3">
         <Metric icon={Dumbbell} label="Завершено" value={String(progress.completedWorkoutCount)} />
         <Metric icon={Sparkles} label="Регулярность" value={`${progress.consistency}%`} />

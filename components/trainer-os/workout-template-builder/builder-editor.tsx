@@ -14,6 +14,7 @@ import {
   GripVertical,
   Layers3,
   Library,
+  Loader2,
   Menu,
   PanelRight,
   Plus,
@@ -70,6 +71,7 @@ export function BuilderEditor({
   athleteId,
   dirty,
   validation,
+  commandState,
   selectedExerciseId,
   onDraftChange,
   onSelectedExerciseChange,
@@ -87,6 +89,7 @@ export function BuilderEditor({
   athleteId?: string;
   dirty: boolean;
   validation: TemplateValidationResult;
+  commandState: { status: "idle" | "running" | "failed"; kind?: "save" | "publish" | "publish-and-assign" | "revision" };
   selectedExerciseId: string | null;
   onDraftChange: (draft: WorkoutTemplateDraft) => void;
   onSelectedExerciseChange: (id: string | null) => void;
@@ -100,6 +103,7 @@ export function BuilderEditor({
   onSaveAndAssign: () => void;
 }) {
   const locked = draft.status !== "draft";
+  const busy = commandState.status === "running";
   const selectedExercise = selectedExerciseId ? findExerciseInstance(draft, selectedExerciseId) : null;
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -225,25 +229,25 @@ export function BuilderEditor({
 
   return (
     <main className="min-h-screen bg-black pb-28 text-zinc-100 lg:pb-8">
-      <header className="sticky top-0 z-30 border-b border-zinc-800 bg-black/94 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
+      <header className="z-30 border-b border-zinc-800 bg-black/94 px-4 py-3 backdrop-blur-xl sm:px-6 lg:sticky lg:top-[112px] lg:px-8">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <Button type="button" size="icon-lg" variant="ghost" onClick={onBack} aria-label="Вернуться к шаблонам" className="shrink-0 rounded-full text-zinc-400"><ArrowLeft className="size-5" /></Button>
+            <Button type="button" size="icon-lg" variant="ghost" onClick={onBack} disabled={busy} aria-label="Вернуться к шаблонам" className="shrink-0 rounded-full text-zinc-400"><ArrowLeft className="size-5" /></Button>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2"><TemplateStatusBadge status={draft.status} /><span className="text-xs text-zinc-600">revision {draft.revision}</span>{dirty ? <span className="inline-flex items-center gap-1 text-xs text-amber-200"><span className="size-1.5 rounded-full bg-amber-300" />Есть изменения</span> : <span className="inline-flex items-center gap-1 text-xs text-zinc-600"><Check className="size-3" />Сохранено</span>}</div>
+              <div className="flex flex-wrap items-center gap-2"><TemplateStatusBadge status={draft.status} /><span className="text-xs text-zinc-600">версия {draft.revision}</span>{busy ? <span role="status" className="inline-flex items-center gap-1.5 text-xs text-lime-200"><Loader2 className="size-3 animate-spin" />{builderCommandLabel(commandState.kind)}</span> : dirty ? <span className="inline-flex items-center gap-1 text-xs text-amber-200"><span className="size-1.5 rounded-full bg-amber-300" />Есть несохранённые изменения</span> : <span className="inline-flex items-center gap-1 text-xs text-zinc-600"><Check className="size-3" />Сохранено</span>}</div>
               <Input id="template-title" aria-label="Название шаблона" value={draft.title} disabled={locked} onChange={(event) => onDraftChange({ ...draft, title: event.target.value })} className="mt-1 h-9 max-w-xl border-0 bg-transparent px-0 text-xl font-semibold text-zinc-50 shadow-none focus-visible:ring-0 disabled:opacity-100" />
             </div>
           </div>
-          <div className="flex min-w-0 gap-2 overflow-x-auto pb-1 xl:justify-end xl:pb-0">
-            <Button type="button" variant="outline" onClick={onPreview} className="min-h-11 shrink-0 rounded-full border-zinc-700 text-zinc-200"><Eye className="size-4" />Preview</Button>
-            <Button type="button" variant="outline" onClick={onDuplicateTemplate} className="min-h-11 shrink-0 rounded-full border-zinc-700 text-zinc-200"><Copy className="size-4" />Дублировать</Button>
-            {draft.status === "draft" ? <><Button type="button" variant="outline" onClick={onSaveDraft} className="min-h-11 shrink-0 rounded-full border-zinc-700 text-zinc-100"><Save className="size-4" />Сохранить черновик</Button><Button type="button" onClick={onPublish} className="min-h-11 shrink-0 rounded-full bg-lime-300 px-4 text-black hover:bg-lime-200"><Send className="size-4" />Опубликовать</Button>{athleteId ? <Button type="button" variant="outline" onClick={onSaveAndAssign} className="min-h-11 shrink-0 rounded-full border-lime-300/35 text-lime-100"><Dumbbell className="size-4" />Сохранить и назначить</Button> : null}</> : draft.status === "published" ? <><Button type="button" onClick={onCreateRevision} className="min-h-11 shrink-0 rounded-full bg-lime-300 px-4 text-black hover:bg-lime-200"><FileRevisionIcon />Создать новую версию</Button>{athleteId ? <Button type="button" variant="outline" onClick={onAssign} className="min-h-11 shrink-0 rounded-full border-lime-300/30 text-lime-100"><Dumbbell className="size-4" />Назначить</Button> : null}</> : null}
+          <div className="flex min-w-0 flex-wrap gap-2 pb-1 [&>button]:min-w-[calc(50%-0.25rem)] [&>button]:flex-1 xl:flex-nowrap xl:justify-end xl:pb-0 xl:[&>button]:min-w-0 xl:[&>button]:flex-none">
+            <Button type="button" variant="outline" onClick={onPreview} disabled={busy} className="min-h-11 shrink-0 rounded-full border-zinc-700 text-zinc-200"><Eye className="size-4" />Предпросмотр</Button>
+            <Button type="button" variant="outline" onClick={onDuplicateTemplate} disabled={busy} className="min-h-11 shrink-0 rounded-full border-zinc-700 text-zinc-200"><Copy className="size-4" />Дублировать</Button>
+            {draft.status === "draft" ? <><Button type="button" variant="outline" onClick={onSaveDraft} disabled={busy || !dirty} className="min-h-11 shrink-0 rounded-full border-zinc-700 text-zinc-100">{busy && commandState.kind === "save" ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}{busy && commandState.kind === "save" ? "Сохраняем…" : "Сохранить черновик"}</Button><Button type="button" onClick={onPublish} disabled={busy} className="min-h-11 shrink-0 rounded-full bg-lime-300 px-4 text-black hover:bg-lime-200">{busy && commandState.kind === "publish" ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}{busy && commandState.kind === "publish" ? "Публикуем…" : "Опубликовать"}</Button>{athleteId ? <Button type="button" variant="outline" onClick={onSaveAndAssign} disabled={busy} className="min-h-11 shrink-0 rounded-full border-lime-300/35 text-lime-100">{busy && commandState.kind === "publish-and-assign" ? <Loader2 className="size-4 animate-spin" /> : <Dumbbell className="size-4" />}{busy && commandState.kind === "publish-and-assign" ? "Публикуем…" : "Опубликовать и назначить"}</Button> : null}</> : draft.status === "published" ? <><Button type="button" onClick={onCreateRevision} disabled={busy} className="min-h-11 shrink-0 rounded-full bg-lime-300 px-4 text-black hover:bg-lime-200">{busy && commandState.kind === "revision" ? <Loader2 className="size-4 animate-spin" /> : <FileRevisionIcon />}{busy && commandState.kind === "revision" ? "Создаём…" : "Создать новую версию"}</Button>{athleteId ? <Button type="button" variant="outline" onClick={onAssign} disabled={busy} className="min-h-11 shrink-0 rounded-full border-lime-300/30 text-lime-100"><Dumbbell className="size-4" />Назначить</Button> : null}</> : null}
           </div>
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-[1600px] gap-4 px-4 py-4 sm:px-6 lg:px-8 xl:grid-cols-[320px_minmax(420px,1fr)_360px] xl:items-start">
-        <aside aria-label="Библиотека упражнений" className="hidden min-w-0 xl:sticky xl:top-[104px] xl:block xl:max-h-[calc(100vh-120px)] xl:overflow-y-auto">{locked ? <LockedPanel text="Published revision неизменяема. Создайте новую версию, чтобы добавить упражнение." /> : library}</aside>
+      <div aria-busy={busy} className={cn("mx-auto grid w-full max-w-[1600px] gap-4 px-4 py-4 transition-opacity sm:px-6 lg:px-8 xl:grid-cols-[320px_minmax(420px,1fr)_360px] xl:items-start", busy && "pointer-events-none opacity-70")}>
+        <aside aria-label="Библиотека упражнений" className="hidden min-w-0 xl:sticky xl:top-[104px] xl:block xl:max-h-[calc(100vh-120px)] xl:overflow-y-auto">{locked ? <LockedPanel text="Опубликованный шаблон нельзя изменить. Создайте новую версию, чтобы добавить упражнение." /> : library}</aside>
 
         <section className="min-w-0">
           <div className="mb-4 flex gap-2 xl:hidden">
@@ -251,7 +255,7 @@ export function BuilderEditor({
             <Button type="button" variant="outline" onClick={() => setInspectorOpen(true)} disabled={!selectedExercise} className="min-h-11 flex-1 rounded-full border-zinc-700 text-zinc-200"><PanelRight className="size-4" />Настройки</Button>
           </div>
 
-          {athleteId ? <div className="mb-4 rounded-lg border border-lime-300/20 bg-lime-300/[0.055] px-4 py-3"><p className="text-xs font-medium uppercase text-lime-200/70">Контекст спортсмена сохранён</p><p className="mt-1 text-sm text-zinc-400">После публикации назначение продолжится в Quick Assign без прямого создания Assignment.</p></div> : null}
+          {athleteId ? <div className="mb-4 rounded-lg border border-lime-300/20 bg-lime-300/[0.055] px-4 py-3"><p className="text-xs font-medium uppercase text-lime-200/70">Спортсмен выбран</p><p className="mt-1 text-sm text-zinc-400">После публикации вы сможете сразу назначить эту тренировку.</p></div> : null}
 
           <GeneralSettings draft={draft} locked={locked} onChange={onDraftChange} />
 
@@ -259,7 +263,7 @@ export function BuilderEditor({
 
           <section id="workout-canvas" aria-labelledby="workout-canvas-heading" className="mt-4 min-w-0">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div><p className="text-xs font-medium uppercase text-lime-200/70">Workout Canvas</p><h2 id="workout-canvas-heading" className="mt-1 text-2xl font-semibold text-zinc-50">Структура тренировки</h2><p className="mt-1 text-sm text-zinc-500">{getTemplateExercises(draft).length} упражнений · {draft.items.length} блоков</p></div>
+              <div><p className="text-xs font-medium uppercase text-lime-200/70">Порядок упражнений</p><h2 id="workout-canvas-heading" className="mt-1 text-2xl font-semibold text-zinc-50">Структура тренировки</h2><p className="mt-1 text-sm text-zinc-500">{getTemplateExercises(draft).length} упражнений · {draft.items.length} блоков</p></div>
               {!locked && selectedForSuperset.size ? <Button type="button" onClick={createSuperset} disabled={selectedForSuperset.size < 2 || selectedForSuperset.size > 4} className="min-h-11 rounded-full bg-lime-300 text-black hover:bg-lime-200"><Layers3 className="size-4" />Объединить ({selectedForSuperset.size})</Button> : null}
             </div>
 
@@ -272,7 +276,7 @@ export function BuilderEditor({
                 ))}
               </ol>
             ) : (
-              <div className="mt-4 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/45 px-6 py-12 text-center"><Dumbbell className="mx-auto size-7 text-zinc-600" /><h3 className="mt-4 text-lg font-semibold text-zinc-100">Canvas пока пуст</h3><p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">Откройте библиотеку и добавьте первое упражнение. Draft можно сохранить и без упражнений.</p>{!locked ? <Button type="button" onClick={() => setLibraryOpen(true)} className="mt-5 min-h-11 rounded-full bg-lime-300 text-black hover:bg-lime-200 xl:hidden"><Plus className="size-4" />Добавить упражнение</Button> : null}</div>
+              <div className="mt-4 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/45 px-6 py-12 text-center"><Dumbbell className="mx-auto size-7 text-zinc-600" /><h3 className="mt-4 text-lg font-semibold text-zinc-100">Добавьте первое упражнение</h3><p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">Выберите упражнение в библиотеке. Черновик можно сохранить и с пустой структурой.</p>{!locked ? <Button type="button" onClick={() => setLibraryOpen(true)} className="mt-5 min-h-11 rounded-full bg-lime-300 text-black hover:bg-lime-200 xl:hidden"><Plus className="size-4" />Добавить упражнение</Button> : null}</div>
             )}
           </section>
         </section>
@@ -280,14 +284,14 @@ export function BuilderEditor({
         <aside aria-label="Инспектор упражнения" className="hidden min-w-0 xl:sticky xl:top-[104px] xl:block xl:max-h-[calc(100vh-120px)] xl:overflow-y-auto"><ExerciseInspector exercise={selectedExercise} locked={locked} onChange={updateExercise} /></aside>
       </div>
 
-      <Sheet open={libraryOpen} onOpenChange={setLibraryOpen}><SheetContent side="right" className="!w-[calc(100vw-8px)] !max-w-[720px] overflow-y-auto border-zinc-800 bg-black p-3 text-zinc-100 sm:!max-w-[720px]"><SheetHeader className="pr-10"><SheetTitle className="text-zinc-50">Библиотека упражнений</SheetTitle><SheetDescription className="text-zinc-500">Добавьте упражнение кнопкой, drag не обязателен.</SheetDescription></SheetHeader>{library}</SheetContent></Sheet>
-      <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}><SheetContent side="right" className="!w-[calc(100vw-8px)] !max-w-[640px] overflow-y-auto border-zinc-800 bg-black p-3 text-zinc-100 sm:!max-w-[640px]"><SheetHeader className="pr-10"><SheetTitle className="text-zinc-50">Настройки упражнения</SheetTitle><SheetDescription className="text-zinc-500">Prescription и индивидуальные подходы.</SheetDescription></SheetHeader><ExerciseInspector exercise={selectedExercise} locked={locked} onChange={updateExercise} /></SheetContent></Sheet>
+      <Sheet open={libraryOpen} onOpenChange={setLibraryOpen}><SheetContent side="right" className="!w-[calc(100vw-8px)] !max-w-[720px] overflow-y-auto border-zinc-800 bg-black p-3 text-zinc-100 sm:!max-w-[720px]"><SheetHeader className="pr-10"><SheetTitle className="text-zinc-50">Библиотека упражнений</SheetTitle><SheetDescription className="text-zinc-500">Найдите упражнение и добавьте его в тренировку.</SheetDescription></SheetHeader>{library}</SheetContent></Sheet>
+      <Sheet open={inspectorOpen} onOpenChange={setInspectorOpen}><SheetContent side="right" className="!w-[calc(100vw-8px)] !max-w-[640px] overflow-y-auto border-zinc-800 bg-black p-3 text-zinc-100 sm:!max-w-[640px]"><SheetHeader className="pr-10"><SheetTitle className="text-zinc-50">Настройки упражнения</SheetTitle><SheetDescription className="text-zinc-500">Настройте подходы, повторения, вес и заметку спортсмену.</SheetDescription></SheetHeader><ExerciseInspector exercise={selectedExercise} locked={locked} onChange={updateExercise} /></SheetContent></Sheet>
       <ExerciseDetailSheet exercise={selectedLibraryExercise} onClose={() => setSelectedLibraryExercise(null)} />
 
       <Dialog open={Boolean(confirm)} onOpenChange={(open) => !open && setConfirm(null)}>
         <DialogContent className="max-w-[calc(100vw-32px)] border-zinc-800 bg-zinc-950 sm:max-w-md">
-          <DialogHeader><DialogTitle>{confirm?.kind === "remove" ? "Удалить упражнение?" : "Добавить ещё один instance?"}</DialogTitle><DialogDescription className="text-zinc-400">{confirm?.kind === "remove" ? "Упражнение исчезнет из этого draft. Исходная библиотека не изменится." : "Одинаковые упражнения допустимы для разных техник, но останутся отдельными instances."}</DialogDescription></DialogHeader>
-          <DialogFooter className="flex-col-reverse sm:flex-row"><Button type="button" variant="outline" onClick={() => setConfirm(null)} className="min-h-11 rounded-full border-zinc-700 text-zinc-100">Отмена</Button><Button type="button" onClick={() => { if (confirm?.kind === "remove") removeExercise(confirm.exercise); if (confirm?.kind === "duplicate") duplicateExercise(confirm.exercise); if (confirm?.kind === "add-duplicate") addExercise(confirm.exercise, true); setConfirm(null); }} className={cn("min-h-11 rounded-full", confirm?.kind === "remove" ? "bg-rose-300 text-black hover:bg-rose-200" : "bg-lime-300 text-black hover:bg-lime-200")}>{confirm?.kind === "remove" ? "Удалить" : "Добавить instance"}</Button></DialogFooter>
+          <DialogHeader><DialogTitle>{confirm?.kind === "remove" ? "Удалить упражнение?" : "Добавить ещё одну копию?"}</DialogTitle><DialogDescription className="text-zinc-400">{confirm?.kind === "remove" ? "Упражнение исчезнет из черновика, но останется в библиотеке." : "Можно добавить одно упражнение несколько раз и настроить каждую копию отдельно."}</DialogDescription></DialogHeader>
+          <DialogFooter className="flex-col-reverse sm:flex-row"><Button type="button" variant="outline" onClick={() => setConfirm(null)} className="min-h-11 rounded-full border-zinc-700 text-zinc-100">Отмена</Button><Button type="button" onClick={() => { if (confirm?.kind === "remove") removeExercise(confirm.exercise); if (confirm?.kind === "duplicate") duplicateExercise(confirm.exercise); if (confirm?.kind === "add-duplicate") addExercise(confirm.exercise, true); setConfirm(null); }} className={cn("min-h-11 rounded-full", confirm?.kind === "remove" ? "bg-rose-300 text-black hover:bg-rose-200" : "bg-lime-300 text-black hover:bg-lime-200")}>{confirm?.kind === "remove" ? "Удалить" : "Добавить копию"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </main>
@@ -295,7 +299,7 @@ export function BuilderEditor({
 }
 
 function GeneralSettings({ draft, locked, onChange }: { draft: WorkoutTemplateDraft; locked: boolean; onChange: (draft: WorkoutTemplateDraft) => void }) {
-  return <section aria-labelledby="general-settings-heading" className="rounded-lg border border-zinc-800 bg-zinc-950/72 p-4"><div><p className="text-xs font-medium uppercase text-zinc-500">Общие настройки</p><h2 id="general-settings-heading" className="mt-1 text-lg font-semibold text-zinc-100">Описание шаблона</h2></div><fieldset disabled={locked} className="mt-4 grid min-w-0 gap-3 disabled:opacity-70"><div className="grid min-w-0 gap-3 sm:grid-cols-[1fr_180px]"><div><Label htmlFor="template-description" className="text-sm text-zinc-300">Короткое описание</Label><Input id="template-description" value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} placeholder="Для чего подходит эта тренировка" className="mt-2 h-11 min-w-0 border-zinc-800 bg-black/30 text-zinc-100" /></div><div><Label htmlFor="template-category-field" className="text-sm text-zinc-300">Focus / категория</Label><Input id="template-category-field" value={draft.category} onChange={(event) => onChange({ ...draft, category: event.target.value })} placeholder="Сила" className="mt-2 h-11 border-zinc-800 bg-black/30 text-zinc-100" /></div></div><div className="grid min-w-0 gap-3 sm:grid-cols-[140px_1fr]"><div><Label htmlFor="template-duration" className="text-sm text-zinc-300">Время, мин</Label><Input id="template-duration" type="number" min="1" value={draft.estimatedDurationMin} onChange={(event) => onChange({ ...draft, estimatedDurationMin: event.target.value })} className="mt-2 h-11 border-zinc-800 bg-black/30 text-zinc-100" /></div><div><Label htmlFor="template-instruction" className="text-sm text-zinc-300">Общая инструкция</Label><Textarea id="template-instruction" value={draft.generalInstruction} onChange={(event) => onChange({ ...draft, generalInstruction: event.target.value })} placeholder="Что спортсмен должен учитывать в этой тренировке" className="mt-2 min-h-20 border-zinc-800 bg-black/30 text-zinc-100" /></div></div></fieldset>{locked ? <p className="mt-3 text-xs text-zinc-500">Published/archived revision открыта только для чтения.</p> : null}</section>;
+  return <section aria-labelledby="general-settings-heading" className="rounded-lg border border-zinc-800 bg-zinc-950/72 p-4"><div><p className="text-xs font-medium uppercase text-zinc-500">Общие настройки</p><h2 id="general-settings-heading" className="mt-1 text-lg font-semibold text-zinc-100">Описание шаблона</h2></div><fieldset disabled={locked} className="mt-4 grid min-w-0 gap-3 disabled:opacity-70"><div className="grid min-w-0 gap-3 sm:grid-cols-[1fr_180px]"><div><Label htmlFor="template-description" className="text-sm text-zinc-300">Короткое описание</Label><Input id="template-description" value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} placeholder="Для чего подходит эта тренировка" className="mt-2 h-11 min-w-0 border-zinc-800 bg-black/30 text-zinc-100" /></div><div><Label htmlFor="template-category-field" className="text-sm text-zinc-300">Цель / категория</Label><Input id="template-category-field" value={draft.category} onChange={(event) => onChange({ ...draft, category: event.target.value })} placeholder="Сила" className="mt-2 h-11 border-zinc-800 bg-black/30 text-zinc-100" /></div></div><div className="grid min-w-0 gap-3 sm:grid-cols-[140px_1fr]"><div><Label htmlFor="template-duration" className="text-sm text-zinc-300">Время, мин</Label><Input id="template-duration" type="number" min="1" value={draft.estimatedDurationMin} onChange={(event) => onChange({ ...draft, estimatedDurationMin: event.target.value })} className="mt-2 h-11 border-zinc-800 bg-black/30 text-zinc-100" /></div><div><Label htmlFor="template-instruction" className="text-sm text-zinc-300">Общая инструкция</Label><Textarea id="template-instruction" value={draft.generalInstruction} onChange={(event) => onChange({ ...draft, generalInstruction: event.target.value })} placeholder="Что спортсмен должен учитывать в этой тренировке" className="mt-2 min-h-20 border-zinc-800 bg-black/30 text-zinc-100" /></div></div></fieldset>{locked ? <p className="mt-3 text-xs text-zinc-500">Опубликованный или архивный шаблон открыт только для чтения.</p> : null}</section>;
 }
 
 function ExerciseCanvasCard({ exercise, order, selected, checked, locked, canMoveUp, canMoveDown, onSelect, onCheck, onMove, onDuplicate, onRemove }: { exercise: WorkoutTemplateExerciseDraft; order: number; selected: boolean; checked: boolean; locked: boolean; canMoveUp: boolean; canMoveDown: boolean; onSelect: () => void; onCheck: (checked: boolean) => void; onMove: (direction: -1 | 1) => void; onDuplicate: () => void; onRemove: () => void }) {
@@ -329,4 +333,11 @@ function copyExercise(source: WorkoutTemplateExerciseDraft) {
 
 function FileRevisionIcon() {
   return <Menu className="size-4" />;
+}
+
+function builderCommandLabel(kind?: "save" | "publish" | "publish-and-assign" | "revision") {
+  if (kind === "save") return "Сохраняем черновик…";
+  if (kind === "publish-and-assign") return "Публикуем перед назначением…";
+  if (kind === "publish") return "Публикуем версию…";
+  return "Создаём новую версию…";
 }

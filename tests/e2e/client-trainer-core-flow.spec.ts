@@ -10,7 +10,7 @@ test.describe("Client-trainer shared runtime", () => {
     await page.getByRole("button", { name: "Подтвердить завершение" }).click();
     await expect(page.getByText("Завершена", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("link", { name: "Вид тренера" }).click();
+    await page.getByRole("link", { name: "Вернуться в кабинет тренера" }).click();
     await openQueueReview(page, "Мария Волкова");
     await expect(page.getByRole("region", { name: "Силовая база" })).toContainText("12 / 12");
     const feedback = "Отличная ровная работа. Сохраняем текущий темп и технику в следующем цикле.";
@@ -25,14 +25,15 @@ test.describe("Client-trainer shared runtime", () => {
     await assignAndOpenClient(page, "egor-nikitin", "Силовая база", "Егор Никитин");
     await startCurrentWorkout(page);
     await page.getByRole("button", { name: "Сохранить" }).first().click();
-    await page.getByRole("button", { name: "Пропустить" }).nth(1).click();
+    await page.getByRole("tab", { name: /Тяга штанги в наклоне/ }).click();
+    await page.getByRole("button", { name: "Пропустить упражнение" }).click();
     const comment = "Закончил раньше: не хватило времени на последний блок.";
     await page.getByRole("textbox", { name: "Комментарий к тренировке" }).fill(comment);
     await page.getByRole("button", { name: "Завершить тренировку" }).click();
     await expect(page.getByRole("dialog")).toContainText("Незаполненных подходов");
     await page.getByRole("button", { name: "Подтвердить завершение" }).click();
 
-    await page.getByRole("link", { name: "Вид тренера" }).click();
+    await page.getByRole("link", { name: "Вернуться в кабинет тренера" }).click();
     await openQueueReview(page, "Егор Никитин");
     await expect(page.getByRole("region", { name: "Исходный комментарий клиента" })).toContainText(comment);
     await expect(page.getByText("Упражнение пропущено", { exact: true }).first()).toBeVisible();
@@ -54,7 +55,7 @@ test.describe("Client-trainer shared runtime", () => {
     await page.getByRole("button", { name: "Подтвердить завершение" }).click();
     await expect(page.getByText("Дискомфорт отмечен", { exact: true })).toBeVisible();
 
-    await page.getByRole("link", { name: "Вид тренера" }).click();
+    await page.getByRole("link", { name: "Вернуться в кабинет тренера" }).click();
     await openQueueReview(page, "Ольга Соколова", true);
     await expect(page.getByText(original, { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/диагноз/i)).toHaveCount(0);
@@ -69,12 +70,17 @@ test.describe("Client-trainer shared runtime", () => {
     await assignAndOpenClient(page, "maria-volkova", "Силовая база", "Мария Волкова");
     await startCurrentWorkout(page);
     const sessionUrl = page.url();
+    await expect(page.getByLabel("Вес, кг")).toHaveCount(1);
+    await expect(page.getByLabel("Повторы")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Пропустить упражнение" })).toHaveCount(1);
     await page.getByRole("button", { name: "Сохранить" }).first().click();
+    await page.reload();
+    await expect(page.getByText("1 из 12 подходов сохранено", { exact: true })).toBeVisible();
     await page.getByRole("link", { name: "Главная" }).click();
     await expect(page.getByRole("link", { name: "Продолжить тренировку" })).toBeVisible();
     await page.getByRole("link", { name: "Продолжить тренировку" }).click();
-    expect(new URL(page.url()).searchParams.get("session")).toBe(new URL(sessionUrl).searchParams.get("session"));
-    await expect(page.getByRole("button", { name: "Обновить" }).first()).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`session=${new URL(sessionUrl).searchParams.get("session")}`));
+    await expect(page.getByText("1 из 12 подходов сохранено", { exact: true })).toBeVisible();
   });
 
   test("E: double start and completion create one session and one attention item", async ({ page }) => {
@@ -84,7 +90,8 @@ test.describe("Client-trainer shared runtime", () => {
     await expect(page).toHaveURL(/session=session-demo-assignment-maria-volkova/);
     await page.getByRole("button", { name: "Завершить тренировку" }).click();
     await page.getByRole("button", { name: "Подтвердить завершение" }).evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
-    await page.getByRole("link", { name: "Вид тренера" }).click();
+    await page.getByRole("link", { name: "Вернуться в кабинет тренера" }).click();
+    await page.getByRole("link", { name: "Главная", exact: true }).click();
     const queue = page.getByRole("list", { name: "Очередь внимания" });
     await expect(queue.getByText("Мария Волкова", { exact: true })).toHaveCount(1);
   });
@@ -96,7 +103,7 @@ test.describe("Client-trainer shared runtime", () => {
     await page.goto("/client/workouts?actor=maria-volkova&session=unknown-session");
     await expect(page.getByRole("heading", { name: "Тренировка не найдена" })).toBeVisible();
     await page.goto("/client/workouts?actor=egor-nikitin&assignment=demo-assignment-maria-volkova-strength-base-v3-2026-07-22");
-    await expect(page.getByRole("heading", { name: "Назначение не найдено" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Тренировка не найдена" })).toBeVisible();
   });
 
   test("G: mobile 390x844 completes the linked role loop without overflow", async ({ page }) => {
@@ -105,12 +112,18 @@ test.describe("Client-trainer shared runtime", () => {
     await expectNoHorizontalOverflow(page);
     await startCurrentWorkout(page);
     await expectNoHorizontalOverflow(page);
+    await expectControlWithinViewportWidth(page, page.getByRole("button", { name: "Следующий", exact: true }));
+    await page.locator("#client-session-comment").scrollIntoViewIfNeeded();
+    await expectMobileHeaderPinned(page);
     await page.getByRole("button", { name: "Сохранить" }).first().click();
-    await page.getByRole("button", { name: "Завершить тренировку" }).click();
+    const completeWorkout = page.getByRole("button", { name: "Завершить тренировку" });
+    await completeWorkout.scrollIntoViewIfNeeded();
+    await expectControlAboveNavigation(page, completeWorkout, "Кабинет клиента");
+    await completeWorkout.click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.getByRole("button", { name: "Подтвердить завершение" }).click();
     await expectNoHorizontalOverflow(page);
-    await page.getByRole("link", { name: "Тренер", exact: true }).click();
+    await page.getByRole("link", { name: "Вернуться в кабинет тренера" }).click();
     await openQueueReview(page, "Мария Волкова");
     await expectNoHorizontalOverflow(page);
     const feedback = "Мобильный цикл принят. Следующую тренировку проведём в том же спокойном темпе.";
@@ -149,6 +162,9 @@ async function saveAllVisibleSets(page: Page) {
 }
 
 async function openQueueReview(page: Page, athleteName: string, useLast = false) {
+  if (!new URL(page.url()).pathname.endsWith("/trainer/dashboard")) {
+    await page.getByRole("link", { name: "Главная", exact: true }).click();
+  }
   await expect(page).toHaveURL(/\/trainer\/dashboard/);
   const candidates = page.getByRole("list", { name: "Очередь внимания" }).getByRole("button", { name: new RegExp(athleteName) });
   await (useLast ? candidates.last() : candidates.first()).click();
@@ -173,4 +189,23 @@ function trackRemoteWrites(page: Page) {
 async function expectNoHorizontalOverflow(page: Page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+}
+
+async function expectMobileHeaderPinned(page: Page) {
+  await expect.poll(async () => Math.round((await page.getByRole("banner").boundingBox())?.y ?? -999)).toBe(0);
+}
+
+async function expectControlWithinViewportWidth(page: Page, control: ReturnType<Page["getByRole"]>) {
+  const box = await control.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+}
+
+async function expectControlAboveNavigation(page: Page, control: ReturnType<Page["getByRole"]>, navigationName: string) {
+  const controlBox = await control.boundingBox();
+  const navigationBox = await page.getByRole("navigation", { name: navigationName }).last().boundingBox();
+  expect(controlBox).not.toBeNull();
+  expect(navigationBox).not.toBeNull();
+  expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(navigationBox!.y);
 }

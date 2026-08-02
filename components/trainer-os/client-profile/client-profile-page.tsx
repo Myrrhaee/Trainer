@@ -29,6 +29,7 @@ import {
 import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-assign-drawer";
 import { WorkoutReviewDrawer } from "@/components/trainer-os/workout-review/workout-review-drawer";
 import { getAthleteProfileView, getDefaultWorkoutReviewSessionId } from "@/components/trainer-os/demo-runtime/selectors";
+import { TrainerClientPreviewLink } from "@/components/trainer-os/demo-runtime/trainer-client-preview-link";
 import { useTrainerDemoRuntime } from "@/components/trainer-os/demo-runtime/trainer-demo-runtime";
 import { cn } from "@/lib/utils";
 
@@ -59,7 +60,7 @@ export function ClientProfilePage({ clientId, entry, initialQuickAssignOpen = fa
   const runtime = useTrainerDemoRuntime();
   const view = getAthleteProfileView(runtime.state, clientId, entry);
 
-  if (!view) return <UnknownClientProfile clientId={clientId} />;
+  if (!view) return <UnknownClientProfile />;
 
   return <KnownClientProfile view={view} initialQuickAssignOpen={initialQuickAssignOpen} />;
 }
@@ -102,9 +103,9 @@ function KnownClientProfile({ view, initialQuickAssignOpen }: { view: TrainerAth
           />
           <div className="flex justify-end">
             <Button asChild variant="ghost" className="rounded-lg text-zinc-400">
-              <Link href={`/client/me?actor=${encodeURIComponent(athlete.id)}`}>
+              <TrainerClientPreviewLink athleteId={athlete.id}>
                 <ExternalLink className="mr-2 h-4 w-4" />Открыть вид клиента
-              </Link>
+              </TrainerClientPreviewLink>
             </Button>
           </div>
 
@@ -245,7 +246,7 @@ function KnownClientProfile({ view, initialQuickAssignOpen }: { view: TrainerAth
   );
 }
 
-function UnknownClientProfile({ clientId }: { clientId: string }) {
+function UnknownClientProfile() {
   return (
     <TrainerShell eyebrow="Профиль спортсмена" title="Спортсмен не найден" description="Проверьте ссылку или вернитесь к списку клиентов.">
       <main className="flex min-h-[76vh] items-center justify-center bg-black px-4 py-10 pb-28 text-zinc-100 lg:pb-10">
@@ -253,10 +254,8 @@ function UnknownClientProfile({ clientId }: { clientId: string }) {
           <div className="mx-auto flex size-14 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 text-zinc-400">
             <UserRoundSearch className="size-6" />
           </div>
-          <h2 className="mt-5 text-2xl font-semibold text-zinc-50">Такого спортсмена нет в demo-команде</h2>
-          <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-            URL не был подменён данными другого клиента. Идентификатор <span className="font-mono text-zinc-400">{clientId}</span> не найден.
-          </p>
+          <h2 className="mt-5 text-2xl font-semibold text-zinc-50">Не удалось открыть профиль</h2>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-500">Возможно, профиль был удалён или ссылка устарела. Данные другого спортсмена не будут показаны.</p>
           <Button asChild className="mt-6 rounded-full bg-lime-300 text-black hover:bg-lime-200">
             <Link href="/trainer/clients"><UsersRound className="size-4" />К списку клиентов</Link>
           </Button>

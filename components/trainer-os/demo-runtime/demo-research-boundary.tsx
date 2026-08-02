@@ -30,20 +30,44 @@ export function DemoResearchBoundary({ children }: { children: ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const runtime = useProductDemoRuntime();
+  const [isHydrated, setIsHydrated] = useState(false);
   const requestedResearch = searchParams.get("research") === "1";
   const requestedFixtureValue = searchParams.get("fixture");
   const requestedFixture = isDemoFixtureId(requestedFixtureValue) ? requestedFixtureValue : null;
   const invalidFixture = requestedResearch && !requestedFixture;
+  const isClientRoute = pathname.startsWith("/client/");
+  const requestedActor = isClientRoute ? searchParams.get("actor") : null;
+  const fixtureActor = requestedFixture ? getDemoFixtureDefinition(requestedFixture).athleteId : null;
+  const missingFixtureActor = requestedResearch && requestedFixture && isClientRoute && !requestedActor;
+  const mismatchedFixtureActor = requestedResearch && requestedFixture && isClientRoute && requestedActor !== fixtureActor;
 
   useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) setIsHydrated(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!runtime.research.ready) return;
     if (requestedResearch && requestedFixture && runtime.research.fixtureId !== requestedFixture) {
       runtime.research.loadFixture(requestedFixture);
     }
   }, [requestedFixture, requestedResearch, runtime.research]);
 
   useEffect(() => {
+    if (!missingFixtureActor || !fixtureActor) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("actor", fixtureActor);
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [fixtureActor, missingFixtureActor, pathname, router, searchParams]);
+
+  useEffect(() => {
+    if (!runtime.research.ready) return;
     if (!runtime.research.enabled || !runtime.research.fixtureId) return;
-    if (requestedResearch && requestedFixture === runtime.research.fixtureId) return;
+    // An explicit research URL is authoritative while the requested fixture is loading.
+    if (requestedResearch && requestedFixture) return;
     const next = new URLSearchParams(searchParams.toString());
     next.set("research", "1");
     next.set("fixture", runtime.research.fixtureId);
@@ -51,6 +75,11 @@ export function DemoResearchBoundary({ children }: { children: ReactNode }) {
   }, [pathname, requestedFixture, requestedResearch, router, runtime.research, searchParams]);
 
   if (invalidFixture) return <ResearchSetupError />;
+  if (mismatchedFixtureActor && requestedFixture && requestedActor) {
+    return <ResearchActorMismatch fixtureId={requestedFixture} requestedActor={requestedActor} />;
+  }
+  if (missingFixtureActor) return <ResearchLoading fixtureId={requestedFixture ?? "review-required"} />;
+  if ((!runtime.research.ready || !isHydrated) && requestedResearch) return <ResearchLoading fixtureId={requestedFixture ?? "review-required"} />;
   if (requestedResearch && requestedFixture && runtime.research.fixtureId !== requestedFixture) {
     return <ResearchLoading fixtureId={requestedFixture} />;
   }
@@ -65,7 +94,9 @@ export function DemoResearchBoundary({ children }: { children: ReactNode }) {
 
 function ModeratorToolbar({ fixtureId }: { fixtureId: DemoFixtureId }) {
   const router = useRouter();
+  const pathname = usePathname();
   const runtime = useProductDemoRuntime();
+  const isClientRoute = pathname.startsWith("/client/");
   const fixture = getDemoFixtureDefinition(fixtureId);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
@@ -94,12 +125,19 @@ function ModeratorToolbar({ fixtureId }: { fixtureId: DemoFixtureId }) {
 
   return (
     <>
-      <aside aria-label="Панель модератора" className="fixed bottom-3 right-3 z-[90] w-[min(360px,calc(100vw-24px))] rounded-lg border border-lime-300/30 bg-zinc-950/96 p-3 text-zinc-100 shadow-2xl backdrop-blur-xl">
+      <aside
+        aria-label="Панель модератора"
+        className={`fixed right-3 z-[90] rounded-lg border border-lime-300/30 bg-zinc-950/96 p-3 text-zinc-100 shadow-2xl backdrop-blur-xl ${
+          isClientRoute
+            ? `${detailsOpen ? "w-[min(360px,calc(100vw-24px))]" : "w-auto sm:w-[min(360px,calc(100vw-24px))]"} top-3 sm:bottom-3 sm:top-auto`
+            : "bottom-3 w-[min(360px,calc(100vw-24px))]"
+        }`}
+      >
         <div className="flex items-center gap-2">
           <FlaskConical className="size-4 shrink-0 text-lime-200" aria-hidden="true" />
-          <div className="min-w-0 flex-1">
+          <div className={`${isClientRoute && !detailsOpen ? "hidden sm:block" : "block"} min-w-0 flex-1`}>
             <p className="text-xs font-semibold text-zinc-100">Demo · {fixture.label}</p>
-            <p className="truncate text-[11px] text-zinc-500">Локальные данные · reload восстанавливает fixture</p>
+            <p className="truncate text-[11px] text-zinc-500">{pathname.startsWith("/client/") ? "Вид клиента" : "Вид тренера"} · сохранено в браузере</p>
           </div>
           <Button type="button" size="icon" variant="ghost" className="size-8 rounded-lg" onClick={() => setDetailsOpen((current) => !current)} aria-label={detailsOpen ? "Скрыть инструменты модератора" : "Показать инструменты модератора"}>
             {detailsOpen ? <X className="size-4" /> : <Info className="size-4" />}
@@ -178,4 +216,19 @@ function ResearchLoading({ fixtureId }: { fixtureId: DemoFixtureId }) {
 
 function ResearchSetupError() {
   return <main className="flex min-h-dvh items-center justify-center bg-black px-4 text-zinc-100"><section className="max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 p-6 text-center"><h1 className="text-xl font-semibold">Сценарий не найден</h1><p className="mt-2 text-sm text-zinc-400">Research-ссылка не содержит известный fixture. Данные другого сценария не подставлены.</p><Button asChild className="mt-5 bg-lime-300 text-black hover:bg-lime-200"><a href={withResearchParams("/trainer/dashboard", "review-required")}>Открыть стартовый сценарий</a></Button></section></main>;
+}
+
+function ResearchActorMismatch({ fixtureId, requestedActor }: { fixtureId: DemoFixtureId; requestedActor: string }) {
+  const fixture = getDemoFixtureDefinition(fixtureId);
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-black px-4 text-zinc-100">
+      <section className="max-w-lg rounded-lg border border-zinc-800 bg-zinc-950 p-6 text-center">
+        <h1 className="text-xl font-semibold">Клиент не относится к сценарию</h1>
+        <p className="mt-2 text-sm text-zinc-400">Actor `{requestedActor}` не совпадает со спортсменом fixture. Данные другого клиента не показаны.</p>
+        <Button asChild className="mt-5 bg-lime-300 text-black hover:bg-lime-200">
+          <a href={withResearchParams(fixture.clientEntry, fixtureId)}>Вернуться к клиенту сценария</a>
+        </Button>
+      </section>
+    </main>
+  );
 }

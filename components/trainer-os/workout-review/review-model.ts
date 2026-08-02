@@ -95,7 +95,6 @@ export type WorkoutReviewDetails = {
     aiDraft?: string;
     aiProvenance?: string;
     existing: TrainerFeedbackRecord[];
-    demoSendBehavior?: "success" | "fail-once";
   };
   attentionContext?: {
     id: string;
@@ -222,7 +221,6 @@ const demoReviewSessions = [
       aiDraft: "Вижу, что из-за недосыпа ты не стал форсировать жим и сохранил контроль нагрузки. Это разумно. Следующий тяжёлый день скорректируем после восстановления.",
       aiProvenance: "На основе результатов тренировки и комментария клиента",
       existing: [],
-      demoSendBehavior: "fail-once",
     },
     attentionContext: { id: "attention-artem-review", queue: "dashboard-review", position: 1, total: 4, reason: "Есть отклонения от плана", nextSessionId: "liza-gromova-2026-06-18" },
   }),
@@ -295,7 +293,7 @@ const demoReviewSessions = [
     athlete: { id: "irina-kozlova", displayName: "Ирина Козлова", initials: "ИК", goal: "Сила и тонус", profileHref: "/trainer/clients/irina-kozlova" },
     assignment: { id: "assignment-irina-technique-02", title: "Верх тела · техника", scheduledFor: "12 июня, 17:30" },
     sessionTitle: "Верх тела · техника",
-    signals: [{ id: "irina-no-sets", kind: "missing-data", tone: "warning", title: "Подходы не записаны", detail: "Сессия завершена без фактических данных по подходам.", sourceLabel: "WorkoutSession" }],
+    signals: [{ id: "irina-no-sets", kind: "missing-data", tone: "warning", title: "Подходы не записаны", detail: "Тренировка завершена без фактических данных по подходам.", sourceLabel: "Результат тренировки" }],
     clientComment: "Прошла движения в лёгком режиме, цифры не записывала.",
     exercises: [],
     feedback: { aiState: "no-context", existing: [] },

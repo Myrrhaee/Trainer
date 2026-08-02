@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -34,6 +35,10 @@ import { createInitialTrainerDemoState } from "./seed";
 import { createDemoFixtureState } from "./fixtures";
 import { resetDemoTransientState } from "./transient-reset";
 import {
+  persistTrainerDemoRuntime,
+  readPersistedTrainerDemoRuntime,
+} from "./persistence";
+import {
   TRAINER_DEMO_ACTOR_ID,
   type DemoBuildMetadata,
   type DemoFixtureId,
@@ -55,10 +60,42 @@ export function TrainerDemoRuntimeProvider({ children, build = localBuild }: { c
   const [state, setState] = useState<TrainerDemoState>(createInitialTrainerDemoState);
   const [fixtureId, setFixtureId] = useState<DemoFixtureId | null>(null);
   const [researchEnabled, setResearchEnabled] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [revision, setRevision] = useState(0);
   const stateRef = useRef(state);
   const fixtureRef = useRef<DemoFixtureId | null>(null);
+  const researchEnabledRef = useRef(false);
+  const isDirtyRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      const persisted = readPersistedTrainerDemoRuntime();
+      if (persisted) {
+        stateRef.current = persisted.state;
+        fixtureRef.current = persisted.fixtureId;
+        researchEnabledRef.current = persisted.researchEnabled;
+        isDirtyRef.current = persisted.isDirty;
+        setState(persisted.state);
+        setFixtureId(persisted.fixtureId);
+        setResearchEnabled(persisted.researchEnabled);
+        setIsDirty(persisted.isDirty);
+      }
+      setIsReady(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const persist = useCallback((nextState: TrainerDemoState, nextDirty: boolean) => {
+    persistTrainerDemoRuntime({
+      fixtureId: fixtureRef.current,
+      researchEnabled: researchEnabledRef.current,
+      isDirty: nextDirty,
+      state: nextState,
+    });
+  }, []);
 
   const apply = useCallback(<TReceipt extends TrainerDemoCommandReceipt>(
     command: (current: TrainerDemoState) => { state: TrainerDemoState; result: TrainerDemoCommandResult<TReceipt> },
@@ -68,7 +105,10 @@ export function TrainerDemoRuntimeProvider({ children, build = localBuild }: { c
     if (execution.state !== stateRef.current) {
       stateRef.current = execution.state;
       setState(execution.state);
+      const nextDirty = marksFixtureDirty ? true : isDirtyRef.current;
+      isDirtyRef.current = nextDirty;
       if (marksFixtureDirty) setIsDirty(true);
+      persist(execution.state, nextDirty);
       logLatestPilotEvent(execution.state);
     }
     if (!execution.result.ok) {
@@ -82,20 +122,24 @@ export function TrainerDemoRuntimeProvider({ children, build = localBuild }: { c
       const next = { ...current, pilotEvents: [...current.pilotEvents, event] };
       stateRef.current = next;
       setState(next);
+      persist(next, isDirtyRef.current);
       logPilotError(execution.result.error.code);
     }
     return execution.result;
-  }, []);
+  }, [persist]);
 
   const loadFixture = useCallback((nextFixtureId: DemoFixtureId) => {
     resetDemoTransientState();
     const next = createDemoFixtureState(nextFixtureId);
     stateRef.current = next;
     fixtureRef.current = nextFixtureId;
+    researchEnabledRef.current = true;
+    isDirtyRef.current = false;
     setState(next);
     setFixtureId(nextFixtureId);
     setResearchEnabled(true);
     setIsDirty(false);
+    persistTrainerDemoRuntime({ fixtureId: nextFixtureId, researchEnabled: true, isDirty: false, state: next });
     setRevision((current) => current + 1);
   }, []);
 
@@ -120,8 +164,9 @@ export function TrainerDemoRuntimeProvider({ children, build = localBuild }: { c
     const next = { ...current, pilotEvents: [...current.pilotEvents, nextEvent] };
     stateRef.current = next;
     setState(next);
+    persist(next, isDirtyRef.current);
     logPilotEvent(nextEvent);
-  }, []);
+  }, [persist]);
 
   const commands = useMemo<TrainerDemoRuntimeValue["commands"]>(() => ({
     resolveAttentionItemWithFeedback: (input) => apply((current) => resolveAttentionWithFeedback(current, input, "ResolveAttentionItemWithFeedback")),
@@ -146,6 +191,7 @@ export function TrainerDemoRuntimeProvider({ children, build = localBuild }: { c
   }), [apply, recordPilotEvent]);
 
   const research = useMemo<TrainerDemoRuntimeValue["research"]>(() => ({
+    ready: isReady,
     enabled: researchEnabled,
     fixtureId,
     isDirty,
@@ -154,7 +200,7 @@ export function TrainerDemoRuntimeProvider({ children, build = localBuild }: { c
     loadFixture,
     resetFixture,
     clearTransientState,
-  }), [build, clearTransientState, fixtureId, isDirty, loadFixture, researchEnabled, resetFixture, revision]);
+  }), [build, clearTransientState, fixtureId, isDirty, isReady, loadFixture, researchEnabled, resetFixture, revision]);
   const value = useMemo<TrainerDemoRuntimeValue>(() => ({ actor, state, commands, research }), [commands, research, state]);
   return <TrainerDemoRuntimeContext.Provider value={value}>{children}</TrainerDemoRuntimeContext.Provider>;
 }

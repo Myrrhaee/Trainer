@@ -9,9 +9,11 @@ import { useProductDemoRuntime } from "@/components/trainer-os/demo-runtime/trai
 import { Button } from "@/components/ui/button";
 
 import { ClientRuntimeShell } from "./client-runtime-shell";
+import { useClientRuntimeNavigation } from "./client-runtime-navigation";
 
 export function ClientRuntimeHome({ actorId }: { actorId: string }) {
   const runtime = useProductDemoRuntime();
+  const navigation = useClientRuntimeNavigation(actorId);
   const view = getClientHomeView(runtime.state, actorId);
   const assignmentId = view?.assignment?.id;
   const feedbackId = view?.latestFeedback?.id;
@@ -28,14 +30,14 @@ export function ClientRuntimeHome({ actorId }: { actorId: string }) {
     runtime.commands.recordPilotEvent({ name: "flow_completed", athleteId: actorId, workoutSessionId });
   }, [actorId, feedbackId, runtime.commands, workoutSessionId]);
 
-  if (!view) return <ClientNotFound actorId={actorId} />;
+  if (!view) return <ClientNotFound />;
 
   const stateCopy = {
-    assignment: { eyebrow: "Тренировка назначена", title: view.assignment?.templateTitle ?? "Следующая тренировка", body: "План тренера готов. Структура назначения зафиксирована и не изменится вместе с шаблоном." },
-    in_progress: { eyebrow: "Сессия в процессе", title: view.session?.sessionTitle ?? "Продолжить тренировку", body: "Сохранённые подходы на месте. Продолжай с того же WorkoutSession." },
-    awaiting_feedback: { eyebrow: "Тренировка завершена", title: "Результат отправлен тренеру", body: "Сессия и фактические подходы сохранены. Сейчас тренировка ждёт разбора." },
+    assignment: { eyebrow: "Тренировка назначена", title: view.assignment?.templateTitle ?? "Следующая тренировка", body: "План тренера готов. Все упражнения и параметры уже сохранены для этой тренировки." },
+    in_progress: { eyebrow: "Тренировка в процессе", title: view.session?.sessionTitle ?? "Продолжить тренировку", body: "Сохранённые подходы на месте. Продолжай с того же шага." },
+    awaiting_feedback: { eyebrow: "Тренировка завершена", title: "Результат отправлен тренеру", body: "Результаты и комментарий сохранены. Сейчас тренировка ждёт разбора." },
     feedback_received: { eyebrow: "Ответ тренера", title: "Новый отзыв по тренировке", body: view.latestFeedback?.body ?? "Тренер оставил обратную связь." },
-    empty: { eyebrow: "Спокойный день", title: "Активной тренировки сейчас нет", body: "Мы не показываем фиктивный план. Новое назначение появится здесь после действия тренера." },
+    empty: { eyebrow: "Спокойный день", title: "Активной тренировки сейчас нет", body: "Следующая тренировка появится здесь после назначения тренера." },
   }[view.state];
 
   return (
@@ -47,7 +49,7 @@ export function ClientRuntimeHome({ actorId }: { actorId: string }) {
           <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base">{stateCopy.body}</p>
           {view.primaryAction ? (
             <Button asChild className="mt-6 h-12 rounded-lg bg-lime-200 px-5 text-black hover:bg-lime-100">
-              <Link href={view.primaryAction.href}>
+              <Link href={navigation.href(view.primaryAction.href)}>
                 {view.primaryAction.label}
                 <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
               </Link>
@@ -92,12 +94,12 @@ function statusLabel(state: "assignment" | "in_progress" | "awaiting_feedback" |
   return { assignment: "Можно начинать", in_progress: "В процессе", awaiting_feedback: "Ждёт разбора", feedback_received: "Отзыв получен", empty: "Нет назначения" }[state];
 }
 
-function ClientNotFound({ actorId }: { actorId: string }) {
+function ClientNotFound() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-black px-4 text-zinc-100">
       <div className="max-w-md text-center">
         <h1 className="text-2xl font-semibold">Клиент не найден</h1>
-        <p className="mt-3 text-sm text-zinc-400">Demo actor `{actorId}` не связан ни с одним спортсменом. Данные другого клиента не подставлены.</p>
+        <p className="mt-3 text-sm text-zinc-400">Проверьте ссылку или вернитесь к началу. Данные другого спортсмена не будут показаны.</p>
         <Button asChild className="mt-6 rounded-lg bg-lime-200 text-black hover:bg-lime-100"><Link href="/">К началу</Link></Button>
       </div>
     </main>

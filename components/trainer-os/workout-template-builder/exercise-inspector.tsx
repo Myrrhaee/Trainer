@@ -136,7 +136,7 @@ export function ExerciseInspector({
 
         <div>
           <Label htmlFor={`trainer-note-${exercise.instanceId}`} className="text-sm text-zinc-300">Заметка спортсмену</Label>
-          <Textarea id={`trainer-note-${exercise.instanceId}`} value={exercise.trainerNote} onChange={(event) => onChange({ ...exercise, trainerNote: event.target.value })} placeholder="Техника, back-off, пауза или замена" className="mt-2 min-h-20 border-zinc-800 bg-black/30 text-zinc-100" />
+          <Textarea id={`trainer-note-${exercise.instanceId}`} value={exercise.trainerNote} onChange={(event) => onChange({ ...exercise, trainerNote: event.target.value })} placeholder="Техника, облегчённый подход, пауза или замена" className="mt-2 min-h-20 border-zinc-800 bg-black/30 text-zinc-100" />
         </div>
 
         <div className="rounded-lg border border-zinc-800 bg-black/20 p-3">

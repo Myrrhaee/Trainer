@@ -376,6 +376,7 @@ export type TrainerDemoRuntimeValue = {
   state: TrainerDemoState;
   commands: TrainerDemoCommands;
   research: {
+    ready: boolean;
     enabled: boolean;
     fixtureId: DemoFixtureId | null;
     isDirty: boolean;

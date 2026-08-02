@@ -2,11 +2,11 @@
 
 ## 1. Scope
 
-Stage 14 freezes the accepted Stage 13 frontend vertical slice and prepares it for a moderated formative session. Changes are limited to deterministic demo fixtures, moderator-only reset/disclosure, build metadata, direct entries, safe recovery, tests, and research documents. No new product area or major capability is included.
+The external trainer pilot release candidate freezes the accepted trainer/client frontend vertical slice for a moderated formative session. Changes since the Stage 14 baseline are limited to workflow continuity, local browser persistence, mobile and sticky-navigation stabilization, deterministic demo fixtures, moderator-only controls, safe recovery, tests, and research evidence. No new product area or backend capability is included.
 
 ## 2. Frozen Product Version
 
-Branch: `release/external-trainer-pilot-v1`. Build label: `trainer-core-pilot-v1`. Stage: `Stage 14`. The deployed environment can expose `VERCEL_GIT_COMMIT_SHA`; local production builds show `local` without reading Git or local paths at runtime. The functional product baseline is Stage 13 commit `5a9aa2940bab56f398dba5ddd184eac67e888f8d`.
+Branch: `release/external-trainer-pilot-v1`. Build label: `trainer-core-pilot-v1`. Release candidate: `external-trainer-pilot-v1-rc1`. The deployed environment can expose `VERCEL_GIT_COMMIT_SHA`; local production builds show `local` without reading Git or local paths at runtime. The final commit and annotated tag are recorded after release-candidate acceptance.
 
 ## 3. Demo Architecture
 
@@ -31,7 +31,7 @@ Client actor remains a stable non-PII query ID. Unknown actors and cross-athlete
 
 ## 6. Reset Behavior
 
-Reset is available only when a valid research fixture is active. Every reset or fixture switch requires explicit moderator confirmation, including before domain commands mark the fixture dirty, so unsaved screen-local Builder or Quick Assign drafts cannot be discarded silently. Reset recreates the selected fixture, returns to its primary entry, clears all `workout-review:*` sessionStorage drafts, clears the Review module store, and increments a render revision to remove Quick Assign, Builder, dialog, set-input, and route-local state. It does not use localStorage or backend writes.
+Reset is available only when a valid research fixture is active. Every reset or fixture switch requires explicit moderator confirmation, including before domain commands mark the fixture dirty, so unsaved screen-local Builder or Quick Assign drafts cannot be discarded silently. Reset recreates and persists the selected fixture, returns to its primary entry, clears all `workout-review:*` sessionStorage drafts, clears the Review module store, and increments a render revision to remove Quick Assign, Builder, dialog, set-input, and route-local state. It does not perform backend writes.
 
 ## 7. Direct Entry Points
 
@@ -39,16 +39,17 @@ Moderator tools provide named entries for Trainer Dashboard, Athlete Profile, Wo
 
 ## 8. Known Limitations
 
-- Full reload restores the fixture baseline; it does not preserve in-progress commands.
-- Reloading an active client session leaves a stale session URL, which now fails closed and offers Home/Assignments recovery.
+- Demo domain state persists in localStorage for continuity in the same browser profile. It is not durable, synchronized, encrypted application storage and can be lost when browser data is cleared.
+- An active client session and saved set progress resume after a reload in the same browser profile. Multi-device and concurrent-session continuity are not supported.
+- Builder and Review drafts use sessionStorage and remain browser-tab/session-local.
 - Runtime naming retains `TrainerDemo*` compatibility names.
 - Local build metadata cannot know the future commit hash and displays `local` unless the deployment supplies it.
-- There is no durable storage, production auth, notification delivery, concurrency, multi-device continuity, or audit backend.
+- There is no backend persistence, production auth, notification delivery, concurrency, multi-device continuity, or audit backend.
 - Seeded historical Review sessions are compatibility facts, not canonical repository rows.
 
 ## 9. Error Recovery
 
-Unknown fixture blocks product content and links to the starting fixture. Unknown actor, athlete, session, assignment, and template never substitute another entity. Trainer error pages return to Dashboard or the athlete list. Client workout error states explain reload/stale-ID behavior and link to Home and current assignments. Closed items remain readable but cannot create duplicate initial feedback. Command errors preserve the current facts and expose retry-safe messages.
+Unknown fixture blocks product content and links to the starting fixture. Unknown actor, athlete, session, assignment, and template never substitute another entity. Invalid or incompatible persisted demo snapshots are discarded before the requested fixture is reconstructed. Trainer error pages return to Dashboard or the athlete list. Client workout error states link to Home and current assignments. Closed items remain readable but cannot create duplicate initial feedback. Command errors preserve the current facts and expose retry-safe messages.
 
 ## 10. Build Metadata
 
@@ -56,7 +57,7 @@ The collapsed moderator badge discloses demo/local behavior without covering par
 
 ## 11. Clean-Start QA
 
-A production build was started after stopping the prior server. All six fixtures were opened from direct URLs without HMR history, reset, and verified again against the same athlete and facts. Reset was also tested after a domain mutation and with a stale Review draft. A second fixture could then run independently. Actor switching retained fixture context. Refresh during an active client session produced the documented safe recovery state. The full client-to-trainer-to-client loop passed from the clean fixture.
+A production build was started after stopping the prior server. All six fixtures were opened from direct URLs without HMR history, reset, and verified again against the same athlete and facts. Reset was also tested after a domain mutation and with a stale Review draft. A second fixture could then run independently. Actor switching retained fixture context. Refresh during an active client session resumed the same saved session and set progress. Invalid persisted state was discarded safely. The full client-to-trainer-to-client loop passed from the clean fixture.
 
 ## 12. Desktop QA
 
@@ -76,7 +77,7 @@ Research mode is frontend/demo-only and does not change auth. Fixture and actor 
 
 ## 16. Research Risks
 
-P0: none found in clean frontend acceptance. P1: persistence, authorization/RLS, server transactions, durable idempotency, audit, and delivery remain beta blockers; reload intentionally loses progress. P2: physical mobile keyboard, complete screen-reader pass, facilitator visibility of moderator controls while a modal is open, and real-trainer comprehension remain unverified. P3: compatibility naming and the `NO_COLOR`/`FORCE_COLOR` process warning.
+P0: none found in clean frontend acceptance. P1: backend persistence, authorization/RLS, server transactions, durable idempotency, audit, and delivery remain beta blockers; browser-local persistence is pilot continuity only. P2: physical mobile keyboard, complete screen-reader pass, facilitator visibility of moderator controls while a modal is open, and real-trainer comprehension remain unverified. P3: compatibility naming and the `NO_COLOR`/`FORCE_COLOR` process warning.
 
 ## 17. Go/No-Go Criteria
 
@@ -84,4 +85,4 @@ Go requires: no P0; six clean-start fixtures; safe actor/entity isolation; repro
 
 ## 18. Acceptance Results
 
-Current verdict: **GO for a moderated external formative pilot, not beta**. Final acceptance: 26/26 Playwright tests passed. This includes all six direct launches with reset and repeat verification, dirty-state confirmation and Review draft clearing, actor switch, invalid IDs, refresh recovery, a clean full loop, a second independent scenario, research-only metadata, mobile overflow, console, no-write checks, and the complete Stage 12–13 regression suite. Lint, TypeScript, and the production build pass. Backend/API/Supabase/PostgreSQL/migrations/auth remain unchanged.
+Current verdict: **GO for a moderated external formative pilot, not beta**. Release-candidate acceptance: 34/34 Playwright tests passed across client/trainer integration, external-pilot readiness, and trainer core-flow suites. Coverage includes all six direct launches, explicit fixture switching over persisted state, reset and repeat verification, persisted active-session recovery, invalid snapshot recovery, dirty-state confirmation and Review draft clearing, actor/entity isolation, a clean end-to-end loop, research-only metadata, mobile overflow, console, no-write checks, Builder draft recovery, and trainer workflow regression. Lint, TypeScript, and the production build pass. Backend/API/Supabase/PostgreSQL/migrations/auth remain unchanged.

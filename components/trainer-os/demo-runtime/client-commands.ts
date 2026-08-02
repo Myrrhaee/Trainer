@@ -310,7 +310,7 @@ function createReviewAttention(session: RuntimeWorkoutSession): RuntimeAttention
     reason: discomfort ? "Спортсмен отметил дискомфорт" : session.lifecycleStatus === "completed_with_omissions" ? "Тренировка завершена с отклонениями" : "Завершённая тренировка ждёт разбора",
     signal: discomfort?.originalText ?? `${session.summary.completedExercises} из ${session.summary.totalExercises} упражнений выполнено.`,
     originalText: discomfort?.originalText,
-    relatedSignals: session.signals.filter((signal) => signal.kind !== "discomfort").map((signal) => signal.title),
+    relatedSignals: [...new Set(session.signals.filter((signal) => signal.kind !== "discomfort").map((signal) => signal.title))],
     primaryAction: "review",
     workoutSessionId: session.session.id,
     ageHours: 0,

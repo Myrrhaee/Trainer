@@ -36,6 +36,7 @@ function roleFromSearchParams(searchParams: URLSearchParams | null): LoginType {
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const demoMode = isDemoModeEnabled();
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   if (supabaseRef.current === null) supabaseRef.current = createClient();
   const supabase = supabaseRef.current;
@@ -133,7 +134,7 @@ function LoginContent() {
       const normalizedEmail = resolveLoginEmail(email, loginType);
       const normalizedName = fullName.trim();
 
-      if (isDemoModeEnabled()) {
+      if (demoMode) {
         if (isSignUp) {
           setError("В demo-режиме регистрация отключена. Используйте тестовый вход.");
           return;
@@ -152,7 +153,7 @@ function LoginContent() {
 
         writeDemoSession(resolved.role);
         router.refresh();
-        router.push(resolved.role === "trainer" ? "/dashboard" : "/client/me");
+        router.push(resolved.role === "trainer" ? "/trainer/dashboard" : "/client/me");
         return;
       }
 
@@ -193,7 +194,7 @@ function LoginContent() {
             inviteTid
           );
           router.refresh();
-          router.push(role === "client" ? "/client/me" : "/dashboard");
+          router.push(role === "client" ? "/client/me" : "/trainer/dashboard");
           return;
         }
 
@@ -281,12 +282,12 @@ function LoginContent() {
           router.push("/client/me");
           return;
         }
-        router.push("/dashboard");
+        router.push("/trainer/dashboard");
         return;
       }
 
       router.refresh();
-      router.push("/dashboard");
+      router.push("/trainer/dashboard");
     } finally {
       setLoading(false);
     }
@@ -395,7 +396,8 @@ function LoginContent() {
               </Label>
               <Input
                 id="email"
-                type="email"
+                type={demoMode ? "text" : "email"}
+                inputMode="email"
                 autoCapitalize="none"
                 autoComplete="email"
                 value={email}

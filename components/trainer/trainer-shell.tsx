@@ -337,8 +337,8 @@ export function TrainerShell({
   }
 
   return (
-    <div className="min-h-screen max-w-full overflow-x-hidden bg-black text-zinc-100">
-      <div className="flex min-h-screen min-w-0 max-w-full overflow-x-hidden">
+    <div className="min-h-screen max-w-full overflow-x-clip bg-black text-zinc-100">
+      <div className="flex min-h-screen min-w-0 max-w-full overflow-x-clip">
         <aside className="sticky top-0 hidden h-screen w-24 shrink-0 overflow-hidden border-r border-zinc-900 bg-zinc-950/88 px-4 py-5 lg:flex lg:flex-col">
           <div className="flex min-h-0 flex-1 flex-col items-center gap-6">
             <Link
@@ -482,7 +482,7 @@ export function TrainerShell({
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 overflow-x-hidden px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-4 lg:px-6 lg:py-5">{children}</main>
+          <main className="min-w-0 flex-1 overflow-x-clip px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-4 lg:px-6 lg:py-5">{children}</main>
         </div>
       </div>
 

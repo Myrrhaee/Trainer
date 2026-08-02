@@ -114,7 +114,7 @@ function ClientSettingsSupabasePage() {
 
       const profile = (data ?? null) as ProfileRow | null;
       if (profile?.role === "trainer") {
-        router.replace("/dashboard");
+        router.replace("/trainer/dashboard");
         return;
       }
 

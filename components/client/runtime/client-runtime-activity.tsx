@@ -14,7 +14,7 @@ export function ClientRuntimeActivity({ actorId }: { actorId: string }) {
   if (!actor || !items) return <main className="flex min-h-dvh items-center justify-center bg-black text-zinc-100"><h1 className="text-2xl font-semibold">Клиент не найден</h1></main>;
 
   return (
-    <ClientRuntimeShell actorId={actorId} actorName={actor.displayName} title="Активность" description="Понятные события клиентского пути, а не технический audit log.">
+    <ClientRuntimeShell actorId={actorId} actorName={actor.displayName} title="Активность" description="Тренировки, ответы тренера и другие важные события.">
       {items.length ? (
         <ol className="space-y-3" aria-label="События тренировочного пути">
           {items.map((item) => (

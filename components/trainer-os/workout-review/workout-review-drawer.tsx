@@ -99,10 +99,10 @@ function KnownReviewDrawer({ review, open, source, attentionItemId, onOpenChange
 
         <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
           <DialogContent className="max-w-md border-zinc-800 bg-zinc-950">
-            <DialogHeader><DialogTitle>Закрыть с несохранённым текстом?</DialogTitle><DialogDescription>Черновик останется доступен при повторном открытии в текущей browser session, но сообщение ещё не отправлено.</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle>Закрыть с несохранённым текстом?</DialogTitle><DialogDescription>Черновик останется доступен до закрытия этой вкладки, но сообщение ещё не отправлено.</DialogDescription></DialogHeader>
             <DialogFooter className="flex-col sm:flex-row">
               <Button type="button" variant="outline" onClick={() => setDiscardOpen(false)} className="rounded-full border-zinc-700">Продолжить редактирование</Button>
-              <Button type="button" onClick={() => { setDiscardOpen(false); onOpenChange(false); }} className="rounded-full bg-zinc-100 text-black hover:bg-white">Закрыть drawer</Button>
+              <Button type="button" onClick={() => { setDiscardOpen(false); onOpenChange(false); }} className="rounded-full bg-zinc-100 text-black hover:bg-white">Закрыть панель</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -117,8 +117,8 @@ function UnknownReviewDrawer({ open, onOpenChange }: WorkoutReviewDrawerProps) {
       <SheetContent side="right" className="!w-[calc(100vw-12px)] !max-w-[920px] border-zinc-800 bg-[#070707] text-zinc-100">
         <div className="flex min-h-full items-center justify-center p-6 text-center">
           <div className="max-w-sm">
-            <SheetTitle className="text-xl font-semibold text-zinc-50">Сессия не найдена</SheetTitle>
-            <SheetDescription className="mt-2 text-zinc-500">Drawer не подставил данные другого спортсмена. Вернитесь к очереди и откройте доступную тренировку.</SheetDescription>
+            <SheetTitle className="text-xl font-semibold text-zinc-50">Тренировка не найдена</SheetTitle>
+            <SheetDescription className="mt-2 text-zinc-500">Вернитесь к очереди и выберите доступную тренировку. Данные другого спортсмена не будут показаны.</SheetDescription>
             <Button asChild className="mt-5 rounded-full bg-lime-300 text-black hover:bg-lime-200"><Link href="/trainer/dashboard">К очереди</Link></Button>
           </div>
         </div>
