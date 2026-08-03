@@ -22,11 +22,11 @@ test.describe("Canonical three-role closed-alpha flow", () => {
     try {
       await page.goto("/trainer/dashboard");
       await expect(page).toHaveURL(/\/login\?next=%2Ftrainer%2Fdashboard/);
-      await expect(page.getByRole("heading", { name: "Вход в аккаунт" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Вход или регистрация" })).toBeVisible();
 
       await page.goto("/client/me");
       await expect(page).toHaveURL(/\/login\?next=%2Fclient%2Fme/);
-      await expect(page.getByRole("heading", { name: "Вход в аккаунт" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Вход или регистрация" })).toBeVisible();
       await expectNoHorizontalOverflow(page);
       expect(errors).toEqual([]);
     } finally {
@@ -170,7 +170,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
 });
 
 async function signInWithDevelopmentOtp(page: Page, email: string) {
-  await expect(page.getByRole("heading", { name: "Вход в аккаунт" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Вход или регистрация" })).toBeVisible();
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Получить код" }).click();
   const localCode = page.locator("p.font-mono");

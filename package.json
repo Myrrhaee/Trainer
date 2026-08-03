@@ -20,6 +20,7 @@
     "notifications:drain": "NODE_OPTIONS='--conditions=react-server' tsx scripts/notifications/drain.ts",
     "pilot:operator": "NODE_OPTIONS='--conditions=react-server' node --env-file=.env.development.local --import tsx scripts/ops/local-pilot.ts",
     "pilot:provision-local": "NODE_OPTIONS='--conditions=react-server' node --env-file=.env.development.local --import tsx scripts/ops/provision-local-pilot.ts",
+    "alpha:operator": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/closed-alpha.ts",
     "ops:validate-config": "tsx scripts/ops/validate-config.ts",
     "ops:preflight": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/preflight.ts",
     "ops:smoke-external": "node scripts/ops/smoke-external.mjs"

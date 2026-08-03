@@ -154,10 +154,10 @@ export function EmailOtpLogin() {
             {step === "complete" ? <Check aria-hidden /> : <Mail aria-hidden />}
           </div>
           <h1 className="text-xl font-semibold tracking-normal text-zinc-50">
-            {step === "complete" ? "Email подтверждён" : "Вход в аккаунт"}
+            {step === "complete" ? "Email подтверждён" : "Вход или регистрация"}
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {step === "email" && "Получите одноразовый код без пароля"}
+            {step === "email" && "Новый аккаунт создастся после подтверждения email"}
             {step === "code" && `Код отправлен на ${email.trim()}`}
             {step === "complete" && "Безопасная сессия создана"}
           </p>

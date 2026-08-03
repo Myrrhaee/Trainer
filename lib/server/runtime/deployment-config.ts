@@ -146,12 +146,27 @@ export function validateDeploymentConfig(
   if (context === "runtime" && external && value(env, "DATABASE_MIGRATION_URL")) {
     issue(issues, "database", "migration_credentials_exposed_to_runtime");
   }
+  if (context === "runtime" && external && value(env, "DATABASE_OPERATOR_URL")) {
+    issue(issues, "database", "operator_credentials_exposed_to_runtime");
+  }
   if (context === "preflight") {
     if (external && !value(env, "DATABASE_MIGRATION_URL")) {
       issue(issues, "database", "database_migration_url_required");
     }
     const parsed = parseDatabaseUrl(env, "DATABASE_MIGRATION_URL", issues, external);
     if (parsed) databaseUrls.set("DATABASE_MIGRATION_URL", parsed);
+    if (external && !value(env, "DATABASE_OPERATOR_URL")) {
+      issue(issues, "database", "database_operator_url_required");
+    }
+    const operator = parseDatabaseUrl(env, "DATABASE_OPERATOR_URL", issues, external);
+    if (operator) databaseUrls.set("DATABASE_OPERATOR_URL", operator);
+    const operatorRef = value(env, "ALPHA_OPERATOR_REF");
+    if (
+      external
+      && (!/^[a-z0-9][a-z0-9._-]{2,63}$/.test(operatorRef) || looksLikePlaceholder(operatorRef))
+    ) {
+      issue(issues, "environment", "alpha_operator_ref_required");
+    }
   }
 
   if (external) {

@@ -1,1 +1,1 @@
-export const expectedSchemaMigration = "0010_notification_outbox";
+export const expectedSchemaMigration = "0011_closed_alpha_operator";

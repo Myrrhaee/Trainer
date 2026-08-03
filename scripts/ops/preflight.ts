@@ -17,6 +17,7 @@ const runtimeRoles = [
   ["DATABASE_AUTH_URL", "ai_strength_authenticator"],
   ["DATABASE_HEALTH_URL", "ai_strength_health"],
   ["DATABASE_WORKER_URL", "ai_strength_worker"],
+  ["DATABASE_OPERATOR_URL", "ai_strength_operator"],
 ] as const;
 
 function configuredUrl(env: EnvironmentMap, name: string) {
@@ -120,7 +121,10 @@ export async function runPreflight(env: EnvironmentMap = process.env) {
     }
   }
 
-  for (const [name, expectedRole] of runtimeRoles) {
+  const roleChecks = config.stage === "staging" || config.stage === "production"
+    ? runtimeRoles
+    : runtimeRoles.filter(([name]) => name !== "DATABASE_OPERATOR_URL" || Boolean(configuredUrl(env, name)));
+  for (const [name, expectedRole] of roleChecks) {
     const connectionString = configuredUrl(env, name);
     if (!connectionString) {
       checks.push({ code: `${name.toLowerCase()}_connection_missing`, ok: false });

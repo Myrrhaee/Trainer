@@ -1,7 +1,7 @@
 # Closed Alpha Staging Runbook
 
 - Status: **repository preparation complete; external resources not provisioned**
-- Canonical schema: migrations `0001` through `0010`
+- Canonical schema: migrations `0001` through `0011`
 - Data rule: staging starts with synthetic accounts only
 
 ## Required Owners
@@ -49,10 +49,10 @@ The runtime must not receive `DATABASE_MIGRATION_URL`, generic `DATABASE_URL`, l
 1. Create the clean managed PostgreSQL staging database in the approved region.
 2. Create a short-lived owner connection for bootstrap only.
 3. Run `npm run db:bootstrap` to create the non-login group roles.
-4. Create five separate login identities and grant only their matching group roles: migrator, authenticator, app, health and worker.
+4. Create six separate login identities and grant only their matching group roles: migrator, authenticator, app, health, worker and closed-alpha operator.
 5. Remove owner credentials from the operator environment after the dedicated migration identity is proven.
 6. Run `npm run db:migrate` with `DATABASE_MIGRATION_URL` from an approved migration job.
-7. Run `npm run ops:validate-config -- --context=preflight`, then `npm run ops:preflight`, from an isolated operator job containing all five database URLs. A nonzero exit blocks deployment.
+7. Run `npm run ops:validate-config -- --context=preflight`, then `npm run ops:preflight`, from an isolated operator job containing all six database URLs. A nonzero exit blocks deployment.
 8. Deploy the application with runtime-only variables from `deployment/staging-runtime.env.example`.
 9. Require `/api/health/ready` to return HTTP 200 before routing alpha traffic.
 10. Run `EXTERNAL_BASE_URL=https://<staging-origin> npm run ops:smoke-external`.

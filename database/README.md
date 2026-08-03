@@ -17,6 +17,7 @@ The bootstrap creates non-login group roles:
 - `ai_strength_app`: ordinary actor-scoped product transactions;
 - `ai_strength_worker`: explicitly granted background work.
 - `ai_strength_health`: readiness-only access to checksummed migration metadata.
+- `ai_strength_operator`: closed-alpha activation through two audited functions only.
 
 The managed environment must create separate login roles and grant each login only its corresponding group role. Do not reuse the migration login in the application runtime.
 
@@ -42,13 +43,16 @@ All values are server-only. None may use a `NEXT_PUBLIC_` prefix.
 | `DATABASE_APP_URL` | Actor-scoped product login | `DATABASE_URL` |
 | `DATABASE_HEALTH_URL` | Least-privilege readiness login | `DATABASE_URL` |
 | `DATABASE_WORKER_URL` | Background notification worker login | `DATABASE_URL` |
+| `DATABASE_OPERATOR_URL` | Isolated closed-alpha operator login; never app runtime | none |
 | `DATABASE_POOL_MAX` | Maximum connections per runtime pool | `5` |
 | `DATABASE_CONNECTION_TIMEOUT_MS` | Pool connection timeout | `5000` |
 | `DATABASE_IDLE_TIMEOUT_MS` | Idle pooled connection timeout | `30000` |
 | `SESSION_IDLE_TTL_SECONDS` | Sliding idle session lifetime | `604800` (7 days) |
 | `SESSION_ABSOLUTE_TTL_SECONDS` | Non-extendable absolute lifetime | `2592000` (30 days) |
 | `AUTH_OTP_PEPPER` | Server-only HMAC key for OTP target, request and secret hashes | Random process-local value in development; required in production |
-| `AUTH_EMAIL_DELIVERY_MODE` | Email OTP delivery adapter | `memory` outside production; no production adapter yet |
+| `AUTH_EMAIL_DELIVERY_MODE` | Email OTP delivery adapter | `memory` locally/test; `resend` externally |
+| `RESEND_API_KEY` | Server-only transactional email credential | required externally |
+| `AUTH_EMAIL_FROM` | Verified transactional sender | required externally |
 | `AUTH_DEV_OTP_DISCLOSURE` | Return the local OTP to the development UI | Enabled outside production unless set to `false`; never available in production |
 | `AUTH_FLOW_SECRET` | HMAC and cookie-encryption secret for federated state, nonce and PKCE context | Random process-local value in development; required in production |
 | `AUTH_PUBLIC_ORIGIN` | Canonical origin used for provider callbacks | Request origin in development; required in production |
@@ -73,7 +77,7 @@ All values are server-only. None may use a `NEXT_PUBLIC_` prefix.
 
 Use separate URLs in staging/production. `DATABASE_URL` is a local/test convenience only.
 
-In staging/production, the application runtime must not receive `DATABASE_MIGRATION_URL` or `DATABASE_URL`. Run migrations and preflight in an isolated operator job, then deploy only the app, auth, health and worker URLs.
+In staging/production, the application runtime must not receive `DATABASE_MIGRATION_URL`, `DATABASE_OPERATOR_URL` or `DATABASE_URL`. Run migrations, preflight and closed-alpha activation in isolated jobs, then deploy only the app, auth, health and worker URLs.
 
 ## Deployment Preflight
 
@@ -108,6 +112,8 @@ The B9 verification covers explicit deployment profiles, runtime/migration crede
 The B10 verification covers Telegram Mini App HMAC validation, payload freshness, duplicate-field rejection, one-time replay protection, convergence with the browser OIDC identity key and invitation hand-off through a verified `start_param`.
 
 The B11 verification covers transactional notification events for assignment, completion and trainer feedback, event deduplication, actor-bound RLS, explicit Telegram messaging consent, worker-only claiming, generic message copy, memory delivery, retries, dead letters and migration rollback/remigrate.
+
+The B16 verification covers the staging-only closed-alpha operator, denial of direct participant-table reads, verified pending-request activation, pseudonymous audit provenance and non-PII readiness for exactly one trainer and two athletes.
 
 ## Notification Worker
 

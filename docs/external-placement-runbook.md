@@ -7,7 +7,7 @@
 
 ## Architecture Boundary
 
-The browser talks only to the public HTTPS Next.js application. The application uses four distinct PostgreSQL runtime identities: app, authenticator, health and worker. A fifth migration identity exists only in an isolated operator environment. Resend receives OTP email requests from server-side code only. No database URL, OTP pepper, flow secret, provider token or migration credential may use a `NEXT_PUBLIC_` prefix.
+The browser talks only to the public HTTPS Next.js application. The application uses four distinct PostgreSQL runtime identities: app, authenticator, health and worker. Migration and closed-alpha operator identities exist only in isolated operator environments. Resend receives OTP email requests from server-side code only. No database URL, OTP pepper, flow secret, provider token or migration credential may use a `NEXT_PUBLIC_` prefix.
 
 Telegram workout notifications remain disabled for the first deployment unless a separate worker schedule, bot token and consent rehearsal have been approved. Email OTP is required because users need a working sign-in path before an external environment may report ready.
 
@@ -32,7 +32,7 @@ Do not invite real participants while any owner is blank.
 
 Use `deployment/staging-runtime.env.example` as the runtime key list. Enter values directly in the hosting provider secret store; do not create a tracked `.env` file. The runtime must not receive `DATABASE_MIGRATION_URL`, generic `DATABASE_URL`, owner credentials or legacy Supabase service-role credentials.
 
-Use `deployment/staging-operator.env.example` only in an isolated migration/preflight shell. Remove the file or secret injection after the job. The operator environment contains the migration identity and must never be attached to a web deployment.
+Use `deployment/staging-operator.env.example` only in an isolated migration/preflight shell. Remove the file or secret injection after the job. The environment contains separate migration and closed-alpha operator identities and must never be attached to a web deployment.
 
 The tracked examples are intentionally not deployable: `ops:validate-config` rejects their `replace-*` values. Copy the key list into the provider secret store and replace every placeholder before expecting a passing gate.
 
@@ -42,7 +42,7 @@ Generate `AUTH_OTP_PEPPER` and `AUTH_FLOW_SECRET` independently. Both must conta
 
 1. Create the managed PostgreSQL database with encrypted external connections and provider-managed backups.
 2. Bootstrap the non-login group roles with a short-lived owner connection.
-3. Create five distinct login identities and grant only the matching canonical group role.
+3. Create six distinct login identities and grant only the matching canonical group role.
 4. Inject `deployment/staging-operator.env.example` values into an isolated shell.
 5. Run `npm run db:migrate` and `npm run ops:preflight`.
 6. Configure the public host from `deployment/staging-runtime.env.example` with `APP_RELEASE` set to the immutable Git commit.

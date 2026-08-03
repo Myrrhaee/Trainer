@@ -15,6 +15,8 @@ function stagingEnvironment(overrides: EnvironmentMap = {}): EnvironmentMap {
     DATABASE_AUTH_URL: "postgresql://runtime_auth:secret@auth.example.test/db?sslmode=verify-full",
     DATABASE_HEALTH_URL: "postgresql://runtime_health:secret@health.example.test/db?sslmode=verify-full",
     DATABASE_WORKER_URL: "postgresql://runtime_worker:secret@worker.example.test/db?sslmode=verify-full",
+    DATABASE_OPERATOR_URL: "postgresql://runtime_operator:secret@operator.example.test/db?sslmode=verify-full",
+    ALPHA_OPERATOR_REF: "founder-alpha",
     DATABASE_MIGRATION_URL: "postgresql://runtime_migration:secret@migrate.example.test/db?sslmode=verify-full",
     AUTH_OTP_PEPPER: "otp-pepper-with-at-least-thirty-two-bytes",
     AUTH_FLOW_SECRET: "flow-secret-with-at-least-thirty-two-bytes",
@@ -88,9 +90,24 @@ test("runtime rejects migration credentials, demo escape hatches and development
     AUTH_DEV_OTP_DISCLOSURE: "true",
   }), "runtime");
   assert.ok(reportCodes.includes("migration_credentials_exposed_to_runtime"));
+  assert.ok(reportCodes.includes("operator_credentials_exposed_to_runtime"));
   assert.ok(reportCodes.includes("demo_mode_forbidden"));
   assert.ok(reportCodes.includes("legacy_runtime_forbidden"));
   assert.ok(reportCodes.includes("development_otp_disclosure_must_be_disabled"));
+});
+
+test("external preflight requires a distinct operator identity", () => {
+  const missingCodes = codes(stagingEnvironment({
+    DATABASE_OPERATOR_URL: "",
+    ALPHA_OPERATOR_REF: "replace-with-operator-reference",
+  }));
+  assert.ok(missingCodes.includes("database_operator_url_required"));
+  assert.ok(missingCodes.includes("alpha_operator_ref_required"));
+
+  const sharedCodes = codes(stagingEnvironment({
+    DATABASE_OPERATOR_URL: stagingEnvironment().DATABASE_WORKER_URL,
+  }));
+  assert.ok(sharedCodes.includes("database_identities_must_be_distinct"));
 });
 
 test("external notification delivery is disabled by default and validates live Telegram mode", () => {
