@@ -3,7 +3,7 @@ export type DeploymentValidationContext = "runtime" | "preflight";
 export type EnvironmentMap = Record<string, string | undefined>;
 
 export type DeploymentConfigIssue = {
-  area: "environment" | "database" | "auth" | "email" | "runtime";
+  area: "environment" | "database" | "auth" | "email" | "notifications" | "runtime";
   code: string;
 };
 
@@ -33,6 +33,10 @@ function issue(
   code: string,
 ) {
   if (!issues.some((item) => item.code === code)) issues.push({ area, code });
+}
+
+function looksLikePlaceholder(input: string) {
+  return /(replace([_-]?with)?|change[_-]?me|your[_-])/i.test(input);
 }
 
 export function resolveDeploymentStage(env: EnvironmentMap): DeploymentStage {
@@ -71,6 +75,9 @@ function parseDatabaseUrl(
     if (forbiddenDatabaseUsers.has(decodeURIComponent(parsed.username).toLowerCase())) {
       issue(issues, "database", `${name.toLowerCase()}_privileged_identity`);
     }
+    if (looksLikePlaceholder(decodeURIComponent(parsed.password))) {
+      issue(issues, "database", `${name.toLowerCase()}_placeholder_credentials`);
+    }
     const sslMode = parsed.searchParams.get("sslmode")?.toLowerCase();
     if (sslMode !== "require" && sslMode !== "verify-ca" && sslMode !== "verify-full") {
       issue(issues, "database", `${name.toLowerCase()}_tls_required`);
@@ -103,6 +110,12 @@ function isEnabled(env: EnvironmentMap, name: string) {
   return value(env, name).toLowerCase() === "true";
 }
 
+function isEmailSender(input: string) {
+  const bracketed = input.match(/<([^<>]+)>$/)?.[1];
+  const address = bracketed ?? input;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address);
+}
+
 export function validateDeploymentConfig(
   env: EnvironmentMap,
   context: DeploymentValidationContext = "runtime",
@@ -116,7 +129,11 @@ export function validateDeploymentConfig(
     issue(issues, "environment", "app_env_invalid");
   }
   if (external && !explicitStage) issue(issues, "environment", "app_env_required");
-  if (external && !value(env, "APP_RELEASE")) issue(issues, "environment", "app_release_required");
+  const appRelease = value(env, "APP_RELEASE");
+  if (external && !appRelease) issue(issues, "environment", "app_release_required");
+  if (external && looksLikePlaceholder(appRelease)) {
+    issue(issues, "environment", "app_release_placeholder");
+  }
 
   const databaseUrls = new Map<string, URL>();
   for (const name of runtimeDatabaseVariables) {
@@ -148,8 +165,12 @@ export function validateDeploymentConfig(
 
   const otpPepper = value(env, "AUTH_OTP_PEPPER");
   const flowSecret = value(env, "AUTH_FLOW_SECRET");
-  if (external && Buffer.byteLength(otpPepper, "utf8") < 32) issue(issues, "auth", "auth_otp_pepper_required");
-  if (external && Buffer.byteLength(flowSecret, "utf8") < 32) issue(issues, "auth", "auth_flow_secret_required");
+  if (external && (Buffer.byteLength(otpPepper, "utf8") < 32 || looksLikePlaceholder(otpPepper))) {
+    issue(issues, "auth", "auth_otp_pepper_required");
+  }
+  if (external && (Buffer.byteLength(flowSecret, "utf8") < 32 || looksLikePlaceholder(flowSecret))) {
+    issue(issues, "auth", "auth_flow_secret_required");
+  }
   if (external && otpPepper && flowSecret && otpPepper === flowSecret) {
     issue(issues, "auth", "auth_secrets_must_be_distinct");
   }
@@ -158,10 +179,24 @@ export function validateDeploymentConfig(
   if (external && value(env, "AUTH_DEV_OTP_DISCLOSURE") !== "false") {
     issue(issues, "auth", "development_otp_disclosure_must_be_disabled");
   }
-  if (external && value(env, "AUTH_EMAIL_DELIVERY_MODE") === "memory") {
-    issue(issues, "email", "memory_email_delivery_forbidden");
-  } else if (external) {
-    issue(issues, "email", "email_delivery_adapter_unavailable");
+  if (external) {
+    const emailMode = value(env, "AUTH_EMAIL_DELIVERY_MODE");
+    if (emailMode === "memory") {
+      issue(issues, "email", "memory_email_delivery_forbidden");
+    } else if (emailMode !== "resend") {
+      issue(issues, "email", "email_delivery_mode_must_be_resend");
+    }
+    const resendApiKey = value(env, "RESEND_API_KEY");
+    if (
+      Buffer.byteLength(resendApiKey, "utf8") < 20
+      || /\s/.test(resendApiKey)
+      || looksLikePlaceholder(resendApiKey)
+    ) {
+      issue(issues, "email", "resend_api_key_required");
+    }
+    if (!isEmailSender(value(env, "AUTH_EMAIL_FROM"))) {
+      issue(issues, "email", "auth_email_from_required");
+    }
   }
 
   const telegramClientId = value(env, "TELEGRAM_CLIENT_ID");
@@ -171,6 +206,16 @@ export function validateDeploymentConfig(
   }
 
   if (external && isEnabled(env, "NEXT_PUBLIC_DEMO_MODE")) issue(issues, "runtime", "demo_mode_forbidden");
+  const notificationMode = value(env, "NOTIFICATION_DELIVERY_MODE") || "disabled";
+  if (external && notificationMode === "memory") {
+    issue(issues, "notifications", "memory_notification_delivery_forbidden");
+  }
+  if (external && !["memory", "disabled", "telegram"].includes(notificationMode)) {
+    issue(issues, "notifications", "notification_delivery_mode_invalid");
+  }
+  if (external && notificationMode === "telegram" && !value(env, "TELEGRAM_BOT_TOKEN")) {
+    issue(issues, "notifications", "telegram_bot_token_required");
+  }
   for (const name of [
     "ENABLE_LEGACY_SUPABASE_ONBOARDING",
     "NEXT_PUBLIC_ENABLE_LEGACY_SUPABASE_ROSTER",

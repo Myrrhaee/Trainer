@@ -1,6 +1,6 @@
 # Closed Alpha Staging Runbook
 
-- Status: **executable locally; external provisioning blocked**
+- Status: **repository preparation complete; external resources not provisioned**
 - Canonical schema: migrations `0001` through `0010`
 - Data rule: staging starts with synthetic accounts only
 
@@ -35,7 +35,10 @@ AUTH_PUBLIC_ORIGIN=https://<staging origin>
 AUTH_OTP_PEPPER=<managed secret, at least 32 bytes>
 AUTH_FLOW_SECRET=<different managed secret, at least 32 bytes>
 AUTH_DEV_OTP_DISCLOSURE=false
-AUTH_EMAIL_DELIVERY_MODE=<implemented production adapter>
+AUTH_EMAIL_DELIVERY_MODE=resend
+RESEND_API_KEY=<managed server-only secret>
+AUTH_EMAIL_FROM=<verified sender>
+NOTIFICATION_DELIVERY_MODE=disabled
 NEXT_PUBLIC_DEMO_MODE=false
 ```
 
@@ -49,10 +52,11 @@ The runtime must not receive `DATABASE_MIGRATION_URL`, generic `DATABASE_URL`, l
 4. Create five separate login identities and grant only their matching group roles: migrator, authenticator, app, health and worker.
 5. Remove owner credentials from the operator environment after the dedicated migration identity is proven.
 6. Run `npm run db:migrate` with `DATABASE_MIGRATION_URL` from an approved migration job.
-7. Run `npm run ops:preflight` from an isolated operator job containing all five database URLs. A nonzero exit blocks deployment.
-8. Deploy the application with runtime-only variables.
+7. Run `npm run ops:validate-config -- --context=preflight`, then `npm run ops:preflight`, from an isolated operator job containing all five database URLs. A nonzero exit blocks deployment.
+8. Deploy the application with runtime-only variables from `deployment/staging-runtime.env.example`.
 9. Require `/api/health/ready` to return HTTP 200 before routing alpha traffic.
-10. Record release ID, migration checksums, preflight output, owner and timestamp without recording secrets.
+10. Run `EXTERNAL_BASE_URL=https://<staging-origin> npm run ops:smoke-external`.
+11. Record release ID, migration checksums, preflight and smoke output, owner and timestamp without recording secrets.
 
 ## Staging Acceptance
 
@@ -99,7 +103,7 @@ Staging deployment must remain blocked while any of these is true:
 - no named provider/region/owners;
 - no separate database identities;
 - no demonstrated restore;
-- no implemented transactional email adapter;
+- no verified sender domain or successful synthetic email delivery;
 - development OTP disclosure or demo/legacy mode enabled;
 - migration identity present in runtime;
 - preflight nonzero;

@@ -37,12 +37,62 @@ export class UnavailableEmailOtpDelivery implements EmailOtpDelivery {
   }
 }
 
+export class ResendEmailOtpDelivery implements EmailOtpDelivery {
+  constructor(
+    private readonly apiKey: string,
+    private readonly from: string,
+    private readonly request: typeof fetch = fetch,
+  ) {
+    if (!apiKey.trim() || !from.trim()) {
+      throw new Error("Resend email delivery is not configured");
+    }
+  }
+
+  async send(message: EmailOtpMessage) {
+    let response: Response;
+    try {
+      response = await this.request("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": `email-otp/${message.challengeId}`,
+        },
+        body: JSON.stringify({
+          from: this.from,
+          to: [message.email],
+          subject: "Код входа в AI Strength Coach",
+          text: [
+            `Ваш код входа: ${message.code}`,
+            "",
+            "Если вы не запрашивали код, проигнорируйте это письмо.",
+          ].join("\n"),
+        }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch {
+      throw new Error("Email OTP delivery transport failed");
+    }
+
+    if (!response.ok) {
+      throw new Error(`Email OTP delivery failed with status ${response.status}`);
+    }
+  }
+}
+
 export function getEmailOtpDelivery(): EmailOtpDelivery {
   const mode = process.env.AUTH_EMAIL_DELIVERY_MODE
     ?? (process.env.NODE_ENV === "production" ? "unavailable" : "memory");
 
   if (mode === "memory" && process.env.NODE_ENV !== "production") {
     return new MemoryEmailOtpDelivery();
+  }
+  if (mode === "resend") {
+    return new ResendEmailOtpDelivery(
+      process.env.RESEND_API_KEY?.trim() ?? "",
+      process.env.AUTH_EMAIL_FROM?.trim() ?? "",
+    );
   }
   return new UnavailableEmailOtpDelivery();
 }

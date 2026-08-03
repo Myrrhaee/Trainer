@@ -13,13 +13,16 @@
     "test:e2e": "playwright test",
     "test:e2e:canonical": "node --env-file=.env.development.local scripts/e2e/run-canonical.mjs",
     "test:backend": "NODE_OPTIONS='--conditions=react-server' tsx --test tests/backend-foundation/*.test.ts",
+    "test:backend:postgres": "node --env-file=.env.development.local scripts/test/run-backend-postgres.mjs",
     "db:bootstrap": "node scripts/db/bootstrap.mjs",
     "db:migrate": "node scripts/db/migrate.mjs",
     "db:rollback": "node scripts/db/rollback.mjs",
     "notifications:drain": "NODE_OPTIONS='--conditions=react-server' tsx scripts/notifications/drain.ts",
     "pilot:operator": "NODE_OPTIONS='--conditions=react-server' node --env-file=.env.development.local --import tsx scripts/ops/local-pilot.ts",
     "pilot:provision-local": "NODE_OPTIONS='--conditions=react-server' node --env-file=.env.development.local --import tsx scripts/ops/provision-local-pilot.ts",
-    "ops:preflight": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/preflight.ts"
+    "ops:validate-config": "tsx scripts/ops/validate-config.ts",
+    "ops:preflight": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/preflight.ts",
+    "ops:smoke-external": "node scripts/ops/smoke-external.mjs"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

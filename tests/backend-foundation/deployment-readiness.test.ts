@@ -20,7 +20,10 @@ function stagingEnvironment(overrides: EnvironmentMap = {}): EnvironmentMap {
     AUTH_FLOW_SECRET: "flow-secret-with-at-least-thirty-two-bytes",
     AUTH_PUBLIC_ORIGIN: "https://staging.example.test",
     AUTH_DEV_OTP_DISCLOSURE: "false",
-    AUTH_EMAIL_DELIVERY_MODE: "unavailable",
+    AUTH_EMAIL_DELIVERY_MODE: "resend",
+    RESEND_API_KEY: "re_synthetic_external_test_key",
+    AUTH_EMAIL_FROM: "AI Strength Coach <login@example.test>",
+    NOTIFICATION_DELIVERY_MODE: "disabled",
     NEXT_PUBLIC_DEMO_MODE: "false",
     ...overrides,
   };
@@ -37,10 +40,34 @@ test("deployment stage is explicit when supplied and conservative in production"
   assert.equal(resolveDeploymentStage({}), "local");
 });
 
-test("external deployment stays blocked until a real email adapter exists", () => {
+test("external deployment accepts the complete Resend-backed profile", () => {
   const report = validateDeploymentConfig(stagingEnvironment(), "preflight");
-  assert.equal(report.ready, false);
-  assert.deepEqual(report.issues, [{ area: "email", code: "email_delivery_adapter_unavailable" }]);
+  assert.equal(report.ready, true);
+  assert.deepEqual(report.issues, []);
+});
+
+test("external deployment requires a configured transactional email adapter", () => {
+  const reportCodes = codes(stagingEnvironment({
+    AUTH_EMAIL_DELIVERY_MODE: "memory",
+    RESEND_API_KEY: "",
+    AUTH_EMAIL_FROM: "",
+  }));
+  assert.ok(reportCodes.includes("memory_email_delivery_forbidden"));
+  assert.ok(reportCodes.includes("resend_api_key_required"));
+  assert.ok(reportCodes.includes("auth_email_from_required"));
+});
+
+test("external deployment rejects tracked example placeholders", () => {
+  const reportCodes = codes(stagingEnvironment({
+    APP_RELEASE: "replace-with-immutable-commit-hash",
+    DATABASE_APP_URL: "postgresql://runtime_app:replace-me@app.example.test/db?sslmode=verify-full",
+    AUTH_OTP_PEPPER: "replace-with-random-secret-at-least-32-bytes",
+    RESEND_API_KEY: "re_replace_with_provider_secret",
+  }));
+  assert.ok(reportCodes.includes("app_release_placeholder"));
+  assert.ok(reportCodes.includes("database_app_url_placeholder_credentials"));
+  assert.ok(reportCodes.includes("auth_otp_pepper_required"));
+  assert.ok(reportCodes.includes("resend_api_key_required"));
 });
 
 test("external deployment rejects shared, privileged, local and unencrypted database identities", () => {
@@ -64,6 +91,22 @@ test("runtime rejects migration credentials, demo escape hatches and development
   assert.ok(reportCodes.includes("demo_mode_forbidden"));
   assert.ok(reportCodes.includes("legacy_runtime_forbidden"));
   assert.ok(reportCodes.includes("development_otp_disclosure_must_be_disabled"));
+});
+
+test("external notification delivery is disabled by default and validates live Telegram mode", () => {
+  assert.equal(validateDeploymentConfig(stagingEnvironment({
+    NOTIFICATION_DELIVERY_MODE: "",
+  }), "preflight").ready, true);
+
+  const memoryCodes = codes(stagingEnvironment({ NOTIFICATION_DELIVERY_MODE: "memory" }));
+  assert.ok(memoryCodes.includes("memory_notification_delivery_forbidden"));
+  assert.equal(memoryCodes.includes("notification_delivery_mode_invalid"), false);
+
+  const telegramCodes = codes(stagingEnvironment({ NOTIFICATION_DELIVERY_MODE: "telegram" }));
+  assert.ok(telegramCodes.includes("telegram_bot_token_required"));
+
+  const invalidCodes = codes(stagingEnvironment({ NOTIFICATION_DELIVERY_MODE: "webhook" }));
+  assert.ok(invalidCodes.includes("notification_delivery_mode_invalid"));
 });
 
 test("configuration reports contain issue codes but never secret values", () => {
