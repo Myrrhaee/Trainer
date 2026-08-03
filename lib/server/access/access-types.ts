@@ -4,6 +4,7 @@ export type RelationStatus = "active" | "suspended" | "ended";
 
 export interface AccessContext {
   userId: string;
+  displayName: string | null;
   trainer: { status: TrainerCapabilityStatus } | null;
   athlete: { status: AthleteCapabilityStatus } | null;
   destination: "/trainer/dashboard" | "/client/me" | "/onboarding" | "/workspaces";

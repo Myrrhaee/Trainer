@@ -6,11 +6,12 @@ import { resolveDeploymentStage } from "../../lib/server/runtime/deployment-conf
 const origin = process.env.AUTH_PUBLIC_ORIGIN?.trim() || "http://127.0.0.1:3011";
 const trainerEmail = "trainer.local@example.test";
 const athleteEmails = ["athlete-one.local@example.test", "athlete-two.local@example.test"];
+const participantNames = ["Тестовый тренер", "Анна Пилот", "Иван Пилот"];
 
 type AuthenticatedAccount = { email: string; cookie: string };
 
 async function request(path: string, input: {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH";
   body?: Record<string, unknown>;
   cookie?: string;
 } = {}) {
@@ -206,6 +207,11 @@ async function main() {
   process.stdout.write("Pilot provisioning: authenticating three canonical accounts\n");
   const trainer = await authenticate(trainerEmail);
   const athletes = await Promise.all(athleteEmails.map(authenticate));
+  await Promise.all([trainer, ...athletes].map((account, index) => request("/api/account/profile", {
+    method: "PATCH",
+    cookie: account.cookie,
+    body: { displayName: participantNames[index] },
+  })));
   await post("/api/access/trainer-request", { cookie: trainer.cookie });
 
   const pool = new Pool({

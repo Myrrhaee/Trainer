@@ -221,19 +221,27 @@ export function CanonicalTrainerRoster() {
                 {athletes.map((athlete) => {
                   const active = athlete.athleteUserId === selectedAthleteId;
                   return (
-                    <button
+                    <div
                       key={athlete.athleteUserId}
-                      type="button"
-                      onClick={() => setSelectedAthleteId(athlete.athleteUserId)}
-                      className={`flex min-h-20 w-full items-center gap-3 px-3 py-3 text-left transition ${active ? "bg-lime-300/[0.08]" : "hover:bg-zinc-900/70"}`}
+                      className={`flex min-h-20 items-center gap-2 px-3 py-3 transition ${active ? "bg-lime-300/[0.08]" : "hover:bg-zinc-900/70"}`}
                     >
-                      <Avatar className="size-11"><AvatarFallback className="bg-zinc-800 text-zinc-100">{athlete.initials}</AvatarFallback></Avatar>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{athlete.displayName}</span>
-                        <span className="mt-1 block text-xs text-zinc-500">Активная связь</span>
-                      </span>
-                      {active ? <CheckCircle2 className="size-4 text-lime-300" /> : null}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAthleteId(athlete.athleteUserId)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        aria-pressed={active}
+                      >
+                        <Avatar className="size-11"><AvatarFallback className="bg-zinc-800 text-zinc-100">{athlete.initials}</AvatarFallback></Avatar>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">{athlete.displayName}</span>
+                          <span className="mt-1 block text-xs text-zinc-500">Активная связь</span>
+                        </span>
+                        {active ? <CheckCircle2 className="size-4 text-lime-300" /> : null}
+                      </button>
+                      <Button asChild type="button" size="sm" variant="ghost" className="shrink-0 rounded-lg text-zinc-400">
+                        <Link href={`/trainer/clients/${athlete.athleteUserId}`}>Профиль</Link>
+                      </Button>
+                    </div>
                   );
                 })}
               </div>

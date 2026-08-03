@@ -15,6 +15,7 @@ import type {
 } from "@/lib/server/access/access-types";
 
 interface ContextRow {
+  display_name: string | null;
   trainer_status: TrainerCapabilityStatus | null;
   athlete_status: AthleteCapabilityStatus | null;
 }
@@ -54,7 +55,8 @@ export class PostgresAccessRepository {
   async context(actor: Actor): Promise<AccessContext> {
     return withActorTransaction(actor, async (client) => {
       const result = await client.query<ContextRow>(
-        `SELECT trainer.status::text AS trainer_status,
+        `SELECT account.display_name,
+                trainer.status::text AS trainer_status,
                 athlete.status::text AS athlete_status
          FROM app.users account
          LEFT JOIN app.trainer_profiles trainer ON trainer.user_id = account.id
@@ -62,9 +64,10 @@ export class PostgresAccessRepository {
          WHERE account.id = $1`,
         [actor.userId],
       );
-      const row = result.rows[0] ?? { trainer_status: null, athlete_status: null };
+      const row = result.rows[0] ?? { display_name: null, trainer_status: null, athlete_status: null };
       return {
         userId: actor.userId,
+        displayName: row.display_name?.trim() || null,
         trainer: row.trainer_status ? { status: row.trainer_status } : null,
         athlete: row.athlete_status ? { status: row.athlete_status } : null,
         destination: destination(row),

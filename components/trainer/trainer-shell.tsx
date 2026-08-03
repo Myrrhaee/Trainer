@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -256,19 +256,38 @@ export function TrainerShell({
   title,
   description,
   eyebrow = "Личный кабинет тренера",
-  trainerName = "Алексей Романов",
-  teamName = "Romanov Coaching",
+  trainerName,
+  teamName,
   headerAction,
   children,
 }: TrainerShellProps) {
+  const demoMode = isDemoModeEnabled();
   const pathname = usePathname();
   const router = useRouter();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>("all");
-  const [notifications, setNotifications] = useState<TrainerNotification[]>(initialNotifications);
+  const [notifications, setNotifications] = useState<TrainerNotification[]>(() => demoMode ? initialNotifications : []);
   const [commandOpen, setCommandOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [accountName, setAccountName] = useState<string | null>(null);
+  const visibleTrainerName = trainerName ?? accountName ?? (demoMode ? "Алексей Романов" : "Тренер");
+  const visibleTeamName = teamName ?? (demoMode ? "Romanov Coaching" : "AI Strength Coach");
+  const visibleCommandGroups = demoMode
+    ? commandGroups
+    : commandGroups.filter((group) => group.title !== "Клиенты");
+
+  useEffect(() => {
+    if (demoMode) return;
+    let cancelled = false;
+    void fetch("/api/account/profile", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() as Promise<{ profile: { displayName: string | null } }> : null)
+      .then((body) => {
+        if (!cancelled && body?.profile.displayName) setAccountName(body.profile.displayName);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [demoMode]);
 
   const unreadCount = notifications.filter((item) => item.unread).length;
   const riskCount = notifications.filter((item) => item.tone === "risk").length;
@@ -420,12 +439,12 @@ export function TrainerShell({
                   <div className="flex items-center gap-3 rounded-full border border-zinc-800 bg-zinc-950/70 px-3 py-2">
                     <Avatar className="h-9 w-9 rounded-full bg-zinc-900">
                       <AvatarFallback className="bg-zinc-900 text-zinc-100">
-                        {initials(trainerName)}
+                        {initials(visibleTrainerName)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="pr-1">
-                      <p className="text-sm font-medium text-zinc-100">{trainerName}</p>
-                      <p className="text-xs text-zinc-500">{teamName}</p>
+                      <p className="text-sm font-medium text-zinc-100">{visibleTrainerName}</p>
+                      <p className="text-xs text-zinc-500">{visibleTeamName}</p>
                     </div>
                     <button
                       type="button"
@@ -472,7 +491,7 @@ export function TrainerShell({
                   >
                     <Avatar className="h-8 w-8 rounded-full bg-zinc-900">
                       <AvatarFallback className="bg-zinc-900 text-xs text-zinc-100">
-                        {initials(trainerName)}
+                        {initials(visibleTrainerName)}
                       </AvatarFallback>
                     </Avatar>
                   </button>
@@ -542,7 +561,7 @@ export function TrainerShell({
             <CommandEmpty className="py-10 text-sm text-zinc-500">
               Ничего не найдено
             </CommandEmpty>
-            {commandGroups.map((group, groupIndex) => (
+            {visibleCommandGroups.map((group, groupIndex) => (
               <div key={group.title}>
                 {groupIndex > 0 ? <CommandSeparator className="bg-zinc-800" /> : null}
                 <CommandGroup
@@ -590,12 +609,12 @@ export function TrainerShell({
             <div className="flex items-center gap-3 rounded-[1.25rem] border border-zinc-800 bg-black/24 p-4">
               <Avatar className="h-12 w-12 rounded-full bg-zinc-900">
                 <AvatarFallback className="bg-zinc-900 text-sm text-zinc-100">
-                  {initials(trainerName)}
+                  {initials(visibleTrainerName)}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-zinc-100">{trainerName}</p>
-                <p className="mt-1 truncate text-xs text-zinc-500">{teamName}</p>
+                <p className="truncate text-sm font-semibold text-zinc-100">{visibleTrainerName}</p>
+                <p className="mt-1 truncate text-xs text-zinc-500">{visibleTeamName}</p>
               </div>
             </div>
             <Button

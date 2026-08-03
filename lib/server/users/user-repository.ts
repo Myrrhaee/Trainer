@@ -68,4 +68,23 @@ export class PostgresUserRepository {
       return result.rowCount ? mapUser(result.rows[0]) : null;
     }, this.appPool);
   }
+
+  async updateDisplayName(actor: Actor, displayName: string) {
+    return withActorTransaction(actor, async (client) => {
+      const result = await client.query<UserRow>(
+        `UPDATE app.users
+         SET display_name = $2
+         WHERE id = $1
+         RETURNING *`,
+        [actor.userId, displayName],
+      );
+      if (!result.rowCount) return null;
+      await client.query(
+        `INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
+         VALUES ($1, $1, 'account.profile.updated', '{}'::jsonb)`,
+        [actor.userId],
+      );
+      return mapUser(result.rows[0]);
+    }, this.appPool);
+  }
 }

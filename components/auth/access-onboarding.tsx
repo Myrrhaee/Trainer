@@ -5,8 +5,11 @@ import Link from "next/link";
 import { ArrowRight, Check, Dumbbell, Link2, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Context = {
+  displayName: string | null;
   trainer: { status: "pending" | "active" | "suspended" | "archived" } | null;
   athlete: { status: "active" | "suspended" | "archived" } | null;
   destination: "/trainer/dashboard" | "/client/me" | "/onboarding" | "/workspaces";
@@ -15,7 +18,8 @@ type Context = {
 export function AccessOnboarding({ invitationToken }: { invitationToken: string | null }) {
   const [context, setContext] = useState<Context | null>(null);
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState<"trainer" | "athlete" | null>(null);
+  const [busy, setBusy] = useState<"profile" | "trainer" | "athlete" | null>(null);
+  const [displayName, setDisplayName] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,11 +36,40 @@ export function AccessOnboarding({ invitationToken }: { invitationToken: string 
       setMessage("Сервис профилей временно недоступен.");
       return;
     }
-    setContext(await response.json() as Context);
+    const next = await response.json() as Context;
+    setContext(next);
+    setDisplayName(next.displayName ?? "");
     setAuthenticated(true);
   }
 
+  async function saveProfile() {
+    if (displayName.trim().length < 2) {
+      setMessage("Укажите имя длиной не менее двух символов.");
+      return;
+    }
+    setBusy("profile");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/account/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName }),
+      });
+      if (!response.ok) throw new Error("profile_failed");
+      await loadContext();
+      setMessage("Имя сохранено.");
+    } catch {
+      setMessage("Не удалось сохранить имя. Попробуйте ещё раз.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function requestTrainer() {
+    if (!context?.displayName) {
+      setMessage("Сначала сохраните имя.");
+      return;
+    }
     setBusy("trainer");
     setMessage(null);
     try {
@@ -53,6 +86,10 @@ export function AccessOnboarding({ invitationToken }: { invitationToken: string 
 
   async function acceptInvitation() {
     if (!invitationToken) return;
+    if (!context?.displayName) {
+      setMessage("Сначала сохраните имя.");
+      return;
+    }
     setBusy("athlete");
     setMessage(null);
     try {
@@ -108,58 +145,78 @@ export function AccessOnboarding({ invitationToken }: { invitationToken: string 
         )}
 
         {authenticated && context && (
-          <div className="mt-8 grid gap-px overflow-hidden border border-zinc-800 bg-zinc-800 sm:grid-cols-2">
-            <div className="bg-zinc-950 p-5">
-              <Dumbbell className="size-5 text-lime-300" aria-hidden />
-              <h2 className="mt-4 text-base font-semibold">Пространство тренера</h2>
-              <p className="mt-2 min-h-10 text-sm text-zinc-500">
-                Для closed alpha требуется ручная активация.
-              </p>
-              {context.trainer?.status === "active" ? (
-                <Button asChild className="mt-5 w-full bg-zinc-100 text-black hover:bg-white">
-                  <Link href="/trainer/dashboard">Открыть кабинет</Link>
+          <>
+            <div className="mt-8 border border-zinc-800 bg-zinc-950 p-5">
+              <Label htmlFor="onboarding-display-name" className="text-sm text-zinc-300">Как вас зовут</Label>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="onboarding-display-name"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  maxLength={120}
+                  autoComplete="name"
+                  placeholder="Имя и фамилия"
+                  className="min-h-11 border-zinc-700 bg-black"
+                />
+                <Button type="button" variant="outline" disabled={busy !== null || displayName.trim().length < 2 || displayName.trim() === context.displayName} onClick={() => void saveProfile()} className="min-h-11 border-zinc-700">
+                  {busy === "profile" ? "Сохраняем..." : context.displayName ? "Обновить" : "Сохранить"}
                 </Button>
-              ) : context.trainer?.status === "pending" ? (
-                <p className="mt-5 flex h-10 items-center gap-2 text-sm text-amber-300">
-                  <Check className="size-4" aria-hidden /> Заявка ожидает активации
+              </div>
+              <p className="mt-2 text-xs text-zinc-500">Это имя увидят ваш тренер или спортсмены.</p>
+            </div>
+            <div className="mt-4 grid gap-px overflow-hidden border border-zinc-800 bg-zinc-800 sm:grid-cols-2">
+              <div className="bg-zinc-950 p-5">
+                <Dumbbell className="size-5 text-lime-300" aria-hidden />
+                <h2 className="mt-4 text-base font-semibold">Пространство тренера</h2>
+                <p className="mt-2 min-h-10 text-sm text-zinc-500">
+                  Для closed alpha требуется ручная активация.
                 </p>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy !== null}
-                  onClick={() => void requestTrainer()}
-                  className="mt-5 w-full border-zinc-700 bg-transparent"
-                >
-                  {busy === "trainer" ? "Отправляем..." : "Запросить доступ"}
-                </Button>
-              )}
-            </div>
+                {context.trainer?.status === "active" ? (
+                  <Button asChild className="mt-5 w-full bg-zinc-100 text-black hover:bg-white">
+                    <Link href="/trainer/dashboard">Открыть кабинет</Link>
+                  </Button>
+                ) : context.trainer?.status === "pending" ? (
+                  <p className="mt-5 flex h-10 items-center gap-2 text-sm text-amber-300">
+                    <Check className="size-4" aria-hidden /> Заявка ожидает активации
+                  </p>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy !== null}
+                    onClick={() => void requestTrainer()}
+                    className="mt-5 w-full border-zinc-700 bg-transparent"
+                  >
+                    {busy === "trainer" ? "Отправляем..." : "Запросить доступ"}
+                  </Button>
+                )}
+              </div>
 
-            <div className="bg-zinc-950 p-5">
-              <Link2 className="size-5 text-lime-300" aria-hidden />
-              <h2 className="mt-4 text-base font-semibold">Пространство спортсмена</h2>
-              <p className="mt-2 min-h-10 text-sm text-zinc-500">
-                Доступ создаётся по одноразовому приглашению тренера.
-              </p>
-              {context.athlete?.status === "active" ? (
-                <Button asChild className="mt-5 w-full bg-zinc-100 text-black hover:bg-white">
-                  <Link href="/client/me">Открыть кабинет</Link>
-                </Button>
-              ) : invitationToken ? (
-                <Button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => void acceptInvitation()}
-                  className="mt-5 w-full bg-lime-300 text-black hover:bg-lime-200"
-                >
-                  {busy === "athlete" ? "Подключаем..." : "Принять приглашение"}
-                </Button>
-              ) : (
-                <p className="mt-5 flex h-10 items-center text-sm text-zinc-500">Нужна ссылка тренера</p>
-              )}
+              <div className="bg-zinc-950 p-5">
+                <Link2 className="size-5 text-lime-300" aria-hidden />
+                <h2 className="mt-4 text-base font-semibold">Пространство спортсмена</h2>
+                <p className="mt-2 min-h-10 text-sm text-zinc-500">
+                  Доступ создаётся по одноразовому приглашению тренера.
+                </p>
+                {context.athlete?.status === "active" ? (
+                  <Button asChild className="mt-5 w-full bg-zinc-100 text-black hover:bg-white">
+                    <Link href="/client/me">Открыть кабинет</Link>
+                  </Button>
+                ) : invitationToken ? (
+                  <Button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => void acceptInvitation()}
+                    className="mt-5 w-full bg-lime-300 text-black hover:bg-lime-200"
+                  >
+                    {busy === "athlete" ? "Подключаем..." : "Принять приглашение"}
+                  </Button>
+                ) : (
+                  <p className="mt-5 flex h-10 items-center text-sm text-zinc-500">Нужна ссылка тренера</p>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         )}
 
         {message && <p className="mt-5 text-sm text-zinc-300" role="status">{message}</p>}
