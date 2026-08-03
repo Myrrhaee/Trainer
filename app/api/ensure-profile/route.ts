@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { legacySupabaseOnboardingEnabled } from "@/lib/server/legacy/legacy-onboarding";
 
 type Body = {
   userId?: string;
@@ -11,6 +12,9 @@ type Body = {
 };
 
 export async function POST(req: Request) {
+  if (!legacySupabaseOnboardingEnabled()) {
+    return NextResponse.json({ error: "legacy_endpoint_disabled" }, { status: 410 });
+  }
   console.log("[ensure-profile] POST called");
   try {
     const body = (await req.json()) as Body;
@@ -120,4 +124,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

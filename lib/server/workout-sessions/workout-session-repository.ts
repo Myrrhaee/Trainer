@@ -1,0 +1,301 @@
+import "server-only";
+
+import { randomUUID } from "node:crypto";
+import type { Pool, PoolClient } from "pg";
+
+import type { Actor } from "@/lib/server/database/actor-context";
+import { setTransactionActor, withActorTransaction } from "@/lib/server/database/actor-context";
+import { getDatabasePool } from "@/lib/server/database/pool";
+import { withDatabaseTransaction } from "@/lib/server/database/transaction";
+import { enqueueNotification } from "@/lib/server/notifications/notification-outbox";
+import type { ProgressSetInput, WorkoutExerciseLog, WorkoutSession, WorkoutSetLog } from "./workout-session-types";
+
+export class SessionVersionConflictError extends Error {}
+export class SessionIdempotencyConflictError extends Error {}
+export class ZeroResultConfirmationRequiredError extends Error {}
+
+type SessionRow = {
+  id: string; assignment_id: string; trainer_user_id: string; athlete_user_id: string;
+  title_snapshot: string; status: WorkoutSession["status"]; version: number; client_timezone: string;
+  started_at: Date; completed_at: Date | null; attention_item_id: string | null;
+};
+type ExerciseRow = {
+  id: string; assignment_exercise_id: string; title_snapshot: string; position: number;
+  status: WorkoutExerciseLog["status"]; athlete_note: string;
+};
+type SetRow = {
+  id: string; exercise_log_id: string; set_key: string; position: number; kind: "warmup" | "working";
+  planned_repetitions_min: number | null; planned_repetitions_max: number | null;
+  planned_duration_seconds: number | null; planned_weight_kg: string | null;
+  status: WorkoutSetLog["status"]; actual_repetitions: number | null;
+  actual_duration_seconds: number | null; actual_weight_kg: string | null;
+  rpe: string | null; athlete_comment: string;
+};
+
+const sessionSelect = `SELECT session.id, session.assignment_id, session.trainer_user_id,
+  session.athlete_user_id, assignment.title_snapshot, session.status::text, session.version,
+  session.client_timezone, session.started_at, session.completed_at,
+  (SELECT attention.id FROM app.attention_items attention
+   WHERE attention.source_session_id = session.id AND attention.item_type = 'workout_review') AS attention_item_id
+FROM app.workout_sessions session
+JOIN app.workout_assignments assignment ON assignment.id = session.assignment_id`;
+
+function numberValue(value: string | number | null) {
+  return value === null ? null : Number(value);
+}
+
+function mapSet(row: SetRow): WorkoutSetLog {
+  return {
+    id: row.id, setKey: row.set_key, position: row.position, kind: row.kind,
+    plannedRepetitionsMin: row.planned_repetitions_min,
+    plannedRepetitionsMax: row.planned_repetitions_max,
+    plannedDurationSeconds: row.planned_duration_seconds,
+    plannedWeightKg: numberValue(row.planned_weight_kg), status: row.status,
+    actualRepetitions: row.actual_repetitions, actualDurationSeconds: row.actual_duration_seconds,
+    actualWeightKg: numberValue(row.actual_weight_kg), rpe: numberValue(row.rpe),
+    athleteComment: row.athlete_comment,
+  };
+}
+
+export class WorkoutSessionRepository {
+  constructor(private readonly pool: Pool = getDatabasePool("app")) {}
+
+  listAthlete(actor: Actor): Promise<WorkoutSession[]> {
+    return withActorTransaction(actor, async (client) => {
+      const result = await client.query<SessionRow>(`${sessionSelect}
+        WHERE session.athlete_user_id = $1 ORDER BY session.started_at DESC`, [actor.userId]);
+      return Promise.all(result.rows.map((row) => this.hydrate(client, row)));
+    }, this.pool);
+  }
+
+  find(actor: Actor, sessionId: string): Promise<WorkoutSession | null> {
+    return withActorTransaction(actor, (client) => this.findInTransaction(client, sessionId), this.pool);
+  }
+
+  start(actor: Actor, input: {
+    assignmentId: string; clientTimezone: string; idempotencyKeyHash: string;
+  }): Promise<WorkoutSession | null> {
+    return withDatabaseTransaction(this.pool, async (client) => {
+      await setTransactionActor(client, actor);
+      const source = await client.query<{
+        assignment_id: string; relation_id: string; trainer_user_id: string; athlete_user_id: string;
+      }>(`SELECT assignment.id AS assignment_id, assignment.relation_id,
+                 assignment.trainer_user_id, assignment.athlete_user_id
+          FROM app.workout_assignments assignment
+          JOIN app.trainer_athlete_relations relation ON relation.id = assignment.relation_id
+          WHERE assignment.id = $1 AND assignment.athlete_user_id = $2
+            AND assignment.status = 'available' AND relation.status = 'active'`,
+        [input.assignmentId, actor.userId]);
+      if (!source.rowCount) return null;
+      const row = source.rows[0];
+      const inserted = await client.query<{ id: string }>(`INSERT INTO app.workout_sessions
+        (assignment_id, relation_id, trainer_user_id, athlete_user_id, client_timezone, start_idempotency_key_hash)
+        VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (assignment_id) DO NOTHING RETURNING id`,
+        [row.assignment_id, row.relation_id, row.trainer_user_id, row.athlete_user_id,
+          input.clientTimezone, input.idempotencyKeyHash]);
+      if (inserted.rowCount) {
+        const sessionId = inserted.rows[0].id;
+        await client.query(`INSERT INTO app.workout_exercise_logs
+          (session_id, assignment_exercise_id, position)
+          SELECT $1, source.id, source.position FROM app.workout_assignment_exercises source
+          WHERE source.assignment_id = $2 ORDER BY source.position`, [sessionId, row.assignment_id]);
+        await client.query(`INSERT INTO app.workout_set_logs
+          (exercise_log_id, source_assignment_set_id, set_key, position, kind,
+           planned_repetitions_min, planned_repetitions_max, planned_duration_seconds, planned_weight_kg)
+          SELECT exercise_log.id, source_set.id, source_set.set_key_snapshot, source_set.position,
+                 source_set.kind_snapshot, source_set.repetitions_min_snapshot,
+                 source_set.repetitions_max_snapshot, source_set.duration_seconds_snapshot,
+                 source_set.target_weight_kg_snapshot
+          FROM app.workout_exercise_logs exercise_log
+          JOIN app.workout_assignment_exercise_sets source_set
+            ON source_set.assignment_exercise_id = exercise_log.assignment_exercise_id
+          WHERE exercise_log.session_id = $1 ORDER BY exercise_log.position, source_set.position`, [sessionId]);
+        await client.query(`INSERT INTO app.workout_set_logs
+          (exercise_log_id, set_key, position, kind, planned_repetitions_min,
+           planned_repetitions_max, planned_duration_seconds, planned_weight_kg)
+          SELECT exercise_log.id, 'generated-' || generated.position::text, generated.position,
+                 'working'::app.workout_set_kind,
+                 CASE WHEN source.prescription_type_snapshot = 'repetitions' THEN source.repetitions_min_snapshot END,
+                 CASE WHEN source.prescription_type_snapshot = 'repetitions' THEN source.repetitions_max_snapshot END,
+                 CASE WHEN source.prescription_type_snapshot = 'duration' THEN source.duration_seconds_snapshot END,
+                 source.target_weight_kg_snapshot
+          FROM app.workout_exercise_logs exercise_log
+          JOIN app.workout_assignment_exercises source ON source.id = exercise_log.assignment_exercise_id
+          CROSS JOIN LATERAL generate_series(1, source.sets_snapshot) AS generated(position)
+          WHERE exercise_log.session_id = $1 AND NOT EXISTS (
+            SELECT 1 FROM app.workout_assignment_exercise_sets source_set
+            WHERE source_set.assignment_exercise_id = source.id
+          ) ORDER BY exercise_log.position, generated.position`, [sessionId]);
+        await client.query(`INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
+          VALUES ($1,$1,'workout.session.started',jsonb_build_object('session_id',$2::text,'assignment_id',$3::text))`,
+          [actor.userId, sessionId, input.assignmentId]);
+      }
+      const existing = await client.query<SessionRow>(`${sessionSelect}
+        WHERE session.assignment_id = $1 AND session.athlete_user_id = $2`, [input.assignmentId, actor.userId]);
+      return existing.rowCount ? this.hydrate(client, existing.rows[0]) : null;
+    });
+  }
+
+  saveProgress(actor: Actor, input: {
+    sessionId: string; expectedVersion: number; idempotencyKeyHash: string; requestHash: string;
+    sets: ProgressSetInput[];
+  }): Promise<WorkoutSession | null> {
+    return withDatabaseTransaction(this.pool, async (client) => {
+      await setTransactionActor(client, actor);
+      const session = await client.query<{ version: number; status: WorkoutSession["status"] }>(
+        `SELECT version, status::text FROM app.workout_sessions
+         WHERE id = $1 AND athlete_user_id = $2 FOR UPDATE`, [input.sessionId, actor.userId]);
+      if (!session.rowCount) return null;
+      const duplicate = await this.receipt(client, actor.userId, input.sessionId,
+        "progress", input.idempotencyKeyHash, input.requestHash);
+      if (duplicate) return this.findInTransaction(client, input.sessionId);
+      if (session.rows[0].status !== "active") return null;
+      if (session.rows[0].version !== input.expectedVersion) throw new SessionVersionConflictError("version_conflict");
+      for (const set of input.sets) {
+        const updated = await client.query(`UPDATE app.workout_set_logs target SET
+          status = $3, actual_repetitions = $4, actual_duration_seconds = $5,
+          actual_weight_kg = $6, rpe = $7, athlete_comment = $8
+          FROM app.workout_exercise_logs exercise
+          WHERE target.id = $1 AND target.exercise_log_id = exercise.id
+            AND exercise.session_id = $2`, [set.setLogId, input.sessionId, set.status,
+          set.actualRepetitions, set.actualDurationSeconds, set.actualWeightKg, set.rpe, set.athleteComment]);
+        if (!updated.rowCount) return null;
+      }
+      await this.refreshExerciseStatuses(client, input.sessionId);
+      await client.query(`UPDATE app.workout_sessions SET version = version + 1 WHERE id = $1`, [input.sessionId]);
+      await this.saveReceipt(client, actor.userId, input.sessionId, "progress",
+        input.idempotencyKeyHash, input.requestHash, input.expectedVersion + 1);
+      await client.query(`INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
+        VALUES ($1,$1,'workout.session.progress_saved',jsonb_build_object('session_id',$2::text,'set_count',$3::int))`,
+        [actor.userId, input.sessionId, input.sets.length]);
+      return this.findInTransaction(client, input.sessionId);
+    });
+  }
+
+  complete(actor: Actor, input: {
+    sessionId: string; expectedVersion: number; idempotencyKeyHash: string; requestHash: string;
+    zeroResultConfirmed: boolean; zeroResultReason: string;
+  }): Promise<WorkoutSession | null> {
+    return withDatabaseTransaction(this.pool, async (client) => {
+      await setTransactionActor(client, actor);
+      const session = await client.query<{
+        version: number; status: WorkoutSession["status"];
+        trainer_user_id: string; athlete_user_id: string; relation_id: string;
+      }>(`SELECT version, status::text, trainer_user_id, athlete_user_id, relation_id
+          FROM app.workout_sessions WHERE id = $1 AND athlete_user_id = $2 FOR UPDATE`,
+        [input.sessionId, actor.userId]);
+      if (!session.rowCount) {
+        const retried = await this.receipt(client, actor.userId, input.sessionId,
+          "complete", input.idempotencyKeyHash, input.requestHash);
+        return retried ? this.findInTransaction(client, input.sessionId) : null;
+      }
+      const duplicate = await this.receipt(client, actor.userId, input.sessionId,
+        "complete", input.idempotencyKeyHash, input.requestHash);
+      if (duplicate) return this.findInTransaction(client, input.sessionId);
+      if (session.rows[0].status !== "active") return null;
+      if (session.rows[0].version !== input.expectedVersion) throw new SessionVersionConflictError("version_conflict");
+      const results = await client.query<{ completed: string }>(`SELECT count(*) FILTER (WHERE set_log.status = 'completed')::text AS completed
+        FROM app.workout_set_logs set_log JOIN app.workout_exercise_logs exercise ON exercise.id = set_log.exercise_log_id
+        WHERE exercise.session_id = $1`, [input.sessionId]);
+      if (Number(results.rows[0].completed) === 0 && !input.zeroResultConfirmed) {
+        throw new ZeroResultConfirmationRequiredError("zero_result_confirmation_required");
+      }
+      await client.query(`UPDATE app.workout_set_logs target SET status = 'incomplete'
+        FROM app.workout_exercise_logs exercise
+        WHERE target.exercise_log_id = exercise.id AND exercise.session_id = $1 AND target.status = 'pending'`, [input.sessionId]);
+      await this.refreshExerciseStatuses(client, input.sessionId);
+      const omissions = await client.query<{ count: string }>(`SELECT count(*)::text FROM app.workout_set_logs set_log
+        JOIN app.workout_exercise_logs exercise ON exercise.id = set_log.exercise_log_id
+        WHERE exercise.session_id = $1 AND set_log.status <> 'completed'`, [input.sessionId]);
+      const status = Number(omissions.rows[0].count) > 0 ? "completed_with_omissions" : "completed";
+      await client.query(`UPDATE app.workout_sessions SET status = $2, version = version + 1,
+        completed_at = clock_timestamp(), zero_result_reason = NULLIF($3, '') WHERE id = $1`,
+        [input.sessionId, status, input.zeroResultReason]);
+      const source = session.rows[0];
+      const attentionItemId = randomUUID();
+      await client.query(`INSERT INTO app.attention_items
+        (id, trainer_user_id, athlete_user_id, relation_id, source_session_id, priority_reasons)
+        VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+        [attentionItemId, source.trainer_user_id, source.athlete_user_id, source.relation_id, input.sessionId,
+          JSON.stringify(status === "completed_with_omissions" ? ["partial_completion"] : [])]);
+      await this.saveReceipt(client, actor.userId, input.sessionId, "complete",
+        input.idempotencyKeyHash, input.requestHash, input.expectedVersion + 1);
+      await client.query(`INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
+        VALUES ($1,$1,'workout.session.completed',jsonb_build_object(
+          'session_id',$2::text,'attention_item_id',$3::text,'outcome',$4::text))`,
+        [actor.userId, input.sessionId, attentionItemId, status]);
+      await enqueueNotification(client, {
+        eventType: "workout_completed",
+        recipientUserId: source.trainer_user_id,
+        actorUserId: actor.userId,
+        aggregateType: "workout_session",
+        aggregateId: input.sessionId,
+      });
+      return this.findInTransaction(client, input.sessionId);
+    });
+  }
+
+  private async receipt(client: PoolClient, actorId: string, sessionId: string,
+    kind: "progress" | "complete", keyHash: string, requestHash: string) {
+    const result = await client.query<{ session_id: string; request_hash: string }>(`SELECT session_id, request_hash
+      FROM app.workout_session_command_receipts
+      WHERE actor_user_id = $1 AND kind = $2 AND idempotency_key_hash = $3`, [actorId, kind, keyHash]);
+    if (!result.rowCount) return false;
+    if (result.rows[0].session_id !== sessionId || result.rows[0].request_hash !== requestHash) {
+      throw new SessionIdempotencyConflictError("idempotency_conflict");
+    }
+    return true;
+  }
+
+  private saveReceipt(client: PoolClient, actorId: string, sessionId: string, kind: "progress" | "complete",
+    keyHash: string, requestHash: string, version: number) {
+    return client.query(`INSERT INTO app.workout_session_command_receipts
+      (session_id, actor_user_id, kind, idempotency_key_hash, request_hash, result_version)
+      VALUES ($1,$2,$3,$4,$5,$6)`, [sessionId, actorId, kind, keyHash, requestHash, version]);
+  }
+
+  private async refreshExerciseStatuses(client: PoolClient, sessionId: string) {
+    await client.query(`UPDATE app.workout_exercise_logs exercise SET status = derived.status
+      FROM (
+        SELECT exercise_log.id,
+          CASE
+            WHEN bool_and(set_log.status = 'skipped') THEN 'skipped'::app.workout_log_status
+            WHEN bool_and(set_log.status = 'completed') THEN 'completed'::app.workout_log_status
+            WHEN bool_and(set_log.status = 'pending') THEN 'pending'::app.workout_log_status
+            ELSE 'incomplete'::app.workout_log_status
+          END AS status
+        FROM app.workout_exercise_logs exercise_log
+        JOIN app.workout_set_logs set_log ON set_log.exercise_log_id = exercise_log.id
+        WHERE exercise_log.session_id = $1 GROUP BY exercise_log.id
+      ) derived WHERE exercise.id = derived.id`, [sessionId]);
+  }
+
+  private async findInTransaction(client: PoolClient, sessionId: string): Promise<WorkoutSession | null> {
+    const result = await client.query<SessionRow>(`${sessionSelect} WHERE session.id = $1`, [sessionId]);
+    return result.rowCount ? this.hydrate(client, result.rows[0]) : null;
+  }
+
+  private async hydrate(client: PoolClient, row: SessionRow): Promise<WorkoutSession> {
+    const exercises = await client.query<ExerciseRow>(`SELECT exercise.id, exercise.assignment_exercise_id,
+      source.title_snapshot, exercise.position, exercise.status::text, exercise.athlete_note
+      FROM app.workout_exercise_logs exercise
+      JOIN app.workout_assignment_exercises source ON source.id = exercise.assignment_exercise_id
+      WHERE exercise.session_id = $1 ORDER BY exercise.position`, [row.id]);
+    const ids = exercises.rows.map((exercise) => exercise.id);
+    const sets = ids.length ? (await client.query<SetRow>(`SELECT *, status::text FROM app.workout_set_logs
+      WHERE exercise_log_id = ANY($1::uuid[]) ORDER BY exercise_log_id, position`, [ids])).rows : [];
+    const byExercise = new Map<string, WorkoutSetLog[]>();
+    for (const set of sets) byExercise.set(set.exercise_log_id, [...(byExercise.get(set.exercise_log_id) ?? []), mapSet(set)]);
+    return {
+      id: row.id, assignmentId: row.assignment_id, trainerUserId: row.trainer_user_id,
+      athleteUserId: row.athlete_user_id, title: row.title_snapshot, status: row.status,
+      version: row.version, clientTimezone: row.client_timezone, startedAt: row.started_at.toISOString(),
+      completedAt: row.completed_at?.toISOString() ?? null, attentionItemId: row.attention_item_id,
+      exercises: exercises.rows.map((exercise) => ({
+        id: exercise.id, assignmentExerciseId: exercise.assignment_exercise_id,
+        title: exercise.title_snapshot, position: exercise.position, status: exercise.status,
+        athleteNote: exercise.athlete_note, sets: byExercise.get(exercise.id) ?? [],
+      })),
+    };
+  }
+}

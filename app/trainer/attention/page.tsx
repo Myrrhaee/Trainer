@@ -23,9 +23,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { CanonicalReviewQueue } from "@/components/trainer/canonical-review-queue";
 import { TrainerShell } from "@/components/trainer/trainer-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { isDemoModeEnabled } from "@/lib/demo-mode";
 import { cn } from "@/lib/utils";
 
 type AttentionCategory = "training" | "progress" | "communication" | "programs" | "business";
@@ -358,6 +360,11 @@ function matchesFilter(item: AttentionItem, filter: AttentionFilter) {
 }
 
 export default function TrainerAttentionPage() {
+  if (!isDemoModeEnabled()) return <CanonicalReviewQueue />;
+  return <DemoTrainerAttentionPage />;
+}
+
+function DemoTrainerAttentionPage() {
   const [items, setItems] = useState<AttentionItem[]>(initialAttentionItems);
   const [activeFilter, setActiveFilter] = useState<AttentionFilter>("open");
   const [selectedId, setSelectedId] = useState(initialAttentionItems[0]?.id ?? "");

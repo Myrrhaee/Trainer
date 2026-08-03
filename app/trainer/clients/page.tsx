@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner";
 
 import { TrainerShell } from "@/components/trainer/trainer-shell";
+import { CanonicalTrainerRoster } from "@/components/trainer/canonical-trainer-roster";
 import { QuickAssignDrawer } from "@/components/trainer-os/quick-assign/quick-assign-drawer";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -574,6 +575,19 @@ function ClientActions({
 }
 
 export default function TrainerClientsPage() {
+  if (
+    !isDemoModeEnabled()
+    && (
+      process.env.NODE_ENV === "production"
+      || process.env.NEXT_PUBLIC_ENABLE_LEGACY_SUPABASE_ROSTER !== "true"
+    )
+  ) {
+    return <CanonicalTrainerRoster />;
+  }
+  return <LegacyTrainerClientsPage />;
+}
+
+function LegacyTrainerClientsPage() {
   const router = useRouter();
   const demoMode = isDemoModeEnabled();
   const [activeFilter, setActiveFilter] = useState<ClientFilter>("all");
@@ -582,6 +596,8 @@ export default function TrainerClientsPage() {
   const [loading, setLoading] = useState(!demoMode);
   const [sortMode, setSortMode] = useState<ClientSort>("recent");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [messageClient, setMessageClient] = useState<TrainerClient | null>(null);
@@ -599,6 +615,26 @@ export default function TrainerClientsPage() {
 
     async function loadRealClients() {
       setLoading(true);
+
+      const accessResponse = await fetch("/api/access/context", { cache: "no-store" });
+      if (cancelled) return;
+      const legacyRosterEnabled = process.env.NODE_ENV !== "production"
+        && process.env.NEXT_PUBLIC_ENABLE_LEGACY_SUPABASE_ROSTER === "true";
+      if (accessResponse.status === 401) {
+        router.replace("/login?next=/trainer/clients");
+        return;
+      }
+      if (accessResponse.ok && !legacyRosterEnabled) {
+        // B4 authenticates this route; canonical athlete reads move in the next vertical slice.
+        setRealClients([]);
+        setLoading(false);
+        return;
+      }
+      if (!accessResponse.ok) {
+        setRealClients([]);
+        setLoading(false);
+        return;
+      }
 
       const {
         data: { user },
@@ -655,11 +691,6 @@ export default function TrainerClientsPage() {
     [demoMode, localClients, realClients]
   );
   const visibleAttentionItems = demoMode ? attentionItems : buildAttentionItems(realClients);
-  const inviteLink =
-    typeof window === "undefined"
-      ? "/signup?trainer=romanov"
-      : `${window.location.origin}/signup?trainer=romanov`;
-
   const filteredClients = useMemo(() => {
     const query = search.trim().toLowerCase();
     const filtered = clients.filter((client) => {
@@ -684,11 +715,41 @@ export default function TrainerClientsPage() {
   const activeSort = sortOptions.find((option) => option.id === sortMode) ?? sortOptions[0];
 
   async function copyInviteLink() {
+    if (!inviteLink) return;
     try {
       await navigator.clipboard.writeText(inviteLink);
       toast.success("Ссылка приглашения скопирована");
     } catch {
       toast.error("Не удалось скопировать ссылку");
+    }
+  }
+
+  async function openInvitation() {
+    setInviteOpen(true);
+    if (demoMode) {
+      setInviteLink(`${window.location.origin}/onboarding?invite=demo-invitation`);
+      return;
+    }
+
+    setInviteLoading(true);
+    setInviteLink(null);
+    try {
+      const response = await fetch("/api/access/invitations", { method: "POST" });
+      const payload = await response.json().catch(() => ({})) as {
+        invitationUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.invitationUrl) {
+        toast.error(payload.error === "trainer_not_active"
+          ? "Доступ тренера ещё не активирован"
+          : "Не удалось создать приглашение");
+        return;
+      }
+      setInviteLink(payload.invitationUrl);
+    } catch {
+      toast.error("Не удалось создать приглашение");
+    } finally {
+      setInviteLoading(false);
     }
   }
 
@@ -747,7 +808,7 @@ export default function TrainerClientsPage() {
         <ClientActions
           className="hidden flex-nowrap xl:flex"
           scope="header"
-          onInvite={() => setInviteOpen(true)}
+          onInvite={() => void openInvitation()}
           onAddClient={() => setAddClientOpen(true)}
         />
       }
@@ -756,7 +817,7 @@ export default function TrainerClientsPage() {
         <section className="xl:hidden">
           <ClientActions
             scope="mobile"
-            onInvite={() => setInviteOpen(true)}
+            onInvite={() => void openInvitation()}
             onAddClient={() => setAddClientOpen(true)}
           />
         </section>
@@ -1055,7 +1116,7 @@ export default function TrainerClientsPage() {
                       type="button"
                       variant="outline"
                       className="rounded-full border-zinc-700 bg-zinc-950/50 text-zinc-100 hover:bg-zinc-900"
-                      onClick={() => setInviteOpen(true)}
+                      onClick={() => void openInvitation()}
                     >
                       <Link2 className="mr-2 h-4 w-4" />
                       Пригласить по ссылке
@@ -1085,11 +1146,14 @@ export default function TrainerClientsPage() {
           <div className="space-y-4 px-4">
             <div className="rounded-[1.2rem] border border-zinc-800 bg-black/24 p-4">
               <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">Ссылка приглашения</p>
-              <p className="mt-3 break-all text-sm leading-relaxed text-zinc-100">{inviteLink}</p>
+              <p className="mt-3 break-all text-sm leading-relaxed text-zinc-100">
+                {inviteLoading ? "Создаём одноразовую ссылку..." : inviteLink ?? "Ссылка не создана"}
+              </p>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <Button
                 type="button"
+                disabled={!inviteLink || inviteLoading}
                 className="h-10 rounded-full bg-lime-300 text-black hover:bg-lime-200"
                 onClick={() => void copyInviteLink()}
               >
@@ -1101,7 +1165,7 @@ export default function TrainerClientsPage() {
                 variant="outline"
                 className="h-10 rounded-full border-zinc-700 bg-zinc-950/50 text-zinc-100 hover:bg-zinc-900"
               >
-                <a href={`mailto:?subject=Приглашение в кабинет&body=${encodeURIComponent(inviteLink)}`}>
+                <a href={`mailto:?subject=Приглашение в кабинет&body=${encodeURIComponent(inviteLink ?? "")}`}>
                   <Mail className="mr-2 h-4 w-4" />
                   Email
                 </a>

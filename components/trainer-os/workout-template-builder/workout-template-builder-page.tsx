@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getDemoLibraryExercises } from "@/lib/demo-data";
+import { isDemoModeEnabled } from "@/lib/demo-mode";
 
 import {
   cloneTemplate,
@@ -31,6 +32,14 @@ import {
   type WorkoutTemplateDraft,
 } from "./builder-model";
 import { BuilderEditor } from "./builder-editor";
+import { CanonicalBuilderAssignmentDialog } from "./canonical-builder-assignment-dialog";
+import {
+  archiveCanonicalBuilderTemplate,
+  createCanonicalBuilderRevision,
+  loadCanonicalBuilderTemplates,
+  publishCanonicalBuilderTemplate,
+  saveCanonicalBuilderDraft,
+} from "./canonical-builder-client";
 import { clearBuilderDraft, readBuilderDraft, writeBuilderDraft } from "./builder-draft-persistence";
 import { toQuickAssignTemplate } from "./quick-assign-adapter";
 import { TemplatesWorkspace, TemplateStatusBadge } from "./templates-workspace";
@@ -42,10 +51,14 @@ type BuilderFeedback = { tone: "success" | "error"; message: string };
 
 export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryContext }) {
   const runtime = useTrainerDemoRuntime();
-  const templates = useMemo(
+  const demoMode = isDemoModeEnabled();
+  const demoTemplates = useMemo(
     () => entry.emptyWorkspace ? [] : getWorkoutTemplateWorkspace(runtime.state),
     [entry.emptyWorkspace, runtime.state]
   );
+  const [canonicalTemplates, setCanonicalTemplates] = useState<WorkoutTemplateDraft[]>([]);
+  const [canonicalLoading, setCanonicalLoading] = useState(!demoMode);
+  const templates = demoMode ? demoTemplates : canonicalTemplates;
   const initialRequestedTemplate = entry.templateId ? templates.find((template) => template.id === entry.templateId) : undefined;
   const [view, setView] = useState<BuilderView>(() => entry.templateId ? (initialRequestedTemplate ? "editor" : "unknown") : entry.source === "quick-assign" ? "editor" : "templates");
   const [draft, setDraft] = useState<WorkoutTemplateDraft | null>(() => {
@@ -71,17 +84,45 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   const validation = useMemo(() => draft ? validateTemplate(draft) : { errors: [], warnings: [], canPublish: false }, [draft]);
   const assignableTemplate = useMemo(() => draft ? toQuickAssignTemplate(draft) : undefined, [draft]);
 
+  function upsertCanonical(template: WorkoutTemplateDraft) {
+    setCanonicalTemplates((current) => [template, ...current.filter((item) => item.id !== template.id)]);
+  }
+
+  useEffect(() => {
+    if (demoMode) return;
+    let active = true;
+    loadCanonicalBuilderTemplates()
+      .then((loaded) => {
+        if (!active) return;
+        setCanonicalTemplates(loaded);
+        if (entry.templateId) {
+          const requested = loaded.find((template) => template.id === entry.templateId);
+          if (requested) {
+            setDraft(requested);
+            setBaseline(JSON.stringify(requested));
+            setSelectedExerciseId(getTemplateExercises(requested)[0]?.instanceId ?? null);
+            setView("editor");
+          } else {
+            setView("unknown");
+          }
+        }
+      })
+      .catch(() => active && setFeedback({ tone: "error", message: "Не удалось загрузить шаблоны." }))
+      .finally(() => active && setCanonicalLoading(false));
+    return () => { active = false; };
+  }, [demoMode, entry.templateId]);
+
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [view]);
 
   useEffect(() => {
-    runtime.commands.recordPilotEvent({
+    if (demoMode) runtime.commands.recordPilotEvent({
       name: "builder_opened",
       athleteId: entry.athleteId,
       workoutTemplateId: entry.templateId,
     });
-  }, [entry.athleteId, entry.templateId, runtime.commands]);
+  }, [demoMode, entry.athleteId, entry.templateId, runtime.commands]);
 
   useEffect(() => {
     if (recoveryChecked) return;
@@ -139,8 +180,18 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     if (feedback?.tone === "error") setFeedback(null);
   }
 
-  function duplicateAndOpen(template: WorkoutTemplateDraft) {
+  async function duplicateAndOpen(template: WorkoutTemplateDraft) {
     const copy = cloneTemplate(template);
+    if (!demoMode) {
+      try {
+        const confirmed = await saveCanonicalBuilderDraft(copy);
+        upsertCanonical(confirmed);
+        openTemplate(confirmed);
+      } catch {
+        setFeedback({ tone: "error", message: "Не удалось создать копию шаблона." });
+      }
+      return;
+    }
     const result = runtime.commands.saveWorkoutTemplateDraft({ actor: runtime.actor, template: copy, athleteId: entry.athleteId });
     if (!result.ok) {
       setFeedback({ tone: "error", message: result.error.message });
@@ -149,7 +200,20 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     openTemplate(result.receipt.template);
   }
 
-  function archiveTemplate(template: WorkoutTemplateDraft) {
+  async function archiveTemplate(template: WorkoutTemplateDraft) {
+    if (!demoMode) {
+      try {
+        const confirmed = await archiveCanonicalBuilderTemplate(template.id);
+        upsertCanonical(confirmed);
+        if (draft?.id === template.id) {
+          setDraft(confirmed);
+          setBaseline(JSON.stringify(confirmed));
+        }
+      } catch {
+        setFeedback({ tone: "error", message: "Не удалось архивировать шаблон." });
+      }
+      return;
+    }
     const archived = { ...template, status: "archived" as const, updatedLabel: "только что" };
     const result = runtime.commands.archiveWorkoutTemplatePrototype({ actor: runtime.actor, template: archived, athleteId: entry.athleteId });
     if (!result.ok) {
@@ -189,6 +253,24 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     setCommandState({ status: "running", kind: "save" });
     setFeedback(null);
     const saved = { ...draft, title: draft.title.trim(), status: "draft" as const, updatedLabel: "только что" };
+    if (!demoMode) {
+      try {
+        const confirmed = await saveCanonicalBuilderDraft(saved);
+        upsertCanonical(confirmed);
+        setDraft(confirmed);
+        setBaseline(JSON.stringify(confirmed));
+        clearBuilderDraft();
+        setFeedback({ tone: "success", message: confirmed.title ? `Черновик «${confirmed.title}» сохранён.` : "Черновик без названия сохранён." });
+        setCommandState({ status: "idle" });
+        commandInFlightRef.current = false;
+        return true;
+      } catch {
+        setFeedback({ tone: "error", message: "Не удалось сохранить черновик." });
+        setCommandState({ status: "failed", kind: "save" });
+        commandInFlightRef.current = false;
+        return false;
+      }
+    }
     await wait(350);
     const result = runtime.commands.saveWorkoutTemplateDraft({ actor: runtime.actor, template: saved, athleteId: entry.athleteId });
     if (!result.ok) {
@@ -227,6 +309,25 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     setCommandState({ status: "running", kind: commandKind });
     setFeedback(null);
     const published = publishTemplate(draft);
+    if (!demoMode) {
+      try {
+        const confirmed = await publishCanonicalBuilderTemplate(published);
+        upsertCanonical(confirmed);
+        setDraft(confirmed);
+        setBaseline(JSON.stringify(confirmed));
+        clearBuilderDraft();
+        setFeedback({ tone: "success", message: `Версия ${confirmed.revision} шаблона «${confirmed.title}» опубликована.` });
+        setCommandState({ status: "idle" });
+        commandInFlightRef.current = false;
+        if (andAssign && entry.athleteId) setAssignAfterPublish(true);
+        else setPublishReceipt({ templateId: confirmed.id, title: confirmed.title, revision: confirmed.revision, athleteId: entry.athleteId });
+      } catch {
+        setFeedback({ tone: "error", message: "Не удалось опубликовать шаблон." });
+        setCommandState({ status: "failed", kind: commandKind });
+        commandInFlightRef.current = false;
+      }
+      return;
+    }
     await wait(450);
     const command = runtime.commands.publishWorkoutTemplate({ actor: runtime.actor, template: published, athleteId: entry.athleteId });
     if (!command.ok) {
@@ -251,6 +352,20 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     commandInFlightRef.current = true;
     setCommandState({ status: "running", kind: "revision" });
     setFeedback(null);
+    if (!demoMode) {
+      try {
+        const confirmed = await createCanonicalBuilderRevision(draft.id);
+        upsertCanonical(confirmed);
+        openTemplate(confirmed);
+        setCommandState({ status: "idle" });
+      } catch {
+        setFeedback({ tone: "error", message: "Не удалось создать новую версию." });
+        setCommandState({ status: "failed", kind: "revision" });
+      } finally {
+        commandInFlightRef.current = false;
+      }
+      return;
+    }
     const revision = createDraftRevision(draft);
     await wait(350);
     const result = runtime.commands.createWorkoutTemplateRevision({ actor: runtime.actor, template: revision, athleteId: entry.athleteId });
@@ -288,7 +403,9 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
 
   return (
     <TrainerShell eyebrow="Конструктор тренировок" title={title} description="Создавайте и сохраняйте тренировки для повторного назначения.">
-      {view === "templates" ? (
+      {canonicalLoading ? (
+        <div className="flex min-h-[50vh] items-center justify-center text-sm text-zinc-500">Загружаем шаблоны…</div>
+      ) : view === "templates" ? (
         <TemplatesWorkspace templates={templates} athleteId={entry.athleteId} onCreate={createNew} onOpen={openTemplate} onDuplicate={duplicateAndOpen} onArchive={archiveTemplate} onAssign={openAssignment} />
       ) : view === "unknown" ? (
         <UnknownTemplate templateId={entry.templateId} onTemplates={() => setView("templates")} onCreate={createNew} />
@@ -330,7 +447,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
         </DialogContent>
       </Dialog>
 
-      <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}».` : "Переход из конструктора тренировок.", returnTo: safeTrainerReturnPath(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setFeedback({ tone: "success", message: `${receipt.templateTitle} назначена для ${receipt.athleteName}.` })} />
+      {demoMode ? <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}».` : "Переход из конструктора тренировок.", returnTo: safeTrainerReturnPath(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setFeedback({ tone: "success", message: `${receipt.templateTitle} назначена для ${receipt.athleteName}.` })} /> : <CanonicalBuilderAssignmentDialog athleteId={entry.athleteId ?? null} template={draft} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(templateTitle) => setFeedback({ tone: "success", message: `«${templateTitle}» назначена спортсмену.` })} />}
     </TrainerShell>
   );
 }

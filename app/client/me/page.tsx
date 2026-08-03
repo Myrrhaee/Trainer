@@ -29,6 +29,7 @@ import { loadVisibleExerciseTitles } from "@/lib/exercise-library";
 import { formatSupabaseError, isSupabaseSchemaMismatch, logSupabaseError } from "@/lib/utils";
 import { isDemoModeEnabled } from "@/lib/demo-mode";
 import { DemoClientMePage } from "@/components/demo/demo-client-cabinet";
+import { CanonicalClientHome } from "@/components/client/canonical-client-home";
 import { ClientRuntimeHome } from "@/components/client/runtime/client-runtime-home";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -439,6 +440,12 @@ function ClientMePageContent() {
   }
   if (isDemoModeEnabled()) {
     return <><DemoClientMePage /><HeaderCopyInjector /><DemoDashboardFlowInjector /><HistoryCompactInjector /><RecommendedProgramsInjector /></>;
+  }
+  if (
+    process.env.NODE_ENV === "production"
+    || process.env.NEXT_PUBLIC_ENABLE_LEGACY_SUPABASE_CLIENT_HOME !== "true"
+  ) {
+    return <CanonicalClientHome />;
   }
 
   return (

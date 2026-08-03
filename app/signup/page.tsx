@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isDemoModeEnabled } from "@/lib/demo-mode";
 
 type SignupRole = "trainer" | "client";
 
@@ -29,7 +30,7 @@ type TrainerCardRow = {
   role: string | null;
 };
 
-function SignupContent() {
+function LegacySignupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
@@ -514,6 +515,29 @@ function SignupContent() {
       </div>
     </div>
   );
+}
+
+function CanonicalSignupRedirect() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    const trainerId = searchParams.get("trainer_id") ?? searchParams.get("trainer");
+    if (trainerId) params.set("trainer_id", trainerId);
+    const suffix = params.size ? `?${params.toString()}` : "";
+    router.replace(`/login${suffix}`);
+  }, [router, searchParams]);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-black">
+      <div className="size-8 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-100" />
+    </div>
+  );
+}
+
+function SignupContent() {
+  return isDemoModeEnabled() ? <LegacySignupContent /> : <CanonicalSignupRedirect />;
 }
 
 export default function SignupPage() {

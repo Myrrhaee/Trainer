@@ -1,9 +1,11 @@
 # Database Platform Decision v1
 
-- Decision status: **accepted temporary decision**
+- Decision status: **superseded historical decision**
 - Owner: **Founder/Product Lead**
 - Decision date: **2026-07-10**
 - Confidence: **medium** because the provider direction is clear, while the existing remote environment remains unverified.
+
+> Superseded on 2026-08-02 by Backend Foundation B0. PostgreSQL remains canonical, but Supabase provider/Auth/Storage are no longer the accepted first-beta path. See `docs/backend-foundation-b0.md` and decision-log entries D-127 through D-138. The analysis below is preserved as Stage 4 evidence.
 
 ## 1. Context
 

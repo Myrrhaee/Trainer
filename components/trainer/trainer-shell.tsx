@@ -44,7 +44,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { clearDemoSession, isDemoModeEnabled } from "@/lib/demo-mode";
-import { createClient } from "@/lib/supabase-client";
 import { cn } from "@/lib/utils";
 
 type SearchItem = {
@@ -326,7 +325,7 @@ export function TrainerShell({
       if (isDemoModeEnabled()) {
         clearDemoSession();
       } else {
-        await createClient().auth.signOut();
+        await fetch("/api/auth/logout", { method: "POST" });
       }
     } finally {
       setAccountOpen(false);

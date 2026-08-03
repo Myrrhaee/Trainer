@@ -7,11 +7,11 @@ Status: accepted conceptual authorization and RLS contracts. This document inten
 | Actor | Authentication | Trust level |
 |---|---|---|
 | Unauthenticated visitor | None | May read only explicitly public projections |
-| Authenticated athlete/client | Supabase user JWT | May access own profile and workout facts, and mutate only allowed active-session facts |
-| Authenticated trainer | Supabase user JWT plus TrainerProfile | May access owned authoring data and athlete data only through required active `TrainerAthleteRelation` |
-| Service/admin backend | Server-held service credentials plus verified caller or trusted job identity | May bypass RLS only for narrow audited operations; never a substitute for ordinary UI authorization |
+| Authenticated athlete/client | Application-owned server session plus AthleteProfile capability | May access own profile and workout facts, and mutate only allowed active-session facts |
+| Authenticated trainer | Application-owned server session plus TrainerProfile capability | May access owned authoring data and athlete data only through required active `TrainerAthleteRelation` |
+| Service/admin backend | Scoped server/database role plus verified caller or trusted job identity | May use privileged operations only for narrow audited work; never a substitute for ordinary UI authorization |
 
-`auth.uid()` is the caller identity. IDs in request bodies are resource references, not proof of identity. Capability, ownership and TrainerAthleteRelation determine access; a string role alone is insufficient. The browser uses the public anon key with a user JWT; the service-role key must remain server-only.
+The backend resolves the caller from the application session and supplies transaction-local actor context to repositories/RLS. IDs in request bodies are resource references, not proof of identity. Capability, ownership and TrainerAthleteRelation determine access; a provider claim or string role alone is insufficient. The browser receives no database key or provider token for ordinary product access.
 
 ## Permission matrix
 
@@ -49,7 +49,7 @@ Legend: `R` read, `C` create, `U` update, `A` archive, `-` forbidden. Conditions
 4. Starting/saving/completing a session checks assignment state and stable session identity. Completed facts cannot be updated through the active-session command.
 5. Feedback creation verifies AttentionItem owner, source session, and relation. Resolution occurs only after feedback persistence succeeds.
 6. Manual resolution verifies owner and stores a required reason.
-7. Service commands authenticate either a caller JWT with equivalent authorization or a trusted signed provider/job event, and then repeat capability, ownership and relation checks. Service role alone is not caller authorization and does not replace RLS as the ordinary data boundary.
+7. Service commands authenticate either an application session with equivalent authorization or a trusted signed provider/job event, and then repeat capability, ownership and relation checks. A privileged database role alone is not caller authorization and does not replace RLS as defence in depth.
 8. All externally retryable commands require an idempotency key and record actor, target, result and correlation identifiers without logging sensitive payloads unnecessarily.
 
 ## Relation and historical-access policy
@@ -80,7 +80,7 @@ The public page may read an explicit TrainerProfile projection: public name, slu
 - Anonymous tests for every API route and public projection.
 - Completed-log immutability and follow-up feedback tests.
 - Ended-relation access and retention tests.
-- Static/deployment scans proving the service key is absent from browser bundles and logs.
+- Static/deployment scans proving database credentials and provider secrets are absent from browser bundles and logs.
 - Concurrency/idempotency tests for session start/completion, AttentionItem and notifications.
 
 ## Decision candidates for Product Lead review

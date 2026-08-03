@@ -1,4 +1,6 @@
 import { WorkoutReviewPage, type ReviewEntryInput } from "@/components/trainer-os/workout-review/workout-review-page";
+import { CanonicalWorkoutReview } from "@/components/trainer/canonical-workout-review";
+import { isDemoModeEnabled } from "@/lib/demo-mode";
 
 export default async function TrainerWorkoutReviewPage({
   params,
@@ -17,7 +19,9 @@ export default async function TrainerWorkoutReviewPage({
     returnTo: firstValue(query.returnTo),
   };
 
-  return <WorkoutReviewPage workoutId={workoutId} entry={entry} />;
+  return isDemoModeEnabled()
+    ? <WorkoutReviewPage workoutId={workoutId} entry={entry} />
+    : <CanonicalWorkoutReview sessionId={workoutId} />;
 }
 
 function firstValue(value: string | string[] | undefined) {

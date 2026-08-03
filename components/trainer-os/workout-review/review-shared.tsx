@@ -149,6 +149,8 @@ export function ReviewExerciseList({ exercises, compact = false }: { exercises: 
 function ExerciseResult({ exercise, compact }: { exercise: ReviewExercise; compact: boolean }) {
   const planSets = exercise.planned?.sets ?? [];
   const actualSets = exercise.actual.sets;
+  const completedActualSets = actualSets.filter((set) => set.completed);
+  const representativeActualSet = completedActualSets[completedActualSets.length - 1] ?? actualSets[actualSets.length - 1];
   return (
     <article className="rounded-lg border border-zinc-800 bg-zinc-950/78 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -165,7 +167,7 @@ function ExerciseResult({ exercise, compact }: { exercise: ReviewExercise; compa
         </div>
         <div className="rounded-lg border border-zinc-800/80 bg-black/25 p-3">
           <dt className="text-xs text-zinc-600">Факт</dt>
-          <dd className="mt-1 text-zinc-200">{actualSets.length ? `${actualSets.filter((set) => set.completed).length} подх. · ${actualSetSummary(actualSets[actualSets.length - 1])}` : "нет записанных подходов"}</dd>
+          <dd className="mt-1 text-zinc-200">{actualSets.length ? `${completedActualSets.length} подх. · ${actualSetSummary(representativeActualSet)}` : "нет записанных подходов"}</dd>
         </div>
       </dl>
       {exercise.actual.comment ? <p className="mt-3 text-sm text-zinc-400">Комментарий: «{exercise.actual.comment}»</p> : null}

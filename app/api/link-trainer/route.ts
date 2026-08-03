@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { legacySupabaseOnboardingEnabled } from "@/lib/server/legacy/legacy-onboarding";
 
 type ProfileRow = {
   role?: string | null;
@@ -11,6 +12,9 @@ type ProfileRow = {
  * userId берётся только из JWT (Bearer), не из тела запроса.
  */
 export async function POST(req: Request) {
+  if (!legacySupabaseOnboardingEnabled()) {
+    return NextResponse.json({ error: "legacy_endpoint_disabled" }, { status: 410 });
+  }
   try {
     const authHeader = req.headers.get("authorization");
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";

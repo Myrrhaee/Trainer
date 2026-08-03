@@ -1,5 +1,7 @@
 # Supabase Dependency and PostgreSQL Portability v1
 
+> Historical Stage 4 dependency audit. Its recommendation to keep Supabase for first beta was superseded on 2026-08-02 by `docs/backend-foundation-b0.md`. The coupling inventory remains valid migration evidence until code is replaced.
+
 ## Accepted platform position
 
 PostgreSQL is canonical. Supabase is the temporary managed PostgreSQL/Auth/RLS provider for first beta. Core domain, read-model, command and repository contracts remain provider-neutral. Clean Supabase staging is the default implementation environment; the configured old remote remains unknown legacy and is not a source for new schema work.

@@ -13,6 +13,7 @@ import {
   resolveDemoLogin,
   writeDemoSession,
 } from "@/lib/demo-mode";
+import { EmailOtpLogin } from "@/components/auth/email-otp-login";
 
 type LoginType = "trainer" | "client";
 const TEST_ADMIN_LOGIN = "admin";
@@ -33,7 +34,7 @@ function roleFromSearchParams(searchParams: URLSearchParams | null): LoginType {
   return searchParams.get("role") === "trainer" ? "trainer" : "client";
 }
 
-function LoginContent() {
+function LegacyDemoLoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const demoMode = isDemoModeEnabled();
@@ -468,6 +469,10 @@ function LoginContent() {
       </div>
     </div>
   );
+}
+
+function LoginContent() {
+  return isDemoModeEnabled() ? <LegacyDemoLoginContent /> : <EmailOtpLogin />;
 }
 
 export default function LoginPage() {
