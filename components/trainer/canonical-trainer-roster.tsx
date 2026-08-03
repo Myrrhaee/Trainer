@@ -37,6 +37,16 @@ function today() {
   return local.toISOString().slice(0, 10);
 }
 
+async function copyInvitationUrl(value: string) {
+  try {
+    if (!navigator.clipboard?.writeText) return false;
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function CanonicalTrainerRoster() {
   const [athletes, setAthletes] = useState<TrainerAthlete[]>([]);
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
@@ -168,8 +178,8 @@ export function CanonicalTrainerRoster() {
       if (!response.ok) throw new Error("invite_failed");
       const body = await response.json() as { invitationUrl: string };
       setInviteUrl(body.invitationUrl);
-      await navigator.clipboard.writeText(body.invitationUrl);
-      toast.success("Ссылка приглашения скопирована");
+      const copied = await copyInvitationUrl(body.invitationUrl);
+      toast.success(copied ? "Ссылка приглашения скопирована" : "Ссылка приглашения создана");
     } catch {
       toast.error("Не удалось создать приглашение");
     } finally {
@@ -190,9 +200,20 @@ export function CanonicalTrainerRoster() {
     >
       <div className="mx-auto max-w-7xl space-y-6">
         {inviteUrl ? (
-          <div className="flex items-center justify-between gap-3 border-b border-lime-300/20 bg-lime-300/[0.06] px-4 py-3 text-sm text-lime-100">
-            <span className="min-w-0 truncate">Ссылка готова: {inviteUrl}</span>
-            <Button type="button" size="icon" variant="ghost" title="Скопировать ссылку" aria-label="Скопировать ссылку" onClick={() => void navigator.clipboard.writeText(inviteUrl)}>
+          <div className="grid gap-2 border-b border-lime-300/20 bg-lime-300/[0.06] px-4 py-3 text-sm text-lime-100 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center" role="status">
+            <span className="font-medium">Ссылка приглашения готова</span>
+            <Input aria-label="Ссылка приглашения" readOnly value={inviteUrl} className="h-9 min-w-0 border-lime-300/20 bg-black/30 text-xs text-lime-100" />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              title="Скопировать ссылку"
+              aria-label="Скопировать ссылку"
+              onClick={() => void copyInvitationUrl(inviteUrl)
+                .then((copied) => copied
+                  ? toast.success("Ссылка скопирована")
+                  : toast.error("Выделите ссылку и скопируйте вручную"))}
+            >
               <Copy className="size-4" />
             </Button>
           </div>

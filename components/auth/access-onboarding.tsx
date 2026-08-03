@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Check, Dumbbell, Link2, LoaderCircle } from "lucide-react";
+import { ArrowRight, Check, Dumbbell, Link2, LoaderCircle, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,16 +15,23 @@ type Context = {
   destination: "/trainer/dashboard" | "/client/me" | "/onboarding" | "/workspaces";
 };
 
-export function AccessOnboarding({ invitationToken }: { invitationToken: string | null }) {
+export function AccessOnboarding({
+  invitationToken,
+  initiallyAuthenticated,
+}: {
+  invitationToken: string | null;
+  initiallyAuthenticated: boolean;
+}) {
   const [context, setContext] = useState<Context | null>(null);
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState<"profile" | "trainer" | "athlete" | null>(null);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(initiallyAuthenticated ? null : false);
+  const [busy, setBusy] = useState<"profile" | "trainer" | "athlete" | "context" | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!initiallyAuthenticated) return;
     void loadContext();
-  }, []);
+  }, [initiallyAuthenticated]);
 
   async function loadContext() {
     const response = await fetch("/api/access/context", { cache: "no-store" });
@@ -38,7 +45,7 @@ export function AccessOnboarding({ invitationToken }: { invitationToken: string 
     }
     const next = await response.json() as Context;
     setContext(next);
-    setDisplayName(next.displayName ?? "");
+    setDisplayName((current) => current.trim() ? current : next.displayName ?? "");
     setAuthenticated(true);
   }
 
@@ -79,6 +86,16 @@ export function AccessOnboarding({ invitationToken }: { invitationToken: string 
       setMessage("Заявка принята. Доступ тренера активируется вручную для closed alpha.");
     } catch {
       setMessage("Не удалось отправить заявку. Попробуйте ещё раз.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function refreshContext() {
+    setBusy("context");
+    setMessage(null);
+    try {
+      await loadContext();
     } finally {
       setBusy(null);
     }
@@ -176,9 +193,21 @@ export function AccessOnboarding({ invitationToken }: { invitationToken: string 
                     <Link href="/trainer/dashboard">Открыть кабинет</Link>
                   </Button>
                 ) : context.trainer?.status === "pending" ? (
-                  <p className="mt-5 flex h-10 items-center gap-2 text-sm text-amber-300">
-                    <Check className="size-4" aria-hidden /> Заявка ожидает активации
-                  </p>
+                  <div className="mt-5 space-y-3">
+                    <p className="flex min-h-10 items-center gap-2 text-sm text-amber-300">
+                      <Check className="size-4" aria-hidden /> Заявка ожидает активации
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy !== null}
+                      onClick={() => void refreshContext()}
+                      className="w-full border-zinc-700 bg-transparent"
+                    >
+                      <RefreshCw className={busy === "context" ? "animate-spin" : ""} aria-hidden />
+                      Проверить доступ
+                    </Button>
+                  </div>
                 ) : (
                   <Button
                     type="button"

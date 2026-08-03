@@ -11,6 +11,7 @@
     "local:dev": "next dev -H 127.0.0.1 -p 3011",
     "local:down": "docker compose --env-file .env.development.local -f compose.local.yml down",
     "test:e2e": "playwright test",
+    "test:e2e:canonical": "node --env-file=.env.development.local scripts/e2e/run-canonical.mjs",
     "test:backend": "NODE_OPTIONS='--conditions=react-server' tsx --test tests/backend-foundation/*.test.ts",
     "db:bootstrap": "node scripts/db/bootstrap.mjs",
     "db:migrate": "node scripts/db/migrate.mjs",
