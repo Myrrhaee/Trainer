@@ -180,12 +180,6 @@ export function EmailOtpLogin() {
                 }}
               />
 
-              <div className="flex items-center gap-3" aria-hidden>
-                <span className="h-px flex-1 bg-zinc-800" />
-                <span className="text-xs text-zinc-500">или email</span>
-                <span className="h-px flex-1 bg-zinc-800" />
-              </div>
-
               <form onSubmit={handleEmailSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="otp-email" className="text-xs font-medium text-zinc-300">

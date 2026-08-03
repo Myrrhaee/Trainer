@@ -9,7 +9,7 @@
 
 The browser talks only to the public HTTPS Next.js application. The application uses four distinct PostgreSQL runtime identities: app, authenticator, health and worker. Migration and closed-alpha operator identities exist only in isolated operator environments. Resend receives OTP email requests from server-side code only. No database URL, OTP pepper, flow secret, provider token or migration credential may use a `NEXT_PUBLIC_` prefix.
 
-Telegram workout notifications remain disabled for the first deployment unless a separate worker schedule, bot token and consent rehearsal have been approved. Email OTP is required because users need a working sign-in path before an external environment may report ready.
+Per the B17 pilot decision, Telegram notifications, browser sign-in and the Mini App are not dependencies of the first three-participant deployment. Notifications remain disabled unless the evidence and operational gates in `docs/backend-foundation-b17.md` are satisfied. Email OTP is required because users need a working sign-in path before an external environment may report ready.
 
 ## Founder Inputs
 

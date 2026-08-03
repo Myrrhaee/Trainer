@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Chrome, Send } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,12 @@ type StartResponse = {
   authorizationUrl?: string;
 };
 
+type ProviderAvailability = {
+  google: boolean;
+  telegramBrowser: boolean;
+  telegramMiniApp: boolean;
+};
+
 function loadGoogleIdentityServices() {
   if (window.google?.accounts.id) return Promise.resolve();
   window.__aiStrengthGoogleScript ??= new Promise<void>((resolve, reject) => {
@@ -90,6 +96,7 @@ function loadTelegramWebApp() {
 }
 
 function hasTelegramMiniAppLaunchContext() {
+  if (typeof window === "undefined") return false;
   if (window.Telegram?.WebApp?.initData) return true;
   const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   return fragment.has("tgWebAppData");
@@ -102,8 +109,28 @@ export function FederatedLoginOptions({
   onAuthenticated(): void;
   returnPath: string;
 }) {
+  const [providers, setProviders] = useState<ProviderAvailability | null>(null);
   const [loading, setLoading] = useState<"google" | "telegram" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/auth/federated/providers", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("provider_availability_unavailable");
+        const payload = await response.json() as { providers?: ProviderAvailability };
+        setProviders(payload.providers ?? null);
+      })
+      .catch((fetchError: unknown) => {
+        if (!(fetchError instanceof DOMException && fetchError.name === "AbortError")) {
+          setProviders(null);
+        }
+      });
+    return () => controller.abort();
+  }, []);
 
   async function start(provider: "google" | "telegram") {
     const response = await fetch("/api/auth/federated/start", {
@@ -202,29 +229,44 @@ export function FederatedLoginOptions({
     }
   }
 
+  const googleAvailable = providers?.google === true;
+  const telegramAvailable = providers?.telegramBrowser === true
+    || (providers?.telegramMiniApp === true && hasTelegramMiniAppLaunchContext());
+
+  if (!googleAvailable && !telegramAvailable) return null;
+
   return (
     <div className="space-y-3">
-      <Button
-        type="button"
-        variant="outline"
-        disabled={loading !== null}
-        onClick={continueWithGoogle}
-        className="h-10 w-full border-zinc-700 bg-zinc-950 text-zinc-100 hover:bg-zinc-900 hover:text-white"
-      >
-        <Chrome aria-hidden />
-        {loading === "google" ? "Открываем Google..." : "Продолжить с Google"}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={loading !== null}
-        onClick={continueWithTelegram}
-        className="h-10 w-full border-zinc-700 bg-zinc-950 text-zinc-100 hover:bg-zinc-900 hover:text-white"
-      >
-        <Send aria-hidden />
-        {loading === "telegram" ? "Открываем Telegram..." : "Продолжить с Telegram"}
-      </Button>
+      {googleAvailable && (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={loading !== null}
+          onClick={continueWithGoogle}
+          className="h-10 w-full border-zinc-700 bg-zinc-950 text-zinc-100 hover:bg-zinc-900 hover:text-white"
+        >
+          <Chrome aria-hidden />
+          {loading === "google" ? "Открываем Google..." : "Продолжить с Google"}
+        </Button>
+      )}
+      {telegramAvailable && (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={loading !== null}
+          onClick={continueWithTelegram}
+          className="h-10 w-full border-zinc-700 bg-zinc-950 text-zinc-100 hover:bg-zinc-900 hover:text-white"
+        >
+          <Send aria-hidden />
+          {loading === "telegram" ? "Открываем Telegram..." : "Продолжить с Telegram"}
+        </Button>
+      )}
       {error && <p className="text-sm text-amber-300" role="alert">{error}</p>}
+      <div className="flex items-center gap-3 pt-2" aria-hidden>
+        <span className="h-px flex-1 bg-zinc-800" />
+        <span className="text-xs text-zinc-500">или email</span>
+        <span className="h-px flex-1 bg-zinc-800" />
+      </div>
     </div>
   );
 }

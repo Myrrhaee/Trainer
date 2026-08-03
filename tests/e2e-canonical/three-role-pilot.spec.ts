@@ -23,6 +23,9 @@ test.describe("Canonical three-role closed-alpha flow", () => {
       await page.goto("/trainer/dashboard");
       await expect(page).toHaveURL(/\/login\?next=%2Ftrainer%2Fdashboard/);
       await expect(page.getByRole("heading", { name: "Вход или регистрация" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Продолжить с Google" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Продолжить с Telegram" })).toHaveCount(0);
+      await expect(page.getByText("или email", { exact: true })).toHaveCount(0);
 
       await page.goto("/client/me");
       await expect(page).toHaveURL(/\/login\?next=%2Fclient%2Fme/);
