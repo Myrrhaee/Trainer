@@ -7,13 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "local:setup": "node --env-file=.env.development.local scripts/local/setup.mjs",
+    "local:dev": "next dev -H 127.0.0.1 -p 3011",
+    "local:down": "docker compose --env-file .env.development.local -f compose.local.yml down",
     "test:e2e": "playwright test",
     "test:backend": "NODE_OPTIONS='--conditions=react-server' tsx --test tests/backend-foundation/*.test.ts",
     "db:bootstrap": "node scripts/db/bootstrap.mjs",
     "db:migrate": "node scripts/db/migrate.mjs",
     "db:rollback": "node scripts/db/rollback.mjs",
     "notifications:drain": "NODE_OPTIONS='--conditions=react-server' tsx scripts/notifications/drain.ts",
-    "pilot:operator": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/local-pilot.ts",
+    "pilot:operator": "NODE_OPTIONS='--conditions=react-server' node --env-file=.env.development.local --import tsx scripts/ops/local-pilot.ts",
+    "pilot:provision-local": "NODE_OPTIONS='--conditions=react-server' node --env-file=.env.development.local --import tsx scripts/ops/provision-local-pilot.ts",
     "ops:preflight": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/preflight.ts"
   },
   "dependencies": {

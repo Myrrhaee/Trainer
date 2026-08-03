@@ -10,21 +10,35 @@ The operator never creates users or identities. Every participant registers thro
 
 ## Local Sequence
 
-1. Start a migrated local PostgreSQL database and the application with `APP_ENV=local`.
-2. The trainer registers through `/login`, opens `/onboarding` and selects `Запросить доступ`.
-3. Activate the pending trainer request:
+1. Start the persistent local PostgreSQL database and apply migrations:
 
 ```bash
-APP_ENV=local DATABASE_MIGRATION_URL=... npm run pilot:operator -- \
+npm run local:setup
+```
+
+The dedicated container binds only to `127.0.0.1:55432` and stores data in the Docker volume `ai-strength-local-postgres-data`. It does not reuse or modify another PostgreSQL instance on the machine.
+
+2. Start the application with the role-scoped local environment:
+
+```bash
+npm run local:dev
+```
+
+3. Open `http://127.0.0.1:3011/login`.
+4. The trainer registers through `/login`, opens `/onboarding` and selects `Запросить доступ`.
+5. Activate the pending trainer request:
+
+```bash
+npm run pilot:operator -- \
   activate-trainer --email trainer@example.test
 ```
 
-4. The trainer signs in again, opens `/trainer/clients` and creates two separate invitation links.
-5. Each athlete registers independently, opens their own invitation link and accepts it.
-6. Check the three-account readiness state:
+6. The trainer signs in again, opens `/trainer/clients` and creates two separate invitation links.
+7. Each athlete registers independently, opens their own invitation link and accepts it.
+8. Check the three-account readiness state:
 
 ```bash
-APP_ENV=local DATABASE_MIGRATION_URL=... npm run pilot:operator -- \
+npm run pilot:operator -- \
   status \
   --trainer-email trainer@example.test \
   --athlete-email athlete-one@example.test \
@@ -32,6 +46,30 @@ APP_ENV=local DATABASE_MIGRATION_URL=... npm run pilot:operator -- \
 ```
 
 The status command prints only stable `PASS`, `WAIT`, `INFO` and `BLOCKER` codes. It does not print participant emails, display names, user IDs, identity subjects, invitation tokens or database credentials.
+
+For a synthetic rehearsal against the persistent local database, the same canonical API sequence can be performed automatically after `local:setup` and `local:dev`:
+
+```bash
+npm run pilot:provision-local
+```
+
+This command uses three fixed `example.test` addresses, obtains development OTPs through the local-only memory adapter, keeps three independent session cookies in process memory and accepts two ordinary single-use invitations. It never inserts a user, identity, athlete profile or relation directly and never prints OTPs, cookies or invitation tokens.
+
+It also exercises the canonical product loop through HTTP APIs: the trainer creates a template and assignment, the assigned athlete starts and completes the session, the trainer submits feedback, and the athlete reads that feedback.
+
+## Verification Evidence
+
+The local rehearsal completed on 2026-08-04 with:
+
+- three independently authenticated synthetic accounts;
+- one active trainer and two active primary athlete relations;
+- one published workout template and one assignment;
+- one completed workout session;
+- zero open review items after trainer feedback;
+- one feedback message visible to the assigned athlete;
+- two pending notification intents and zero dead-letter notifications.
+
+`scripts/ops/preflight.ts` also passed migrations `0001` through `0010`, the expected schema check, all four runtime database roles, and the negative health-role access checks. Provider delivery was not exercised: email OTP and notification delivery remained on local memory adapters.
 
 ## Activation Safety
 
