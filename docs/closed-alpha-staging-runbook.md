@@ -1,7 +1,7 @@
 # Closed Alpha Staging Runbook
 
 - Status: **executable locally; external provisioning blocked**
-- Canonical schema: migrations `0001` through `0009`
+- Canonical schema: migrations `0001` through `0010`
 - Data rule: staging starts with synthetic accounts only
 
 ## Required Owners
@@ -30,6 +30,7 @@ APP_RELEASE=<immutable commit or release id>
 DATABASE_APP_URL=<app login with ai_strength_app membership>
 DATABASE_AUTH_URL=<auth login with ai_strength_authenticator membership>
 DATABASE_HEALTH_URL=<health login with ai_strength_health membership>
+DATABASE_WORKER_URL=<worker login with ai_strength_worker membership>
 AUTH_PUBLIC_ORIGIN=https://<staging origin>
 AUTH_OTP_PEPPER=<managed secret, at least 32 bytes>
 AUTH_FLOW_SECRET=<different managed secret, at least 32 bytes>
@@ -45,10 +46,10 @@ The runtime must not receive `DATABASE_MIGRATION_URL`, generic `DATABASE_URL`, l
 1. Create the clean managed PostgreSQL staging database in the approved region.
 2. Create a short-lived owner connection for bootstrap only.
 3. Run `npm run db:bootstrap` to create the non-login group roles.
-4. Create four separate login identities and grant only their matching group roles: migrator, authenticator, app and health.
+4. Create five separate login identities and grant only their matching group roles: migrator, authenticator, app, health and worker.
 5. Remove owner credentials from the operator environment after the dedicated migration identity is proven.
 6. Run `npm run db:migrate` with `DATABASE_MIGRATION_URL` from an approved migration job.
-7. Run `npm run ops:preflight` from an isolated operator job containing all four database URLs. A nonzero exit blocks deployment.
+7. Run `npm run ops:preflight` from an isolated operator job containing all five database URLs. A nonzero exit blocks deployment.
 8. Deploy the application with runtime-only variables.
 9. Require `/api/health/ready` to return HTTP 200 before routing alpha traffic.
 10. Record release ID, migration checksums, preflight output, owner and timestamp without recording secrets.

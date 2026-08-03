@@ -13,6 +13,7 @@
     "db:migrate": "node scripts/db/migrate.mjs",
     "db:rollback": "node scripts/db/rollback.mjs",
     "notifications:drain": "NODE_OPTIONS='--conditions=react-server' tsx scripts/notifications/drain.ts",
+    "pilot:operator": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/local-pilot.ts",
     "ops:preflight": "NODE_OPTIONS='--conditions=react-server' tsx scripts/ops/preflight.ts"
   },
   "dependencies": {
