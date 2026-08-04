@@ -16,6 +16,7 @@
     "test:backend:postgres": "node --env-file=.env.development.local scripts/test/run-backend-postgres.mjs",
     "db:bootstrap": "node scripts/db/bootstrap.mjs",
     "db:migrate": "node scripts/db/migrate.mjs",
+    "db:migrate:neon": "node scripts/db/migrate-neon.mjs",
     "db:rollback": "node scripts/db/rollback.mjs",
     "notifications:drain": "NODE_OPTIONS='--conditions=react-server' tsx scripts/notifications/drain.ts",
     "pilot:operator": "NODE_OPTIONS='--conditions=react-server' node --env-file=.env.development.local --import tsx scripts/ops/local-pilot.ts",
@@ -26,6 +27,7 @@
     "ops:smoke-external": "node scripts/ops/smoke-external.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-slot": "^1.2.4",

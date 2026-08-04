@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 
@@ -38,13 +39,20 @@ export async function withMigrationClient(callback) {
     connectionString: migrationConnectionString(),
     application_name: "ai-strength-migrations",
     connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
   });
+  client.on("error", () => undefined);
 
   await client.connect();
   try {
     return await callback(client);
   } finally {
-    await client.end();
+    const gracefulClose = client.end().catch(() => undefined);
+    await Promise.race([gracefulClose, delay(1_000)]);
+    if (!client.connection.stream.destroyed) {
+      client.connection.stream.destroy();
+    }
   }
 }
 
@@ -56,4 +64,12 @@ export async function ensureMigrationTable(client) {
       applied_at timestamptz NOT NULL DEFAULT clock_timestamp()
     )
   `);
+  const owner = await client.query(`
+    SELECT pg_get_userbyid(relowner) AS owner
+    FROM pg_class
+    WHERE oid = 'public.app_schema_migrations'::regclass
+  `);
+  if (owner.rows[0]?.owner !== "ai_strength_migrator") {
+    await client.query("ALTER TABLE public.app_schema_migrations OWNER TO ai_strength_migrator");
+  }
 }

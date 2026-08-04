@@ -10,7 +10,7 @@ Run the bootstrap once with a database owner that may create roles:
 DATABASE_MIGRATION_URL=... npm run db:bootstrap
 ```
 
-The bootstrap creates non-login group roles:
+The bootstrap installs the trusted `pgcrypto` extension under the managed database owner and creates non-login group roles:
 
 - `ai_strength_migrator`: migration ownership boundary;
 - `ai_strength_authenticator`: narrow identity/session access;
@@ -21,6 +21,8 @@ The bootstrap creates non-login group roles:
 
 The managed environment must create separate login roles and grant each login only its corresponding group role. Do not reuse the migration login in the application runtime.
 
+Configure the managed migration login with a short `idle_in_transaction_session_timeout` (the reference staging value is `5s`). This releases transaction-scoped migration locks promptly if the operator loses its network connection.
+
 ## Migrations
 
 ```bash
@@ -28,7 +30,15 @@ DATABASE_MIGRATION_URL=... npm run db:migrate
 DATABASE_MIGRATION_URL=... npm run db:rollback
 ```
 
-The runner applies `*.up.sql` files in lexical order, records a SHA-256 checksum and rejects a changed migration that was already applied. Rollback removes only the latest applied migration through its matching `*.down.sql` file.
+When the operator's PostgreSQL wire connection to a Neon environment is unreliable, run the same canonical SQL and checksum contract over Neon's transactional HTTPS transport:
+
+```bash
+DATABASE_MIGRATION_URL=... npm run db:migrate:neon
+```
+
+This is an operator transport fallback only. It does not change the PostgreSQL schema, runtime repositories or source of truth.
+
+The runner applies `*.up.sql` files in lexical order, records a SHA-256 checksum and rejects a changed migration that was already applied. Each migration uses a fresh connection, switches locally to `ai_strength_migrator`, serializes through a transaction-scoped lock on the checksum table and sends PostgreSQL-aware individual statements inside one transaction. This keeps dollar-quoted functions intact while remaining compatible with transaction poolers; a managed-database connection loss releases the lock for a safe retry. Rollback removes only the latest applied migration through its matching `*.down.sql` file.
 
 ## Runtime Environment
 
