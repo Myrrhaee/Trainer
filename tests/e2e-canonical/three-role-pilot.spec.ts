@@ -64,7 +64,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await expect(trainer.getByRole("link", { name: "Открыть кабинет" })).toBeVisible();
         await trainer.getByRole("link", { name: "Открыть кабинет" }).click();
         await expect(trainer).toHaveURL(/\/trainer\/dashboard$/);
-        await expect(trainer.getByRole("heading", { name: "Сегодня" })).toBeVisible();
+        await expect(trainer.getByRole("heading", { name: "Команда", exact: true })).toBeVisible();
       });
 
       let athleteOneInvite = "";
@@ -95,11 +95,12 @@ test.describe("Canonical three-role closed-alpha flow", () => {
 
       await test.step("trainer sees canonical names and assigns a workout", async () => {
         await trainer.goto("/trainer/clients");
-        const athleteOneRow = trainer.getByRole("button", { name: new RegExp(athleteOneName) });
-        const athleteTwoRow = trainer.getByRole("button", { name: new RegExp(athleteTwoName) });
+        const athleteOneRow = trainer.getByRole("row", { name: new RegExp(athleteOneName) });
+        const athleteTwoRow = trainer.getByRole("row", { name: new RegExp(athleteTwoName) });
         await expect(athleteOneRow).toBeVisible();
         await expect(athleteTwoRow).toBeVisible();
-        await athleteOneRow.click();
+        await athleteOneRow.getByRole("button", { name: `Назначить тренировку для ${athleteOneName}` }).click();
+        await expect(trainer.getByRole("dialog", { name: "Назначить тренировку" })).toBeVisible();
         await trainer.getByLabel("Название тренировки").fill(workoutTitle);
         await trainer.getByLabel("Общая инструкция").fill("Один технический подход без отказа.");
         await trainer.getByLabel("Упражнение 1").fill("Приседание с собственным весом");
@@ -108,6 +109,18 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await trainer.getByLabel("Комментарий спортсмену").fill("Остановись с запасом в два повтора.");
         await trainer.getByRole("button", { name: "Сохранить и назначить" }).click();
         await expect(trainer.getByText(`Назначено: ${workoutTitle} · ${athleteOneName}`, { exact: true })).toBeVisible();
+      });
+
+      await test.step("trainer opens the canonical athlete profile and URL-driven tabs", async () => {
+        const athleteRow = trainer.getByRole("row", { name: new RegExp(athleteOneName) });
+        await athleteRow.getByRole("link", { name: athleteOneName, exact: true }).click();
+        await expect(trainer).toHaveURL(/\/trainer\/clients\/[0-9a-f-]+$/);
+        await expect(trainer.getByRole("heading", { name: athleteOneName, exact: true })).toBeVisible();
+        await expect(trainer.getByText("Тренировка назначена", { exact: true })).toBeVisible();
+        await trainer.getByRole("link", { name: "Тренировки", exact: true }).click();
+        await expect(trainer).toHaveURL(/\?tab=training$/);
+        await expect(trainer.getByRole("heading", { name: "Текущее назначение", exact: true })).toBeVisible();
+        await expectNoHorizontalOverflow(trainer);
       });
 
       let sessionPath = "";
@@ -149,9 +162,18 @@ test.describe("Canonical three-role closed-alpha flow", () => {
 
       await test.step("trainer reviews exact facts and athlete receives feedback", async () => {
         await trainer.goto("/trainer/dashboard");
-        const reviewQueue = trainer.getByRole("region", { name: "Очередь разбора" });
-        await expect(reviewQueue.getByText(athleteOneName, { exact: true })).toBeVisible();
-        await reviewQueue.getByRole("link", { name: "Разобрать", exact: true }).click();
+        const decisionWorkspace = trainer.getByRole("region", { name: "Следующее решение" });
+        await decisionWorkspace.getByRole("button", { name: new RegExp(athleteOneName) }).click();
+        await expect(decisionWorkspace.getByRole("heading", { name: athleteOneName })).toBeVisible();
+        await trainer.evaluate(() => window.scrollTo(0, 600));
+        await decisionWorkspace.getByRole("link", { name: "Контекст клиента" }).click();
+        await expect(trainer).toHaveURL(/\/trainer\/clients\/[0-9a-f-]+\?from=dashboard.*attentionItem=/);
+        const entryContext = trainer.getByRole("region", { name: "Причина открытия профиля" });
+        await expect(entryContext.getByText("Тренировка ждёт разбора", { exact: true })).toBeVisible();
+        await expect.poll(() => trainer.evaluate(() => window.scrollY)).toBe(0);
+        await trainer.getByRole("link", { name: "К главной" }).click();
+        await decisionWorkspace.getByRole("button", { name: new RegExp(athleteOneName) }).click();
+        await decisionWorkspace.getByRole("button", { name: "Разобрать", exact: true }).click();
         await expect(trainer.getByText("B14: подход выполнен через мобильный сценарий.", { exact: false })).toBeVisible();
         await trainer.getByLabel("Сообщение спортсмену").fill(feedbackText);
         await trainer.getByRole("button", { name: "Отправить", exact: true }).click();
@@ -200,7 +222,7 @@ async function createInvitation(page: Page) {
     response.url().endsWith("/api/access/invitations")
     && response.request().method() === "POST"
   ));
-  await page.getByRole("button", { name: "Пригласить" }).click();
+  await page.getByRole("button", { name: "Пригласить", exact: true }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(201);
   const body = await response.json() as { webInvitationUrl: string };

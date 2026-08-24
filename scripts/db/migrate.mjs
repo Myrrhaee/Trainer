@@ -73,7 +73,22 @@ await withRetry("migration table setup", () => (
   }, { setMigratorRole: false, useSerializationLock: false })
 ));
 
-const files = await listSqlFiles(migrationsDirectory, ".up.sql");
+const allFiles = await listSqlFiles(migrationsDirectory, ".up.sql");
+const throughIndex = process.argv.indexOf("--through");
+const throughMigration = throughIndex >= 0 ? process.argv[throughIndex + 1] : null;
+
+if (throughIndex >= 0 && !throughMigration) {
+  throw new Error("--through requires a migration name");
+}
+
+const targetFilename = throughMigration ? `${throughMigration}.up.sql` : null;
+const targetIndex = targetFilename ? allFiles.indexOf(targetFilename) : -1;
+
+if (targetFilename && targetIndex < 0) {
+  throw new Error(`Unknown migration target ${throughMigration}`);
+}
+
+const files = targetIndex >= 0 ? allFiles.slice(0, targetIndex + 1) : allFiles;
 
 for (const filename of files) {
   const name = filename.slice(0, -".up.sql".length);

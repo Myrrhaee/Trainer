@@ -4,7 +4,7 @@ import { ArrowRight, CheckCircle2, Eye, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type EmptyTeamStateProps = {
-  onOpenDemo: () => void;
+  onOpenDemo?: () => void;
 };
 
 export function EmptyTeamState({ onOpenDemo }: EmptyTeamStateProps) {
@@ -36,10 +36,12 @@ export function EmptyTeamState({ onOpenDemo }: EmptyTeamStateProps) {
               <ArrowRight className="size-4" />
             </Link>
           </Button>
-          <Button type="button" variant="outline" onClick={onOpenDemo} className="rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
-            <Eye className="size-4" />
-            Открыть демо-команду
-          </Button>
+          {onOpenDemo ? (
+            <Button type="button" variant="outline" onClick={onOpenDemo} className="rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
+              <Eye className="size-4" />
+              Открыть демо-команду
+            </Button>
+          ) : null}
         </div>
 
         <p className="mt-5 inline-flex items-center gap-2 text-xs text-zinc-600">

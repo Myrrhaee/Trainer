@@ -1,41 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, CheckCircle2, Copy, Dumbbell, Link2, Loader2, Plus, Trash2, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, CheckCircle2, ClipboardCheck, Copy, Dumbbell, Link2, Loader2, Search, UserRound, Users } from "lucide-react";
 import { toast } from "sonner";
 
+import { CanonicalRosterAssignmentDialog } from "@/components/trainer/canonical-roster-assignment-dialog";
+import {
+  buildCanonicalTrainerRoster,
+  filterCanonicalTrainerRoster,
+  type CanonicalRosterAthlete,
+  type CanonicalRosterFilter,
+  type CanonicalRosterStatus,
+} from "@/components/trainer/canonical-trainer-roster-model";
 import { TrainerShell } from "@/components/trainer/trainer-shell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import type { TrainerAthlete, WorkoutTemplate } from "@/lib/server/workouts/workout-types";
-
-type ExerciseDraft = {
-  id: string;
-  title: string;
-  sets: string;
-  repetitions: string;
-  targetWeightKg: string;
-};
-
-function blankExercise(index: number): ExerciseDraft {
-  return {
-    id: `exercise-${Date.now()}-${index}`,
-    title: "",
-    sets: "3",
-    repetitions: "10",
-    targetWeightKg: "",
-  };
-}
-
-function today() {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-}
+import type { TrainerDashboardSnapshot } from "@/lib/server/trainer-dashboard/trainer-dashboard-types";
+import type { WorkoutTemplate } from "@/lib/server/workouts/workout-types";
+import { cn } from "@/lib/utils";
 
 async function copyInvitationUrl(value: string) {
   try {
@@ -48,127 +32,42 @@ async function copyInvitationUrl(value: string) {
 }
 
 export function CanonicalTrainerRoster() {
-  const [athletes, setAthletes] = useState<TrainerAthlete[]>([]);
+  const [snapshot, setSnapshot] = useState<TrainerDashboardSnapshot | null>(null);
   const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedAthleteId, setSelectedAthleteId] = useState("");
-  const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [mode, setMode] = useState<"new" | "saved">("new");
-  const [title, setTitle] = useState("");
-  const [instruction, setInstruction] = useState("");
-  const [trainerNote, setTrainerNote] = useState("");
-  const [scheduledFor, setScheduledFor] = useState(today());
-  const [exercises, setExercises] = useState<ExerciseDraft[]>([blankExercise(0)]);
-  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<CanonicalRosterFilter>("all");
+  const [assignmentAthlete, setAssignmentAthlete] = useState<CanonicalRosterAthlete | null>(null);
   const [inviting, setInviting] = useState(false);
   const [inviteUrl, setInviteUrl] = useState("");
-  const [lastAssignment, setLastAssignment] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState("");
 
-  const selectedAthlete = useMemo(
-    () => athletes.find((athlete) => athlete.athleteUserId === selectedAthleteId) ?? null,
-    [athletes, selectedAthleteId],
+  async function load() {
+    setLoading(true);
+    setFailed(false);
+    try {
+      const [dashboardResponse, templatesResponse] = await Promise.all([
+        fetch("/api/trainer/dashboard", { cache: "no-store" }),
+        fetch("/api/trainer/workout-templates", { cache: "no-store" }),
+      ]);
+      if (!dashboardResponse.ok || !templatesResponse.ok) throw new Error("load_failed");
+      setSnapshot(await dashboardResponse.json() as TrainerDashboardSnapshot);
+      setTemplates((await templatesResponse.json() as { templates: WorkoutTemplate[] }).templates);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  const roster = useMemo(() => snapshot ? buildCanonicalTrainerRoster(snapshot) : null, [snapshot]);
+  const visibleAthletes = useMemo(
+    () => filterCanonicalTrainerRoster(roster?.athletes ?? [], filter, search),
+    [filter, roster?.athletes, search],
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      try {
-        const [athletesResponse, templatesResponse] = await Promise.all([
-          fetch("/api/trainer/athletes", { cache: "no-store" }),
-          fetch("/api/trainer/workout-templates", { cache: "no-store" }),
-        ]);
-        if (!athletesResponse.ok || !templatesResponse.ok) throw new Error("load_failed");
-        const athletesBody = await athletesResponse.json() as { athletes: TrainerAthlete[] };
-        const templatesBody = await templatesResponse.json() as { templates: WorkoutTemplate[] };
-        if (cancelled) return;
-        setAthletes(athletesBody.athletes);
-        setTemplates(templatesBody.templates);
-        setSelectedAthleteId((current) => current || athletesBody.athletes[0]?.athleteUserId || "");
-        setSelectedTemplateId((current) => current || templatesBody.templates[0]?.id || "");
-      } catch {
-        if (!cancelled) toast.error("Не удалось загрузить рабочие данные");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => { cancelled = true; };
-  }, []);
-
-  function updateExercise(id: string, field: keyof Omit<ExerciseDraft, "id">, value: string) {
-    setExercises((current) => current.map((item) => item.id === id ? { ...item, [field]: value } : item));
-  }
-
-  async function createTemplate() {
-    const payload = {
-      title,
-      description: "",
-      generalInstruction: instruction,
-      estimatedDurationMin: null,
-      exercises: exercises.map((exercise) => ({
-        title: exercise.title,
-        sets: Number(exercise.sets),
-        repetitions: Number(exercise.repetitions),
-        targetWeightKg: exercise.targetWeightKg ? Number(exercise.targetWeightKg) : null,
-        restSeconds: 90,
-        trainerNote: "",
-      })),
-    };
-    const response = await fetch("/api/trainer/workout-templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error("template_failed");
-    const body = await response.json() as { template: WorkoutTemplate };
-    setTemplates((current) => [body.template, ...current]);
-    setSelectedTemplateId(body.template.id);
-    return body.template;
-  }
-
-  async function saveOnly() {
-    if (saving) return;
-    setSaving(true);
-    try {
-      const template = await createTemplate();
-      setMode("saved");
-      toast.success(`Шаблон «${template.title}» сохранён`);
-    } catch {
-      toast.error("Проверьте название и параметры упражнений");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function assign() {
-    if (saving || !selectedAthlete) return;
-    setSaving(true);
-    try {
-      const template = mode === "new"
-        ? await createTemplate()
-        : templates.find((item) => item.id === selectedTemplateId);
-      if (!template) throw new Error("template_missing");
-      const response = await fetch("/api/workout-assignments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          athleteUserId: selectedAthlete.athleteUserId,
-          templateId: template.id,
-          scheduledFor,
-          trainerNote,
-        }),
-      });
-      if (!response.ok) throw new Error("assignment_failed");
-      setMode("saved");
-      setLastAssignment(`${template.title} · ${selectedAthlete.displayName}`);
-      toast.success("Тренировка назначена");
-    } catch {
-      toast.error("Не удалось назначить тренировку");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function createInvitation() {
     if (inviting) return;
@@ -190,178 +89,130 @@ export function CanonicalTrainerRoster() {
   return (
     <TrainerShell
       title="Спортсмены"
-      description="Активные связи и назначение тренировок"
+      description="Команда, текущий статус и следующий рабочий шаг"
       headerAction={(
-        <Button type="button" onClick={() => void createInvitation()} disabled={inviting} className="bg-lime-300 text-black hover:bg-lime-200">
-          {inviting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Link2 className="mr-2 size-4" />}
+        <Button type="button" onClick={() => void createInvitation()} disabled={inviting} className="rounded-full bg-lime-300 text-black hover:bg-lime-200">
+          {inviting ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
           Пригласить
         </Button>
       )}
     >
-      <div className="mx-auto max-w-7xl space-y-6">
-        {inviteUrl ? (
-          <div className="grid gap-2 border-b border-lime-300/20 bg-lime-300/[0.06] px-4 py-3 text-sm text-lime-100 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center" role="status">
-            <span className="font-medium">Ссылка приглашения готова</span>
-            <Input aria-label="Ссылка приглашения" readOnly value={inviteUrl} className="h-9 min-w-0 border-lime-300/20 bg-black/30 text-xs text-lime-100" />
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              title="Скопировать ссылку"
-              aria-label="Скопировать ссылку"
-              onClick={() => void copyInvitationUrl(inviteUrl)
-                .then((copied) => copied
-                  ? toast.success("Ссылка скопирована")
-                  : toast.error("Выделите ссылку и скопируйте вручную"))}
-            >
-              <Copy className="size-4" />
-            </Button>
-          </div>
-        ) : null}
+      <main className="min-h-screen bg-black px-4 py-5 pb-28 text-zinc-100 sm:px-6 lg:px-8 lg:pb-8">
+        <div className="mx-auto w-full max-w-[1440px] space-y-5">
+          {inviteUrl ? <InvitationReceipt inviteUrl={inviteUrl} /> : null}
+          {receipt ? <p role="status" className="flex items-center gap-2 border-y border-lime-300/20 bg-lime-300/[0.055] px-4 py-3 text-sm text-lime-100"><CheckCircle2 className="size-4" />{receipt}</p> : null}
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(34rem,1.4fr)]">
-          <section className="min-w-0 border-t border-zinc-800 pt-5" aria-labelledby="athletes-heading">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase text-zinc-500">Команда</p>
-                <h2 id="athletes-heading" className="mt-1 text-lg font-semibold tracking-normal">Активные спортсмены</h2>
-              </div>
-              <span className="text-sm text-zinc-500">{athletes.length}</span>
+          {loading ? (
+            <div className="grid min-h-[60vh] place-items-center" aria-label="Загрузка спортсменов"><Loader2 className="size-6 animate-spin text-zinc-500" /></div>
+          ) : failed || !roster ? (
+            <div className="grid min-h-[60vh] place-items-center text-center">
+              <div><h2 className="text-xl font-semibold">Не удалось загрузить спортсменов</h2><Button type="button" onClick={() => void load()} variant="outline" className="mt-4 rounded-full border-zinc-700">Повторить</Button></div>
             </div>
+          ) : roster.summary.total === 0 ? (
+            <EmptyRoster onInvite={() => void createInvitation()} />
+          ) : (
+            <>
+              <RosterSummary summary={roster.summary} />
 
-            {loading ? (
-              <div className="flex min-h-48 items-center justify-center text-zinc-500"><Loader2 className="size-5 animate-spin" /></div>
-            ) : athletes.length === 0 ? (
-              <div className="py-14 text-center">
-                <Users className="mx-auto size-8 text-zinc-700" />
-                <h3 className="mt-4 font-medium">Пока нет спортсменов</h3>
-                <p className="mt-2 text-sm text-zinc-500">Создайте ссылку и отправьте её первому участнику.</p>
-              </div>
-            ) : (
-              <div className="mt-4 divide-y divide-zinc-800 border-y border-zinc-800">
-                {athletes.map((athlete) => {
-                  const active = athlete.athleteUserId === selectedAthleteId;
-                  return (
-                    <div
-                      key={athlete.athleteUserId}
-                      className={`flex min-h-20 items-center gap-2 px-3 py-3 transition ${active ? "bg-lime-300/[0.08]" : "hover:bg-zinc-900/70"}`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedAthleteId(athlete.athleteUserId)}
-                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        aria-pressed={active}
-                      >
-                        <Avatar className="size-11"><AvatarFallback className="bg-zinc-800 text-zinc-100">{athlete.initials}</AvatarFallback></Avatar>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{athlete.displayName}</span>
-                          <span className="mt-1 block text-xs text-zinc-500">Активная связь</span>
-                        </span>
-                        {active ? <CheckCircle2 className="size-4 text-lime-300" /> : null}
-                      </button>
-                      <Button asChild type="button" size="sm" variant="ghost" className="shrink-0 rounded-lg text-zinc-400">
-                        <Link href={`/trainer/clients/${athlete.athleteUserId}`}>Профиль</Link>
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="min-w-0 border-t border-zinc-800 pt-5" aria-labelledby="assignment-heading">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase text-zinc-500">Быстрое назначение</p>
-                <h2 id="assignment-heading" className="mt-1 text-lg font-semibold tracking-normal">
-                  {selectedAthlete ? selectedAthlete.displayName : "Выберите спортсмена"}
-                </h2>
-              </div>
-              <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-950 p-1">
-                <button type="button" onClick={() => setMode("new")} className={`h-9 px-3 text-sm ${mode === "new" ? "bg-zinc-800 text-white" : "text-zinc-500"}`}>Новый шаблон</button>
-                <button type="button" onClick={() => setMode("saved")} disabled={!templates.length} className={`h-9 px-3 text-sm disabled:opacity-40 ${mode === "saved" ? "bg-zinc-800 text-white" : "text-zinc-500"}`}>Сохранённые</button>
-              </div>
-            </div>
-
-            <div className="mt-5 space-y-5">
-              {mode === "new" ? (
-                <>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="workout-title">Название тренировки</Label>
-                      <Input id="workout-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, Полное тело A" className="border-zinc-800 bg-zinc-950" />
-                    </div>
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="workout-instruction">Общая инструкция</Label>
-                      <Textarea id="workout-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="Темп, запас повторов, ограничения" className="min-h-20 border-zinc-800 bg-zinc-950" />
-                    </div>
+              <section aria-labelledby="roster-heading" className="overflow-hidden rounded-lg border border-zinc-800/90 bg-zinc-950/80">
+                <div className="flex flex-col gap-4 border-b border-zinc-800 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Команда</p>
+                    <h2 id="roster-heading" className="mt-1 text-xl font-semibold">Все спортсмены</h2>
                   </div>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <Label>Упражнения</Label>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setExercises((current) => [...current, blankExercise(current.length)])} className="border-zinc-800 bg-transparent">
-                        <Plus className="mr-2 size-4" />Добавить
-                      </Button>
+                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="relative min-w-0 sm:w-72">
+                      <Search className="pointer-events-none absolute left-3 top-3 size-4 text-zinc-600" />
+                      <Input aria-label="Поиск спортсмена" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Имя или статус" className="h-10 border-zinc-800 bg-black pl-9" />
                     </div>
-                    {exercises.map((exercise, index) => (
-                      <div key={exercise.id} className="grid gap-3 border-b border-zinc-800 pb-4 sm:grid-cols-[minmax(0,1fr)_5rem_6rem_7rem_2.5rem]">
-                        <Input aria-label={`Упражнение ${index + 1}`} value={exercise.title} onChange={(event) => updateExercise(exercise.id, "title", event.target.value)} placeholder={`Упражнение ${index + 1}`} className="border-zinc-800 bg-zinc-950" />
-                        <Input aria-label="Подходы" type="number" min="1" max="20" value={exercise.sets} onChange={(event) => updateExercise(exercise.id, "sets", event.target.value)} className="border-zinc-800 bg-zinc-950" />
-                        <Input aria-label="Повторения" type="number" min="1" max="500" value={exercise.repetitions} onChange={(event) => updateExercise(exercise.id, "repetitions", event.target.value)} className="border-zinc-800 bg-zinc-950" />
-                        <Input aria-label="Вес в килограммах" type="number" min="0" step="0.5" value={exercise.targetWeightKg} onChange={(event) => updateExercise(exercise.id, "targetWeightKg", event.target.value)} placeholder="кг" className="border-zinc-800 bg-zinc-950" />
-                        <Button type="button" size="icon" variant="ghost" disabled={exercises.length === 1} onClick={() => setExercises((current) => current.filter((item) => item.id !== exercise.id))} aria-label="Удалить упражнение" title="Удалить упражнение" className="text-zinc-500 hover:text-red-300">
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="saved-template">Шаблон</Label>
-                  <select id="saved-template" value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)} className="h-11 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm outline-none focus:ring-2 focus:ring-lime-300/50">
-                    {templates.map((template) => <option key={template.id} value={template.id}>{template.title} · {template.exercises.length} упр.</option>)}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid gap-4 border-t border-zinc-800 pt-5 sm:grid-cols-[12rem_minmax(0,1fr)]">
-                <div className="space-y-2">
-                  <Label htmlFor="scheduled-for">Дата</Label>
-                  <div className="relative">
-                    <CalendarDays className="pointer-events-none absolute left-3 top-3 size-4 text-zinc-500" />
-                    <Input id="scheduled-for" type="date" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} className="border-zinc-800 bg-zinc-950 pl-9" />
+                    <RosterFilters filter={filter} onChange={setFilter} summary={roster.summary} />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="trainer-note">Комментарий спортсмену</Label>
-                  <Input id="trainer-note" value={trainerNote} onChange={(event) => setTrainerNote(event.target.value)} placeholder="Необязательно" className="border-zinc-800 bg-zinc-950" />
-                </div>
-              </div>
 
-              {lastAssignment ? (
-                <p className="flex items-center gap-2 text-sm text-lime-200"><CheckCircle2 className="size-4" />Назначено: {lastAssignment}</p>
-              ) : null}
-
-              <div className="flex flex-wrap justify-end gap-3 border-t border-zinc-800 pt-5">
-                {selectedAthlete ? (
-                  <Button asChild type="button" variant="outline" className="border-zinc-700 bg-transparent">
-                    <Link href={`/trainer/builder?athleteId=${selectedAthlete.athleteUserId}&from=quick-assign&returnTo=/trainer/clients`}>
-                      Открыть конструктор
-                    </Link>
-                  </Button>
-                ) : null}
-                {mode === "new" ? <Button type="button" variant="outline" onClick={() => void saveOnly()} disabled={saving} className="border-zinc-700 bg-transparent">Сохранить шаблон</Button> : null}
-                <Button type="button" onClick={() => void assign()} disabled={saving || !selectedAthlete || (mode === "saved" && !selectedTemplateId)} className="bg-lime-300 text-black hover:bg-lime-200">
-                  {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Dumbbell className="mr-2 size-4" />}
-                  {mode === "new" ? "Сохранить и назначить" : "Назначить"}
-                </Button>
-              </div>
-            </div>
-          </section>
+                {visibleAthletes.length > 0 ? (
+                  <div role="table" aria-label="Список спортсменов">
+                    <div role="row" className="hidden grid-cols-[minmax(240px,1.1fr)_190px_minmax(220px,1fr)_130px_150px] gap-4 border-b border-zinc-800 px-5 py-2.5 text-xs uppercase text-zinc-600 lg:grid">
+                      <span role="columnheader">Спортсмен</span><span role="columnheader">Статус</span><span role="columnheader">Следующий шаг</span><span role="columnheader">Активность</span><span role="columnheader" className="text-right">Действие</span>
+                    </div>
+                    <div className="divide-y divide-zinc-800/85">
+                      {visibleAthletes.map((athlete) => <RosterRow key={athlete.athleteUserId} athlete={athlete} onAssign={setAssignmentAthlete} />)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-5 py-16 text-center"><Search className="mx-auto size-7 text-zinc-700" /><p className="mt-3 font-medium">Ничего не найдено</p><button type="button" onClick={() => { setSearch(""); setFilter("all"); }} className="mt-2 text-sm text-lime-200 hover:text-lime-100">Сбросить поиск и фильтры</button></div>
+                )}
+              </section>
+            </>
+          )}
         </div>
-      </div>
+      </main>
+
+      {assignmentAthlete ? (
+        <CanonicalRosterAssignmentDialog
+          key={assignmentAthlete.athleteUserId}
+          athlete={assignmentAthlete}
+          templates={templates}
+          open
+          onOpenChange={(open) => { if (!open) setAssignmentAthlete(null); }}
+          onAssigned={(message) => { setReceipt(message); void load(); }}
+        />
+      ) : null}
     </TrainerShell>
   );
+}
+
+function RosterSummary({ summary }: { summary: { total: number; attention: number; waitingReview: number; onTrack: number } }) {
+  const items = [
+    { label: "Всего", value: summary.total, icon: Users, tone: "neutral" },
+    { label: "Нужен шаг", value: summary.attention, icon: Dumbbell, tone: "attention" },
+    { label: "Ждут разбора", value: summary.waitingReview, icon: ClipboardCheck, tone: "review" },
+    { label: "По плану", value: summary.onTrack, icon: CheckCircle2, tone: "calm" },
+  ] as const;
+  return (
+    <section aria-label="Сводка по спортсменам" className="grid grid-cols-2 divide-x divide-y divide-zinc-800 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/75 sm:grid-cols-4 sm:divide-y-0">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return <div key={item.label} className="flex items-center gap-3 px-4 py-4 sm:px-5"><span className={cn("flex size-9 items-center justify-center rounded-full border", item.tone === "attention" && "border-rose-300/20 bg-rose-300/8 text-rose-100", item.tone === "review" && "border-amber-300/20 bg-amber-300/8 text-amber-100", item.tone === "calm" && "border-lime-300/20 bg-lime-300/8 text-lime-100", item.tone === "neutral" && "border-zinc-700 bg-zinc-900 text-zinc-300")}><Icon className="size-4" /></span><span><span className="block text-xl font-semibold">{item.value}</span><span className="block text-xs text-zinc-500">{item.label}</span></span></div>;
+      })}
+    </section>
+  );
+}
+
+function RosterFilters({ filter, onChange, summary }: { filter: CanonicalRosterFilter; onChange: (filter: CanonicalRosterFilter) => void; summary: { total: number; attention: number; waitingReview: number; onTrack: number } }) {
+  const filters: Array<{ id: CanonicalRosterFilter; label: string; count: number }> = [
+    { id: "all", label: "Все", count: summary.total },
+    { id: "attention", label: "Нужен шаг", count: summary.attention },
+    { id: "waiting_review", label: "Разбор", count: summary.waitingReview },
+    { id: "on_track", label: "По плану", count: summary.onTrack },
+  ];
+  return <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-zinc-800 bg-black p-1" aria-label="Фильтр спортсменов">{filters.map((item) => <button key={item.id} type="button" onClick={() => onChange(item.id)} aria-pressed={filter === item.id} className={cn("h-8 shrink-0 rounded-md px-2.5 text-xs transition", filter === item.id ? "bg-zinc-800 text-zinc-50" : "text-zinc-500 hover:text-zinc-200")}>{item.label} <span className="text-zinc-600">{item.count}</span></button>)}</div>;
+}
+
+function RosterRow({ athlete, onAssign }: { athlete: CanonicalRosterAthlete; onAssign: (athlete: CanonicalRosterAthlete) => void }) {
+  return (
+    <div role="row" aria-label={`${athlete.displayName} ${athlete.statusLabel}`} className="grid gap-3 px-4 py-4 transition hover:bg-zinc-900/45 sm:px-5 lg:grid-cols-[minmax(240px,1.1fr)_190px_minmax(220px,1fr)_130px_150px] lg:items-center lg:gap-4">
+      <div role="cell" className="flex min-w-0 items-center gap-3"><Avatar className="size-11 shrink-0 border border-zinc-800"><AvatarFallback className="bg-zinc-900 text-sm font-semibold text-zinc-100">{athlete.initials}</AvatarFallback></Avatar><span className="min-w-0"><Link href={`/trainer/clients/${athlete.athleteUserId}`} className="block truncate font-medium text-zinc-50 hover:text-lime-100">{athlete.displayName}</Link><span className="mt-0.5 block text-xs text-zinc-600">Активная связь</span></span></div>
+      <div role="cell"><StatusBadge status={athlete.status} label={athlete.statusLabel} /></div>
+      <div role="cell" className="min-w-0"><p className="truncate text-sm text-zinc-200">{athlete.nextStep}</p><p className="mt-0.5 truncate text-xs text-zinc-600">{athlete.nextStepDetail}</p></div>
+      <div role="cell" className="text-sm text-zinc-500"><span className="lg:hidden">Активность: </span>{athlete.latestActivity}</div>
+      <div role="cell" className="flex items-center gap-2 lg:justify-end">
+        {athlete.status === "waiting_review" && athlete.reviewHref ? <Button asChild size="sm" className="rounded-full bg-lime-300 px-3 text-black hover:bg-lime-200"><Link href={athlete.reviewHref}>Разобрать</Link></Button> : null}
+        {athlete.status === "no_next_workout" ? <Button type="button" size="sm" onClick={() => onAssign(athlete)} aria-label={`Назначить тренировку для ${athlete.displayName}`} className="rounded-full bg-lime-300 px-3 text-black hover:bg-lime-200"><Dumbbell className="size-3.5" />Назначить</Button> : null}
+        {athlete.status === "scheduled" || athlete.status === "in_progress" ? <Button asChild size="sm" variant="outline" className="rounded-full border-zinc-700 bg-black/30"><Link href={`/trainer/clients/${athlete.athleteUserId}`}>Профиль</Link></Button> : null}
+        <Button asChild size="icon" variant="ghost" className="size-9 rounded-full text-zinc-500" title={`Открыть профиль ${athlete.displayName}`}><Link href={`/trainer/clients/${athlete.athleteUserId}`} aria-label={`Открыть профиль ${athlete.displayName}`}><ArrowRight className="size-4" /></Link></Button>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status, label }: { status: CanonicalRosterStatus; label: string }) {
+  return <span className={cn("inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs", status === "waiting_review" && "border-amber-300/20 bg-amber-300/7 text-amber-100", status === "no_next_workout" && "border-rose-300/20 bg-rose-300/7 text-rose-100", status === "in_progress" && "border-sky-300/20 bg-sky-300/7 text-sky-100", status === "scheduled" && "border-lime-300/20 bg-lime-300/7 text-lime-100")}><span className="size-1.5 rounded-full bg-current" />{label}</span>;
+}
+
+function InvitationReceipt({ inviteUrl }: { inviteUrl: string }) {
+  return <div className="grid gap-2 border-y border-lime-300/20 bg-lime-300/[0.055] px-4 py-3 text-sm text-lime-100 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center"><span className="font-medium">Ссылка приглашения готова</span><Input aria-label="Ссылка приглашения" readOnly value={inviteUrl} className="h-9 min-w-0 border-lime-300/20 bg-black/30 text-xs text-lime-100" /><Button type="button" size="icon" variant="ghost" title="Скопировать ссылку" aria-label="Скопировать ссылку" onClick={() => void copyInvitationUrl(inviteUrl).then((copied) => copied ? toast.success("Ссылка скопирована") : toast.error("Скопируйте ссылку вручную"))}><Copy className="size-4" /></Button></div>;
+}
+
+function EmptyRoster({ onInvite }: { onInvite: () => void }) {
+  return <section className="grid min-h-[60vh] place-items-center text-center"><div><div className="mx-auto flex size-14 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950"><UserRound className="size-6 text-zinc-500" /></div><h2 className="mt-4 text-xl font-semibold">Пока нет спортсменов</h2><p className="mt-2 text-sm text-zinc-500">Создайте ссылку и отправьте её первому участнику.</p><Button type="button" onClick={onInvite} className="mt-5 rounded-full bg-lime-300 text-black hover:bg-lime-200"><Link2 className="size-4" />Создать ссылку</Button></div></section>;
 }

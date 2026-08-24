@@ -11,7 +11,6 @@ import {
   ChevronRight,
   CircleAlert,
   Dumbbell,
-  ExternalLink,
   ShieldAlert,
   UserRound,
   UsersRound,
@@ -35,6 +34,7 @@ type AttentionWorkspaceProps = {
   onResolve: (item: TrainerAttentionQueueItem) => void;
   onQuickAssign: (client: TeamClient) => void;
   onWorkoutReview: (client: TeamClient) => void;
+  allowManualResolve?: boolean;
 };
 
 export function AttentionWorkspace({
@@ -48,6 +48,7 @@ export function AttentionWorkspace({
   onResolve,
   onQuickAssign,
   onWorkoutReview,
+  allowManualResolve = true,
 }: AttentionWorkspaceProps) {
   const currentItem = items.find((item) => item.id === currentItemId) ?? items[0] ?? null;
   const currentIndex = currentItem ? items.findIndex((item) => item.id === currentItem.id) : -1;
@@ -106,6 +107,7 @@ export function AttentionWorkspace({
             onResolve={onResolve}
             onQuickAssign={onQuickAssign}
             onWorkoutReview={onWorkoutReview}
+            allowManualResolve={allowManualResolve}
           />
           <div className="min-w-0">
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -157,11 +159,13 @@ function AttentionDecisionCard({
   onResolve,
   onQuickAssign,
   onWorkoutReview,
+  allowManualResolve,
 }: {
   item: TrainerAttentionQueueItem;
   onResolve: (item: TrainerAttentionQueueItem) => void;
   onQuickAssign: (client: TeamClient) => void;
   onWorkoutReview: (client: TeamClient) => void;
+  allowManualResolve: boolean;
 }) {
   const tone = attentionTone[item.kind];
   const SignalIcon = tone.icon;
@@ -234,27 +238,20 @@ function AttentionDecisionCard({
             </Link>
           </Button>
         ) : null}
-        {item.reviewHref ? (
-          <Button asChild variant="outline" className="h-11 rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
-            <Link href={`${item.reviewHref}?from=dashboard&attentionItem=${item.id}&queue=review`}>
-              Полный разбор
-              <ExternalLink className="size-4" />
-            </Link>
-          </Button>
-        ) : (
-          <Button asChild variant="outline" className="h-11 rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
-            <Link href={profileHref}>Контекст клиента</Link>
-          </Button>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => onResolve(item)}
-          className="h-11 rounded-full px-3 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-        >
-          <CheckCircle2 className="size-4" />
-          Отметить решённым
+        <Button asChild variant="outline" className="h-11 rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
+          <Link href={profileHref}>Контекст клиента</Link>
         </Button>
+        {allowManualResolve ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onResolve(item)}
+            className="h-11 rounded-full px-3 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          >
+            <CheckCircle2 className="size-4" />
+            Отметить решённым
+          </Button>
+        ) : null}
       </div>
     </article>
   );

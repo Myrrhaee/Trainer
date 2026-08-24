@@ -34,7 +34,7 @@ export function DashboardStatusHeader({ summary, onOpenAttention }: DashboardSta
           <p className="mt-1 text-sm text-zinc-500">
             {calm
               ? "Открытых действий нет. Команда продолжает работать по плану."
-              : `${summary.calm} клиентов идут по плану. Начните с самого важного сигнала.`}
+              : `${summary.calm} ${getClientWord(summary.calm)} ${getClientVerb(summary.calm)} по плану. Начните с самого важного сигнала.`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -84,4 +84,10 @@ function getClientWord(count: number) {
   if (mod10 === 1 && mod100 !== 11) return "клиент";
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "клиента";
   return "клиентов";
+}
+
+function getClientVerb(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  return mod10 === 1 && mod100 !== 11 ? "идёт" : "идут";
 }

@@ -84,6 +84,10 @@ export function ActivityDrawer({
   }
 
   function openPrimaryAction(item: TeamActivityItem) {
+    if (item.href) {
+      router.push(item.href);
+      return;
+    }
     if (item.type === "completed_workout") {
       const sessionId = getDefaultReviewSessionId(item.clientId);
       router.push(sessionId ? `/trainer/review/${sessionId}?from=history` : `/trainer/clients/${item.clientId}?from=dashboard`);

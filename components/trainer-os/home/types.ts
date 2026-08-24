@@ -52,6 +52,7 @@ export type TeamActivityItem = {
   clock: string;
   dateGroup: TeamActivityDateGroup;
   unread?: boolean;
+  href?: string;
 };
 
 export type SecondaryAttentionItem = {
