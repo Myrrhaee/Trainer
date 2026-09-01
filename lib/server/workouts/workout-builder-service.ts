@@ -166,8 +166,8 @@ export class WorkoutBuilderService {
 
   async publish(actor: Actor, templateId: unknown, value: unknown) {
     const parsedId = uuid(templateId);
-    const saved = await this.repository.saveDraft(actor, { ...templateInput(value, true), id: parsedId });
-    return saved ? this.repository.publish(actor, parsedId) : null;
+    await this.repository.saveDraft(actor, { ...templateInput(value, true), id: parsedId });
+    return this.repository.publish(actor, parsedId);
   }
 
   createRevision(actor: Actor, templateId: unknown) {

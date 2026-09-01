@@ -55,7 +55,8 @@ type TemplateSummaryRow = {
 type PreviewHeadRow = {
   template_id: string;
   template_status: "draft" | "published" | "archived";
-  current_revision: number;
+  published_revision_id: string | null;
+  editable_revision_id: string | null;
   revision_id: string;
   revision_number: number;
   revision_status: "draft" | "published";
@@ -212,14 +213,13 @@ export class QuickAssignRepository {
                summary.prescribed_set_count,
                summary.superset_count,
                revision.estimated_duration_min,
-               template.updated_at
+               revision.updated_at
         FROM app.workout_templates template
         JOIN app.workout_template_revisions revision
-          ON revision.template_id = template.id
-         AND revision.revision_number = template.current_revision
+          ON revision.id = template.published_revision_id
         JOIN revision_summary summary ON summary.revision_id = revision.id
         WHERE template.trainer_user_id = $1
-          AND template.status = 'published'
+          AND template.status <> 'archived'
           AND template.archived_at IS NULL
           AND revision.status = 'published'
           AND summary.exercise_count > 0
@@ -227,9 +227,9 @@ export class QuickAssignRepository {
             OR lower(revision.description) LIKE '%' || $2 || '%'
             OR lower(revision.category) LIKE '%' || $2 || '%')
           AND ($3::timestamptz IS NULL
-            OR template.updated_at < $3
-            OR (template.updated_at = $3 AND template.id < $4::uuid))
-        ORDER BY template.updated_at DESC, template.id DESC
+            OR revision.updated_at < $3
+            OR (revision.updated_at = $3 AND template.id < $4::uuid))
+        ORDER BY revision.updated_at DESC, template.id DESC
         LIMIT $5
       `, [actor.userId, query, cursor?.updatedAt ?? null, cursor?.templateId ?? null, first + 1]);
       const hasNextPage = result.rows.length > first;
@@ -261,7 +261,8 @@ export class QuickAssignRepository {
       const head = await client.query<PreviewHeadRow>(`
         SELECT template.id AS template_id,
                template.status::text AS template_status,
-               template.current_revision,
+               template.published_revision_id,
+               template.editable_revision_id,
                revision.id AS revision_id,
                revision.revision_number,
                revision.status::text AS revision_status,
@@ -270,7 +271,7 @@ export class QuickAssignRepository {
                revision.category,
                revision.general_instruction,
                revision.estimated_duration_min,
-               template.updated_at
+               revision.updated_at
         FROM app.workout_template_revisions revision
         JOIN app.workout_templates template ON template.id = revision.template_id
         WHERE revision.id = $2
@@ -285,10 +286,11 @@ export class QuickAssignRepository {
         title: source.title,
       };
       if (source.template_status === "archived") return { status: "archived", tombstone };
-      if (source.revision_number !== source.current_revision) return { status: "stale_revision", tombstone };
-      if (source.template_status !== "published" || source.revision_status !== "published") {
+      if (source.revision_status === "draft" || source.revision_id === source.editable_revision_id) {
         return { status: "draft", tombstone };
       }
+      if (source.revision_id !== source.published_revision_id) return { status: "stale_revision", tombstone };
+      if (!source.published_revision_id || source.revision_status !== "published") return { status: "unavailable" };
 
       const [exerciseResult, setResult] = await Promise.all([
         client.query<PreviewExerciseRow>(`

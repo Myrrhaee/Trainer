@@ -11,6 +11,8 @@ type Head = {
   id: string; title: string; status: "draft" | "published" | "archived";
   revision_id: string; revision_number: number; description: string; category: string;
   estimated_duration_min: number | null; general_instruction: string; updated_at: Date; usage_count: string;
+  published_revision_id: string | null; published_revision_number: number | null;
+  editable_revision_id: string | null; editable_revision_number: number | null;
 };
 
 type ExerciseRow = {
@@ -29,15 +31,34 @@ type SetRow = {
   target_weight_kg: string | null; rest_seconds: number; uses_override: boolean;
 };
 
-const headSelect = `SELECT template.id, revision.title, template.status::text,
+const headSelect = `SELECT template.id, revision.title,
+  CASE WHEN template.status = 'archived' THEN 'archived' ELSE revision.status::text END AS status,
   revision.id AS revision_id, revision.revision_number, revision.description, revision.category,
   revision.estimated_duration_min, revision.general_instruction,
   greatest(template.updated_at, revision.updated_at) AS updated_at,
+  template.published_revision_id, published.revision_number AS published_revision_number,
+  template.editable_revision_id, editable.revision_number AS editable_revision_number,
   (SELECT count(*)::text FROM app.workout_assignments assignment
    WHERE assignment.source_template_id = template.id) AS usage_count
 FROM app.workout_templates template
 JOIN app.workout_template_revisions revision
-  ON revision.template_id = template.id AND revision.revision_number = template.current_revision`;
+  ON revision.id = coalesce(template.editable_revision_id, template.published_revision_id)
+LEFT JOIN app.workout_template_revisions published ON published.id = template.published_revision_id
+LEFT JOIN app.workout_template_revisions editable ON editable.id = template.editable_revision_id`;
+
+export type WorkoutBuilderCommandErrorCode =
+  | "template_archived"
+  | "editable_draft_not_found"
+  | "editable_draft_already_exists"
+  | "published_revision_not_found"
+  | "template_lifecycle_conflict"
+  | "revision_already_published";
+
+export class WorkoutBuilderCommandError extends Error {
+  constructor(public readonly commandCode: WorkoutBuilderCommandErrorCode) {
+    super(commandCode);
+  }
+}
 
 function valueText(value: number | string | null) {
   return value === null ? "" : String(Number(value));
@@ -114,12 +135,31 @@ export class WorkoutBuilderRepository {
       let templateId = input.id;
       let revisionId: string;
       const current = templateId ? await client.query<Head>(`${headSelect}
-        WHERE template.id = $1 AND template.trainer_user_id = $2 AND template.status = 'draft'
+        WHERE template.id = $1 AND template.trainer_user_id = $2
+          AND template.status <> 'archived'
+          AND revision.id = template.editable_revision_id
+          AND revision.status = 'draft'
         FOR UPDATE OF template, revision`, [templateId, actor.userId]) : null;
-      if (templateId && !current?.rowCount) return null;
+      if (templateId && !current?.rowCount) {
+        const lifecycle = await client.query<{
+          status: "draft" | "published" | "archived";
+          editable_revision_id: string | null;
+        }>(`SELECT status::text, editable_revision_id
+            FROM app.workout_templates
+            WHERE id = $1 AND trainer_user_id = $2
+            FOR UPDATE`, [templateId, actor.userId]);
+        if (!lifecycle.rowCount) return null;
+        return null;
+      }
       if (current?.rowCount) {
+        if (current.rows[0].revision_number !== input.revision) {
+          throw new WorkoutBuilderCommandError("template_lifecycle_conflict");
+        }
         revisionId = current.rows[0].revision_id;
-        await client.query(`UPDATE app.workout_templates SET title = $2, description = $3 WHERE id = $1`,
+        await client.query(`UPDATE app.workout_templates
+          SET title = CASE WHEN published_revision_id IS NULL THEN $2 ELSE title END,
+              description = CASE WHEN published_revision_id IS NULL THEN $3 ELSE description END
+          WHERE id = $1`,
           [templateId, input.title, input.description]);
         await client.query(`UPDATE app.workout_template_revisions SET title = $2, description = $3,
           category = $4, estimated_duration_min = $5, general_instruction = $6 WHERE id = $1`,
@@ -138,6 +178,9 @@ export class WorkoutBuilderRepository {
           VALUES ($1, 1, $2, $3, $4, $5, $6, 'draft', NULL) RETURNING id`,
           [templateId, input.title, input.description, input.category, input.estimatedDurationMin || null, input.generalInstruction]);
         revisionId = revision.rows[0].id;
+        await client.query(`UPDATE app.workout_templates
+          SET editable_revision_id = $2, current_revision = 1
+          WHERE id = $1`, [templateId, revisionId]);
       }
       await this.insertItems(client, revisionId, input.items);
       await client.query(`INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
@@ -151,12 +194,43 @@ export class WorkoutBuilderRepository {
     return withDatabaseTransaction(this.pool, async (client) => {
       await setTransactionActor(client, actor);
       const current = await client.query<Head>(`${headSelect}
-        WHERE template.id = $1 AND template.trainer_user_id = $2 AND template.status = 'draft'
+        WHERE template.id = $1 AND template.trainer_user_id = $2
+          AND template.status <> 'archived'
+          AND revision.id = template.editable_revision_id
+          AND revision.status = 'draft'
         FOR UPDATE OF template, revision`, [templateId, actor.userId]);
-      if (!current.rowCount) return null;
+      if (!current.rowCount) {
+        const lifecycle = await client.query<{
+          status: "draft" | "published" | "archived";
+          published_revision_id: string | null;
+          editable_revision_id: string | null;
+        }>(`SELECT status::text, published_revision_id, editable_revision_id
+            FROM app.workout_templates
+            WHERE id = $1 AND trainer_user_id = $2
+            FOR UPDATE`, [templateId, actor.userId]);
+        if (!lifecycle.rowCount) return null;
+        if (lifecycle.rows[0].status === "archived") throw new WorkoutBuilderCommandError("template_archived");
+        if (lifecycle.rows[0].published_revision_id && !lifecycle.rows[0].editable_revision_id) {
+          throw new WorkoutBuilderCommandError("revision_already_published");
+        }
+        throw new WorkoutBuilderCommandError("editable_draft_not_found");
+      }
       await client.query(`UPDATE app.workout_template_revisions
         SET status = 'published', published_at = clock_timestamp() WHERE id = $1`, [current.rows[0].revision_id]);
-      await client.query(`UPDATE app.workout_templates SET status = 'published' WHERE id = $1`, [templateId]);
+      await client.query(`UPDATE app.workout_templates
+        SET status = 'published',
+            published_revision_id = $2,
+            editable_revision_id = NULL,
+            current_revision = $3,
+            title = $4,
+            description = $5
+        WHERE id = $1`, [
+        templateId,
+        current.rows[0].revision_id,
+        current.rows[0].revision_number,
+        current.rows[0].title,
+        current.rows[0].description,
+      ]);
       await client.query(`INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
         VALUES ($1, $1, 'workout.template.published', jsonb_build_object('template_id', $2::text))`,
         [actor.userId, templateId]);
@@ -170,17 +244,39 @@ export class WorkoutBuilderRepository {
       const current = await client.query<Pick<Head,
         "title" | "revision_id" | "revision_number" | "description" | "category" |
         "estimated_duration_min" | "general_instruction"
-      >>(`SELECT revision.title, revision.id AS revision_id, revision.revision_number,
+      > & { template_status: "draft" | "published" | "archived"; editable_revision_id: string | null }>(
+        `SELECT revision.title, revision.id AS revision_id, revision.revision_number,
                  revision.description, revision.category, revision.estimated_duration_min,
-                 revision.general_instruction
+                 revision.general_instruction, template.status::text AS template_status,
+                 template.editable_revision_id
           FROM app.workout_templates template
           JOIN app.workout_template_revisions revision
-            ON revision.template_id = template.id
-           AND revision.revision_number = template.current_revision
+            ON revision.id = template.published_revision_id
           WHERE template.id = $1 AND template.trainer_user_id = $2
-            AND template.status = 'published' AND revision.status = 'published'
+            AND revision.status = 'published'
           FOR UPDATE OF template`, [templateId, actor.userId]);
-      if (!current.rowCount) return null;
+      if (!current.rowCount) {
+        const lifecycle = await client.query<{
+          status: "draft" | "published" | "archived";
+          published_revision_id: string | null;
+          editable_revision_id: string | null;
+        }>(`SELECT status::text, published_revision_id, editable_revision_id
+            FROM app.workout_templates
+            WHERE id = $1 AND trainer_user_id = $2
+            FOR UPDATE`, [templateId, actor.userId]);
+        if (!lifecycle.rowCount) return null;
+        if (lifecycle.rows[0].status === "archived") throw new WorkoutBuilderCommandError("template_archived");
+        if (!lifecycle.rows[0].published_revision_id) {
+          throw new WorkoutBuilderCommandError("published_revision_not_found");
+        }
+        throw new WorkoutBuilderCommandError("template_lifecycle_conflict");
+      }
+      if (current.rows[0].template_status === "archived") {
+        throw new WorkoutBuilderCommandError("template_archived");
+      }
+      if (current.rows[0].editable_revision_id) {
+        return this.find(client, actor.userId, templateId);
+      }
       const source = current.rows[0];
       const revision = await client.query<{ id: string }>(`INSERT INTO app.workout_template_revisions
         (template_id, revision_number, title, description, category, estimated_duration_min,
@@ -188,6 +284,9 @@ export class WorkoutBuilderRepository {
         VALUES ($1,$2,$3,$4,$5,$6,$7,'draft',NULL) RETURNING id`,
         [templateId, source.revision_number + 1, source.title, source.description, source.category,
           source.estimated_duration_min, source.general_instruction]);
+      await client.query(`UPDATE app.workout_templates
+        SET editable_revision_id = $2, current_revision = $3
+        WHERE id = $1`, [templateId, revision.rows[0].id, source.revision_number + 1]);
       await client.query(`INSERT INTO app.workout_template_exercises
         (revision_id, instance_key, position, source_exercise_key, title, category, equipment,
          description, image_url, prescription_type, repetition_mode, sets, repetitions,
@@ -210,8 +309,10 @@ export class WorkoutBuilderRepository {
         JOIN app.workout_template_exercises target
           ON target.revision_id = $1 AND target.instance_key = source.instance_key
         WHERE source.revision_id = $2`, [revision.rows[0].id, source.revision_id]);
-      await client.query(`UPDATE app.workout_templates SET status = 'draft', current_revision = $2 WHERE id = $1`,
-        [templateId, source.revision_number + 1]);
+      await client.query(`INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
+        VALUES ($1, $1, 'workout.template.revision_created',
+          jsonb_build_object('template_id', $2::text, 'revision', $3::integer))`,
+        [actor.userId, templateId, source.revision_number + 1]);
       return this.find(client, actor.userId, templateId);
     });
   }
@@ -245,6 +346,12 @@ export class WorkoutBuilderRepository {
       estimatedDurationMin: head.estimated_duration_min === null ? "" : String(head.estimated_duration_min),
       generalInstruction: head.general_instruction, items: mapItems(exercises.rows, sets),
       updatedLabel: updatedLabel(head.updated_at), usageCount: Number(head.usage_count),
+      latestPublishedRevision: head.published_revision_id && head.published_revision_number
+        ? { revisionId: head.published_revision_id, revision: head.published_revision_number }
+        : null,
+      editableRevision: head.editable_revision_id && head.editable_revision_number
+        ? { revisionId: head.editable_revision_id, revision: head.editable_revision_number }
+        : null,
     };
   }
 

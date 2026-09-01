@@ -55,8 +55,13 @@ export type BuilderTemplate = {
   items: BuilderItem[];
   updatedLabel: string;
   usageCount: number;
+  latestPublishedRevision: { revisionId: string; revision: number } | null;
+  editableRevision: { revisionId: string; revision: number } | null;
 };
 
-export type SaveBuilderTemplateInput = Omit<BuilderTemplate, "id" | "revisionId" | "status" | "updatedLabel" | "usageCount"> & {
+export type SaveBuilderTemplateInput = Omit<BuilderTemplate,
+  "id" | "revisionId" | "status" | "updatedLabel" | "usageCount" |
+  "latestPublishedRevision" | "editableRevision"
+> & {
   id?: string;
 };

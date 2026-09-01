@@ -4,6 +4,7 @@ import { AccessService } from "@/lib/server/access/access-service";
 import { resolveRequestActor } from "@/lib/server/auth/actor";
 import { isSameOriginRequest } from "@/lib/server/http/request-security";
 import { WorkoutBuilderService, WorkoutBuilderValidationError } from "@/lib/server/workouts/workout-builder-service";
+import { WorkoutBuilderCommandError } from "@/lib/server/workouts/workout-builder-repository";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,9 @@ export async function POST(request: Request, context: { params: Promise<{ templa
       ? NextResponse.json({ template }, { status: 201 })
       : NextResponse.json({ error: "template_not_found" }, { status: 404 });
   } catch (error) {
+    if (error instanceof WorkoutBuilderCommandError) {
+      return NextResponse.json({ error: error.commandCode }, { status: 409 });
+    }
     if (error instanceof WorkoutBuilderValidationError) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ error: "temporarily_unavailable" }, { status: 503 });
   }

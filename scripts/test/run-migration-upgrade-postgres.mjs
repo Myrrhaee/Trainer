@@ -8,6 +8,7 @@ const targetOwner = "ai_strength_migrator";
 const databaseNames = {
   clean: `ai_strength_upgrade_clean_${process.pid}`,
   legacy: `ai_strength_upgrade_legacy_${process.pid}`,
+  inconsistent: `ai_strength_upgrade_inconsistent_${process.pid}`,
 };
 
 function execute(command, args, env = process.env, capture = false) {
@@ -109,23 +110,176 @@ async function verifyState(databaseName, expectedMigration, hasProfileColumns) {
   return state;
 }
 
+async function seedLegacyLifecycleStates(databaseName) {
+  const trainer = await query(databaseName, `
+    WITH account AS (
+      INSERT INTO app.users (status, display_name) VALUES ('active', 'R2D migration trainer') RETURNING id
+    )
+    INSERT INTO app.trainer_profiles (user_id, status, activated_at)
+    SELECT id, 'active', clock_timestamp() FROM account RETURNING user_id
+  `);
+  const athlete = await query(databaseName, `
+    WITH account AS (
+      INSERT INTO app.users (status, display_name) VALUES ('active', 'R2D migration athlete') RETURNING id
+    )
+    INSERT INTO app.athlete_profiles (user_id, status)
+    SELECT id, 'active' FROM account RETURNING user_id
+  `);
+  const relation = await query(databaseName, `
+    INSERT INTO app.trainer_athlete_relations
+      (trainer_user_id, athlete_user_id, status, is_primary)
+    VALUES ($1, $2, 'active', true) RETURNING id
+  `, [trainer.rows[0].user_id, athlete.rows[0].user_id]);
+
+  async function template(status, currentRevision, title, archived = false) {
+    const result = await query(databaseName, `
+      INSERT INTO app.workout_templates
+        (trainer_user_id, title, description, status, current_revision, archived_at)
+      VALUES ($1, $2, '', $3::app.workout_template_status, $4,
+        CASE WHEN $5 THEN clock_timestamp() ELSE NULL END)
+      RETURNING id
+    `, [trainer.rows[0].user_id, title, status, currentRevision, archived]);
+    return result.rows[0].id;
+  }
+
+  async function revision(templateId, number, status, title) {
+    const result = await query(databaseName, `
+      INSERT INTO app.workout_template_revisions
+        (template_id, revision_number, title, description, general_instruction,
+         status, published_at)
+      VALUES ($1, $2, $3, '', '', $4::app.workout_template_revision_status,
+        CASE WHEN $4 = 'published' THEN clock_timestamp() ELSE NULL END)
+      RETURNING id
+    `, [templateId, number, title, status]);
+    return result.rows[0].id;
+  }
+
+  const publishedOnly = await template("published", 1, "Published only");
+  const publishedOnlyRevision = await revision(publishedOnly, 1, "published", "Published only");
+  const draftOnly = await template("draft", 1, "Draft only");
+  const draftOnlyRevision = await revision(draftOnly, 1, "draft", "Draft only");
+  const publishedWithDraft = await template("draft", 2, "Published with draft");
+  const publishedWithDraftRevision = await revision(publishedWithDraft, 1, "published", "Published with draft v1");
+  const publishedWithDraftEditable = await revision(publishedWithDraft, 2, "draft", "Published with draft v2");
+  const archived = await template("archived", 2, "Archived", true);
+  const archivedPublishedRevision = await revision(archived, 1, "published", "Archived v1");
+  const archivedEditableRevision = await revision(archived, 2, "draft", "Archived v2");
+
+  const assignment = await query(databaseName, `
+    INSERT INTO app.workout_assignments
+      (relation_id, trainer_user_id, athlete_user_id, source_template_id,
+       source_revision_id, source_revision_number, title_snapshot,
+       instruction_snapshot, trainer_note, scheduled_for)
+    VALUES ($1, $2, $3, $4, $5, 1, 'Published only snapshot',
+      'Snapshot instruction', 'Snapshot note', DATE '2026-09-01')
+    RETURNING id
+  `, [
+    relation.rows[0].id,
+    trainer.rows[0].user_id,
+    athlete.rows[0].user_id,
+    publishedOnly,
+    publishedOnlyRevision,
+  ]);
+  const snapshot = await query(databaseName,
+    `SELECT to_jsonb(assignment) AS value FROM app.workout_assignments assignment WHERE id = $1`,
+    [assignment.rows[0].id]);
+
+  return {
+    publishedOnly: [publishedOnly, publishedOnlyRevision],
+    draftOnly: [draftOnly, draftOnlyRevision],
+    publishedWithDraft: [publishedWithDraft, publishedWithDraftRevision, publishedWithDraftEditable],
+    archived: [archived, archivedPublishedRevision, archivedEditableRevision],
+    assignmentId: assignment.rows[0].id,
+    assignmentSnapshot: snapshot.rows[0].value,
+  };
+}
+
+async function verifyLifecycleBackfill(databaseName, fixture) {
+  const templates = await query(databaseName, `
+    SELECT id, status::text, current_revision, published_revision_id, editable_revision_id
+    FROM app.workout_templates
+    WHERE id = ANY($1::uuid[])
+    ORDER BY id
+  `, [[
+    fixture.publishedOnly[0],
+    fixture.draftOnly[0],
+    fixture.publishedWithDraft[0],
+    fixture.archived[0],
+  ]]);
+  const byId = new Map(templates.rows.map((row) => [row.id, row]));
+  const expected = [
+    [fixture.publishedOnly[0], "published", 1, fixture.publishedOnly[1], null],
+    [fixture.draftOnly[0], "draft", 1, null, fixture.draftOnly[1]],
+    [fixture.publishedWithDraft[0], "published", 2, fixture.publishedWithDraft[1], fixture.publishedWithDraft[2]],
+    [fixture.archived[0], "archived", 2, fixture.archived[1], fixture.archived[2]],
+  ];
+  for (const [id, status, currentRevision, publishedRevisionId, editableRevisionId] of expected) {
+    const row = byId.get(id);
+    if (!row
+      || row.status !== status
+      || row.current_revision !== currentRevision
+      || row.published_revision_id !== publishedRevisionId
+      || row.editable_revision_id !== editableRevisionId) {
+      throw new Error(`lifecycle_backfill_mismatch:${JSON.stringify({ expected: [id, status, currentRevision, publishedRevisionId, editableRevisionId], row })}`);
+    }
+  }
+  const snapshot = await query(databaseName,
+    `SELECT to_jsonb(assignment) AS value FROM app.workout_assignments assignment WHERE id = $1`,
+    [fixture.assignmentId]);
+  if (JSON.stringify(snapshot.rows[0].value) !== JSON.stringify(fixture.assignmentSnapshot)) {
+    throw new Error("existing_assignment_snapshot_changed");
+  }
+}
+
 async function runCleanUpgrade() {
   const databaseName = databaseNames.clean;
   const env = scenarioEnv(databaseName);
   await resetDatabase(databaseName, true);
   run(process.execPath, ["scripts/db/bootstrap.mjs"], env);
-  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0011_closed_alpha_operator"], env);
-  const before = await verifyState(databaseName, "0011_closed_alpha_operator", false);
-  if (before.migration_count !== 11) throw new Error("clean_upgrade_expected_11_migrations");
+  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0012_athlete_profile_read_model"], env);
+  const before = await verifyState(databaseName, "0012_athlete_profile_read_model", true);
+  if (before.migration_count !== 12) throw new Error("clean_upgrade_expected_12_migrations");
+  const fixture = await seedLegacyLifecycleStates(databaseName);
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const after = await verifyState(databaseName, "0012_athlete_profile_read_model", true);
-  if (after.migration_count !== 12) throw new Error("clean_upgrade_expected_12_migrations");
+  const after = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
+  if (after.migration_count !== 13) throw new Error("clean_upgrade_expected_13_migrations");
+  await verifyLifecycleBackfill(databaseName, fixture);
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const repeated = await verifyState(databaseName, "0012_athlete_profile_read_model", true);
-  if (repeated.migration_count !== 12) throw new Error("clean_upgrade_idempotency_failed");
+  const repeated = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
+  if (repeated.migration_count !== 13) throw new Error("clean_upgrade_idempotency_failed");
   process.stdout.write(`CLEAN UPGRADE PASS ${JSON.stringify(repeated)}\n`);
+}
+
+async function runInconsistentPreflight() {
+  const databaseName = databaseNames.inconsistent;
+  const env = scenarioEnv(databaseName);
+  await resetDatabase(databaseName, true);
+  run(process.execPath, ["scripts/db/bootstrap.mjs"], env);
+  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0012_athlete_profile_read_model"], env);
+  const trainer = await query(databaseName, `
+    WITH account AS (
+      INSERT INTO app.users (status, display_name) VALUES ('active', 'R2D inconsistent trainer') RETURNING id
+    )
+    INSERT INTO app.trainer_profiles (user_id, status, activated_at)
+    SELECT id, 'active', clock_timestamp() FROM account RETURNING user_id
+  `);
+  const template = await query(databaseName, `
+    INSERT INTO app.workout_templates (trainer_user_id, title, status, current_revision)
+    VALUES ($1, 'Inconsistent', 'published', 1) RETURNING id
+  `, [trainer.rows[0].user_id]);
+  await query(databaseName, `
+    INSERT INTO app.workout_template_revisions
+      (template_id, revision_number, title, status, published_at)
+    VALUES ($1, 1, 'Inconsistent draft', 'draft', NULL)
+  `, [template.rows[0].id]);
+  const failed = execute(process.execPath, ["scripts/db/migrate.mjs"], env, true);
+  const output = `${failed.stdout ?? ""}\n${failed.stderr ?? ""}`;
+  if (failed.status === 0 || !output.includes("r2d1_template_lifecycle_preflight_failed")) {
+    throw new Error(`lifecycle_preflight_diagnostic_missing:${output}`);
+  }
+  process.stdout.write("INCONSISTENT LIFECYCLE PREFLIGHT PASS\n");
 }
 
 async function simulateLegacyOwnership(databaseName) {
@@ -192,7 +346,7 @@ async function runLegacyRecovery() {
   const env = scenarioEnv(databaseName);
   await resetDatabase(databaseName, true);
   run(process.execPath, ["scripts/db/bootstrap.mjs"], env);
-  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0011_closed_alpha_operator"], env);
+  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0012_athlete_profile_read_model"], env);
   const legacy = await simulateLegacyOwnership(databaseName);
 
   const failedMigration = execute(process.execPath, ["scripts/db/migrate.mjs"], env, true);
@@ -227,8 +381,8 @@ async function runLegacyRecovery() {
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const state = await verifyState(databaseName, "0012_athlete_profile_read_model", true);
-  if (state.migration_count !== 12) throw new Error("legacy_upgrade_expected_12_migrations");
+  const state = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
+  if (state.migration_count !== 13) throw new Error("legacy_upgrade_expected_13_migrations");
   process.stdout.write(`LEGACY RECOVERY PASS ${JSON.stringify({
     legacyOwner: legacy.legacyOwner,
     catalogObjects: legacy.catalog.length,
@@ -254,6 +408,7 @@ try {
     "--wait",
   ]);
   await runCleanUpgrade();
+  await runInconsistentPreflight();
   await runLegacyRecovery();
   exitCode = 0;
 } finally {

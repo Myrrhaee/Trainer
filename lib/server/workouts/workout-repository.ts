@@ -147,7 +147,7 @@ function mapAssignment(row: AssignmentRow): WorkoutAssignment {
 }
 
 const templateSelect = `
-  SELECT template.id, template.title, template.description, template.status::text,
+  SELECT template.id, revision.title, revision.description, 'published'::text AS status,
          revision.id AS revision_id, revision.revision_number,
          revision.general_instruction, revision.estimated_duration_min,
          template.created_at,
@@ -164,8 +164,7 @@ const templateSelect = `
          ) FILTER (WHERE exercise.id IS NOT NULL), '[]'::jsonb) AS exercises
   FROM app.workout_templates template
   JOIN app.workout_template_revisions revision
-    ON revision.template_id = template.id
-   AND revision.revision_number = template.current_revision
+    ON revision.id = template.published_revision_id
   LEFT JOIN app.workout_template_exercises exercise ON exercise.revision_id = revision.id`;
 
 export class PostgresWorkoutRepository {
@@ -199,7 +198,9 @@ export class PostgresWorkoutRepository {
     return withActorTransaction(actor, async (client) => {
       const result = await client.query<TemplateRow>(
         `${templateSelect}
-         WHERE template.trainer_user_id = $1 AND template.status = 'published'
+         WHERE template.trainer_user_id = $1
+           AND template.status <> 'archived'
+           AND revision.status = 'published'
          GROUP BY template.id, revision.id
          ORDER BY template.updated_at DESC`,
         [actor.userId],
@@ -214,15 +215,15 @@ export class PostgresWorkoutRepository {
       const template = await client.query<{ id: string }>(
         `INSERT INTO app.workout_templates (
            trainer_user_id, title, description, status, current_revision
-         ) VALUES ($1, $2, $3, 'published', 1)
+         ) VALUES ($1, $2, $3, 'draft', 1)
          RETURNING id`,
         [actor.userId, input.title, input.description],
       );
       const revision = await client.query<{ id: string }>(
-        `INSERT INTO app.workout_template_revisions (
+         `INSERT INTO app.workout_template_revisions (
            template_id, revision_number, title, description,
-           general_instruction, estimated_duration_min
-         ) VALUES ($1, 1, $2, $3, $4, $5)
+           general_instruction, estimated_duration_min, status, published_at
+         ) VALUES ($1, 1, $2, $3, $4, $5, 'draft', NULL)
          RETURNING id`,
         [
           template.rows[0].id,
@@ -232,7 +233,25 @@ export class PostgresWorkoutRepository {
           input.estimatedDurationMin,
         ],
       );
+      await client.query(
+        `UPDATE app.workout_templates
+         SET editable_revision_id = $2, current_revision = 1
+         WHERE id = $1`,
+        [template.rows[0].id, revision.rows[0].id],
+      );
       await this.insertTemplateExercises(client, revision.rows[0].id, input.exercises);
+      await client.query(
+        `UPDATE app.workout_template_revisions
+         SET status = 'published', published_at = clock_timestamp()
+         WHERE id = $1`,
+        [revision.rows[0].id],
+      );
+      await client.query(
+        `UPDATE app.workout_templates
+         SET status = 'published', published_revision_id = $2, editable_revision_id = NULL
+         WHERE id = $1`,
+        [template.rows[0].id, revision.rows[0].id],
+      );
       await client.query(
         `INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
          VALUES ($1, $1, 'workout.template.published',
@@ -302,9 +321,9 @@ export class PostgresWorkoutRepository {
       const templateHead = await client.query<{
         id: string;
         status: "draft" | "published" | "archived";
-        current_revision: number;
+        published_revision_id: string | null;
       }>(
-        `SELECT id, status::text, current_revision
+        `SELECT id, status::text, published_revision_id
          FROM app.workout_templates
          WHERE id = $1 AND trainer_user_id = $2
          FOR UPDATE`,
@@ -312,6 +331,10 @@ export class PostgresWorkoutRepository {
       );
       if (!templateHead.rowCount) {
         if (strictR2C) throw new WorkoutAssignmentCommandError("template_not_found");
+        return null;
+      }
+      if (templateHead.rows[0].status === "archived" || !templateHead.rows[0].published_revision_id) {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("template_unavailable");
         return null;
       }
 
@@ -339,8 +362,8 @@ export class PostgresWorkoutRepository {
             `SELECT id AS revision_id, revision_number, status::text AS revision_status,
                     title, general_instruction
              FROM app.workout_template_revisions
-             WHERE template_id = $1 AND revision_number = $2`,
-            [input.templateId, templateHead.rows[0].current_revision],
+             WHERE id = $2 AND template_id = $1`,
+            [input.templateId, templateHead.rows[0].published_revision_id],
           );
       if (!revisionResult.rowCount) {
         if (strictR2C) throw new WorkoutAssignmentCommandError("template_not_found");
@@ -349,18 +372,14 @@ export class PostgresWorkoutRepository {
       const template = {
         id: templateHead.rows[0].id,
         status: templateHead.rows[0].status,
-        currentRevision: templateHead.rows[0].current_revision,
+        publishedRevisionId: templateHead.rows[0].published_revision_id,
         ...revisionResult.rows[0],
       };
-      if (template.status === "archived") {
-        if (strictR2C) throw new WorkoutAssignmentCommandError("template_unavailable");
-        return null;
-      }
-      if (template.revision_number !== template.currentRevision) {
+      if (template.revision_id !== template.publishedRevisionId) {
         if (strictR2C) throw new WorkoutAssignmentCommandError("template_revision_stale");
         return null;
       }
-      if (template.status !== "published" || template.revision_status !== "published") {
+      if (!template.publishedRevisionId || template.revision_status !== "published") {
         if (strictR2C) throw new WorkoutAssignmentCommandError("template_unavailable");
         return null;
       }

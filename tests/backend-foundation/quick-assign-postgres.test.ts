@@ -140,12 +140,29 @@ test("QuickAssignReadModel scopes athlete, filters/searches/paginates templates 
     for (let index = 0; index < 27; index += 1) {
       await workouts.createPublishedTemplate(trainer, simpleTemplate(`Шаблон ${String(index).padStart(2, "0")}`, `Описание поиск ${index}`));
     }
-    await admin.query(`WITH source AS (
-      INSERT INTO app.workout_templates (trainer_user_id, title, description, status, current_revision)
-      VALUES ($1, 'Пустой опубликованный', '', 'published', 1) RETURNING id
-    ) INSERT INTO app.workout_template_revisions
-      (template_id, revision_number, title, description, general_instruction, estimated_duration_min, status, published_at)
-      SELECT id, 1, 'Пустой опубликованный', '', '', NULL, 'published', clock_timestamp() FROM source`, [trainer.userId]);
+    const emptyClient = await admin.connect();
+    try {
+      await emptyClient.query("BEGIN");
+      const emptyTemplate = await emptyClient.query<{ id: string }>(`
+        INSERT INTO app.workout_templates (trainer_user_id, title, description, status, current_revision)
+        VALUES ($1, 'Пустой опубликованный', '', 'draft', 1) RETURNING id`, [trainer.userId]);
+      const emptyRevision = await emptyClient.query<{ id: string }>(`
+        INSERT INTO app.workout_template_revisions
+          (template_id, revision_number, title, description, general_instruction,
+           estimated_duration_min, status, published_at)
+        VALUES ($1, 1, 'Пустой опубликованный', '', '', NULL, 'draft', NULL)
+        RETURNING id`, [emptyTemplate.rows[0].id]);
+      await emptyClient.query(`UPDATE app.workout_templates
+        SET editable_revision_id = $2 WHERE id = $1`, [emptyTemplate.rows[0].id, emptyRevision.rows[0].id]);
+      await emptyClient.query(`UPDATE app.workout_template_revisions
+        SET status = 'published', published_at = clock_timestamp() WHERE id = $1`, [emptyRevision.rows[0].id]);
+      await emptyClient.query(`UPDATE app.workout_templates
+        SET status = 'published', published_revision_id = $2, editable_revision_id = NULL
+        WHERE id = $1`, [emptyTemplate.rows[0].id, emptyRevision.rows[0].id]);
+      await emptyClient.query("COMMIT");
+    } finally {
+      emptyClient.release();
+    }
 
     const service = new QuickAssignQueryService(new QuickAssignRepository(app));
     const first = await service.find(trainer, athlete.userId, { first: 25 });
@@ -186,6 +203,13 @@ test("QuickAssignReadModel scopes athlete, filters/searches/paginates templates 
     assert.ok(measured);
     assert.equal(measured.selectedTemplate.status, "ready");
     assert.ok(counted.count() <= 20, `expected bounded query budget, got ${counted.count()}`);
+
+    const lifecycleCounted = countedPool(app);
+    const editable = await new WorkoutBuilderRepository(lifecycleCounted.pool).createRevision(trainer, rich.id);
+    assert.ok(editable);
+    assert.ok(lifecycleCounted.count() <= 16,
+      `expected bounded lifecycle query budget, got ${lifecycleCounted.count()}`);
+    assert.equal((await new QuickAssignRepository(app).findPreview(trainer, richRevision)).status, "ready");
   } finally {
     await Promise.all([admin.end(), app.end()]);
   }
@@ -218,7 +242,11 @@ test("exact preview includes complete per-set and superset facts and returns aut
     assert.equal((await repository.findPreview(stranger, revision)).status, "unavailable");
     assert.equal(await new QuickAssignQueryService(repository).find(trainer, strangerAthlete.userId), null);
 
-    assert.ok(await builder.createRevision(trainer, published.id));
+    const editable = await builder.createRevision(trainer, published.id);
+    assert.ok(editable);
+    assert.equal((await repository.findPreview(trainer, revision)).status, "ready");
+    assert.equal((await repository.findPreview(trainer, editable.revisionId)).status, "draft");
+    assert.ok(await builder.publish(trainer, published.id));
     assert.equal((await repository.findPreview(trainer, revision)).status, "stale_revision");
 
     const archived = await builder.saveDraft(trainer, richDraft("Архивный preview"));
@@ -370,6 +398,7 @@ test("assignment rejects stale, archived, foreign and concurrent commands withou
     const staleRead = await query.find(trainer, athlete.userId);
     assert.ok(staleRead);
     assert.ok(await builder.createRevision(trainer, staleTemplate.id));
+    assert.ok(await builder.publish(trainer, staleTemplate.id));
     await assert.rejects(
       workouts.createAssignment(trainer, {
         assignmentId: "80808080-8080-4080-8080-808080808080",

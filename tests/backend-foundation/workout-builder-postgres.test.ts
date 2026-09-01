@@ -3,7 +3,11 @@ import test from "node:test";
 
 import { Pool } from "pg";
 
-import { WorkoutBuilderRepository } from "../../lib/server/workouts/workout-builder-repository";
+import { setTransactionActor } from "../../lib/server/database/actor-context";
+import {
+  WorkoutBuilderCommandError,
+  WorkoutBuilderRepository,
+} from "../../lib/server/workouts/workout-builder-repository";
 import type { SaveBuilderTemplateInput } from "../../lib/server/workouts/workout-builder-types";
 import {
   PostgresWorkoutRepository,
@@ -92,6 +96,11 @@ test("builder persists a rich draft, publishes it and creates an isolated next r
 
     const published = await repository.publish(owner, saved.id);
     assert.equal(published?.status, "published");
+    await assert.rejects(
+      repository.publish(owner, saved.id),
+      (error: unknown) => error instanceof WorkoutBuilderCommandError
+        && error.commandCode === "revision_already_published",
+    );
     assert.equal(await repository.saveDraft(owner, { ...draft("Mutation"), id: saved.id }), null);
     assert.equal((await repository.list(stranger)).length, 0);
     assert.equal((await repository.list(owner)).find((item) => item.id === saved.id)?.status, "published");
@@ -99,9 +108,50 @@ test("builder persists a rich draft, publishes it and creates an isolated next r
     const revision = await repository.createRevision(owner, saved.id);
     assert.equal(revision?.status, "draft");
     assert.equal(revision?.revision, 2);
+    assert.equal(revision?.latestPublishedRevision?.revision, 1);
+    assert.equal(revision?.editableRevision?.revision, 2);
     assert.equal(revision?.items.length, 1);
     if (revision?.items[0].kind !== "exercise") throw new Error("unexpected_item");
     assert.equal(revision.items[0].exercise.setOverrides[1].targetWeightKg, "80");
+    const replayedRevision = await repository.createRevision(owner, saved.id);
+    assert.equal(replayedRevision?.revisionId, revision.revisionId);
+    const revisionCount = await admin.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM app.workout_template_revisions WHERE template_id = $1",
+      [saved.id],
+    );
+    assert.equal(revisionCount.rows[0].count, "2");
+    assert.equal(await repository.createRevision(stranger, saved.id), null);
+
+    const appClient = await app.connect();
+    try {
+      await appClient.query("BEGIN");
+      await setTransactionActor(appClient, owner);
+      await appClient.query(
+        "UPDATE app.workout_templates SET published_revision_id = NULL WHERE id = $1",
+        [saved.id],
+      );
+      await assert.rejects(
+        appClient.query("SET CONSTRAINTS ALL IMMEDIATE"),
+        /template_lifecycle_conflict/,
+      );
+      await appClient.query("ROLLBACK");
+    } finally {
+      appClient.release();
+    }
+
+    const immutableClient = await app.connect();
+    try {
+      await immutableClient.query("BEGIN");
+      await setTransactionActor(immutableClient, owner);
+      const mutation = await immutableClient.query(
+        "UPDATE app.workout_template_revisions SET title = 'Mutation denied' WHERE id = $1",
+        [revision.latestPublishedRevision!.revisionId],
+      );
+      assert.equal(mutation.rowCount, 0);
+      await immutableClient.query("COMMIT");
+    } finally {
+      immutableClient.release();
+    }
   } finally {
     await Promise.all([admin.end(), app.end()]);
   }
