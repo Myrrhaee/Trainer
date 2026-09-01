@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, UserRound, X } from "lucide-react";
 
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { QuickAssignReadModel, QuickAssignSelectedTemplate } from "@/lib/server/quick-assign/quick-assign-types";
+import { decodeTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
 import { QuickAssignAssignmentForm } from "./quick-assign-assignment-form";
 import {
   loadQuickAssignModel,
@@ -24,6 +25,11 @@ import {
 } from "./quick-assign-client";
 import { QuickAssignSelectedPreview } from "./quick-assign-preview";
 import { quickAssignHeaderSummary } from "./quick-assign-presentation";
+import {
+  builderHrefForQuickAssign,
+  createQuickAssignBuilderHandoff,
+  readQuickAssignBuilderHandoff,
+} from "./quick-assign-handoff";
 import { consumeQuickAssignProfileTrigger } from "./quick-assign-profile-trigger";
 import { QuickAssignCompletionReceipt } from "./quick-assign-receipt";
 import {
@@ -44,11 +50,13 @@ export function CanonicalQuickAssignSheet({
   initialOpen,
   transitionContext,
   originPhrase,
+  handoffToken,
 }: {
   athleteUserId: string;
   initialOpen: boolean;
   transitionContext: string;
   originPhrase: string;
+  handoffToken?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(initialOpen);
@@ -64,6 +72,7 @@ export function CanonicalQuickAssignSheet({
   const [receipt, setReceipt] = useState<QuickAssignPersistedResponse | null>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
   const previewHeadingRef = useRef<HTMLHeadingElement>(null);
   const sheetHeadingRef = useRef<HTMLHeadingElement>(null);
   const initializedHistoryRef = useRef(false);
@@ -75,6 +84,8 @@ export function CanonicalQuickAssignSheet({
   const initialLoadedRef = useRef(false);
   const selectedRevisionRef = useRef<string | null>(null);
   const modelRef = useRef<QuickAssignReadModel | null>(null);
+  const handoffHandledRef = useRef(false);
+  const handoffErrorRef = useRef<HTMLDivElement>(null);
 
   const selectedPreview = model?.selectedTemplate.status === "ready"
     ? model.selectedTemplate.template
@@ -98,7 +109,11 @@ export function CanonicalQuickAssignSheet({
     const openUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     const clean = new URL(window.location.href);
     clean.searchParams.delete("assign");
-    const cleanUrl = `${clean.pathname}${clean.search}${clean.hash}`;
+    clean.searchParams.delete("handoff");
+    const context = decodeTrainerWorkflowContext(transitionContext);
+    const cleanUrl = context?.origin !== "profile" && context?.origin !== "direct" && context?.returnTo
+      ? context.returnTo
+      : `${clean.pathname}${clean.search}${clean.hash}`;
     openUrlRef.current = openUrl;
     const openedFromProfileTrigger = consumeQuickAssignProfileTrigger(athleteUserId);
     if (!openedFromProfileTrigger) {
@@ -117,7 +132,44 @@ export function CanonicalQuickAssignSheet({
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [athleteUserId, initialOpen]);
+  }, [athleteUserId, initialOpen, transitionContext]);
+
+  useEffect(() => {
+    if (!open || handoffHandledRef.current || !handoffToken) return;
+    handoffHandledRef.current = true;
+    const handoff = readQuickAssignBuilderHandoff(handoffToken, athleteUserId);
+    if (!handoff) {
+      setHandoffError("Возврат из конструктора устарел или не принадлежит этому спортсмену. Выберите шаблон заново.");
+      window.requestAnimationFrame(() => handoffErrorRef.current?.focus());
+      return;
+    }
+    dispatch({
+      type: "presentation_restored",
+      query: handoff.query,
+      scheduledFor: handoff.scheduledFor,
+      trainerNote: handoff.trainerNote,
+    });
+    if (handoff.status !== "published" || !handoff.publishedRevisionId) return;
+    selectedRevisionRef.current = handoff.publishedRevisionId;
+    setPreviewLoading(true);
+    loadQuickAssignModel({
+      athleteUserId,
+      query: handoff.query,
+      templateRevisionId: handoff.publishedRevisionId,
+    }).then((next) => {
+      setModel(next);
+      if (next.selectedTemplate.status === "ready") {
+        dispatch({ type: "template_selected", template: next.selectedTemplate.template });
+        window.requestAnimationFrame(() => previewHeadingRef.current?.focus());
+      } else {
+        setHandoffError("Опубликованная версия больше недоступна для назначения. Выберите актуальный шаблон.");
+        window.requestAnimationFrame(() => handoffErrorRef.current?.focus());
+      }
+    }).catch(() => {
+      setHandoffError("Не удалось проверить опубликованную версию. Выберите шаблон заново.");
+      window.requestAnimationFrame(() => handoffErrorRef.current?.focus());
+    }).finally(() => setPreviewLoading(false));
+  }, [athleteUserId, handoffToken, open]);
 
   const loadFirstPage = useCallback(async (query: string) => {
     const sequence = ++listSequenceRef.current;
@@ -296,16 +348,27 @@ export function CanonicalQuickAssignSheet({
 
   function closeThroughHistory() {
     setDiscardOpen(false);
+    const context = decodeTrainerWorkflowContext(transitionContext);
+    if (context?.origin !== "profile" && context?.origin !== "direct" && context?.returnTo) {
+      setOpen(false);
+      router.replace(context.returnTo);
+      return;
+    }
     if (new URL(window.location.href).searchParams.get("assign") === "1") window.history.back();
     else setOpen(false);
   }
 
   const selectedState: QuickAssignSelectedTemplate = model?.selectedTemplate ?? { status: "idle" };
-  const builderHref = useMemo(() => {
-    const params = new URLSearchParams({ athleteId: athleteUserId });
-    if (transitionContext) params.set("flow", transitionContext);
-    return `/trainer/builder?${params}`;
-  }, [athleteUserId, transitionContext]);
+  const openBuilder = useCallback(() => {
+    const handoff = createQuickAssignBuilderHandoff({
+      athleteUserId,
+      transitionContext,
+      query: state.query,
+      scheduledFor: state.draft.scheduledFor,
+      trainerNote: state.draft.trainerNote,
+    });
+    router.push(builderHrefForQuickAssign(handoff));
+  }, [athleteUserId, router, state.draft.scheduledFor, state.draft.trainerNote, state.query, transitionContext]);
 
   return (
     <>
@@ -358,7 +421,12 @@ export function CanonicalQuickAssignSheet({
           ) : !model.athlete.capabilities.canAssign ? (
             <UnavailableState model={model} onClose={requestClose} />
           ) : (
-            <div className="min-h-0 flex-1 lg:grid lg:grid-cols-[360px_minmax(0,1fr)]">
+            <div className="relative min-h-0 flex-1 lg:grid lg:grid-cols-[360px_minmax(0,1fr)]">
+              {handoffError ? (
+                <div ref={handoffErrorRef} tabIndex={-1} role="alert" className="absolute inset-x-4 top-3 z-10 border-l-2 border-amber-300/70 bg-zinc-950 px-3 py-2 text-sm text-amber-100 shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-amber-200 sm:inset-x-5">
+                  {handoffError}
+                </div>
+              ) : null}
               <div className={state.mobileStep === "selection" ? "h-full min-h-0 lg:block" : "hidden h-full min-h-0 border-r border-zinc-800 lg:block"}>
                 <QuickAssignTemplateSelection
                   items={model.templates.items}
@@ -374,7 +442,7 @@ export function CanonicalQuickAssignSheet({
                   onSelect={selectTemplate}
                   onLoadMore={() => void loadMore()}
                   onRetry={() => void loadFirstPage(state.query)}
-                  onCreateTemplate={() => router.push(builderHref)}
+                  onCreateTemplate={openBuilder}
                 />
               </div>
               <div className={state.mobileStep === "review" ? "h-full min-h-0 overflow-y-auto px-4 py-4 pb-[max(24px,env(safe-area-inset-bottom))] sm:px-6 lg:block" : "hidden h-full min-h-0 overflow-y-auto px-4 py-4 sm:px-6 lg:block"} data-quick-assign-review-scroll>

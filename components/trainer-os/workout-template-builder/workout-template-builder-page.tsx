@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Dumbbell, Plus } from "lucide-react";
 
 import { TrainerShell } from "@/components/trainer/trainer-shell";
@@ -32,7 +33,13 @@ import {
   type WorkoutTemplateDraft,
 } from "./builder-model";
 import { BuilderEditor } from "./builder-editor";
-import { CanonicalBuilderAssignmentDialog } from "./canonical-builder-assignment-dialog";
+import {
+  createQuickAssignBuilderHandoff,
+  publishQuickAssignBuilderHandoff,
+  quickAssignHrefFromHandoff,
+  readQuickAssignBuilderHandoff,
+} from "@/components/trainer/quick-assign/quick-assign-handoff";
+import { createTrainerWorkflowContext, encodeTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
 import {
   archiveCanonicalBuilderTemplate,
   createCanonicalBuilderRevision,
@@ -50,6 +57,7 @@ type BuilderCommandState = { status: "idle" | "running" | "failed"; kind?: Build
 type BuilderFeedback = { tone: "success" | "error"; message: string };
 
 export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryContext }) {
+  const router = useRouter();
   const runtime = useTrainerDemoRuntime();
   const demoMode = isDemoModeEnabled();
   const demoTemplates = useMemo(
@@ -77,6 +85,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   const [commandState, setCommandState] = useState<BuilderCommandState>({ status: "idle" });
   const [recoveryDraft, setRecoveryDraft] = useState<WorkoutTemplateDraft | null>(null);
   const [recoveryChecked, setRecoveryChecked] = useState(false);
+  const [handoffChecked, setHandoffChecked] = useState(false);
   const commandInFlightRef = useRef(false);
   const libraryExercises = useMemo(() => getDemoLibraryExercises(), []);
   const dirty = Boolean(draft && JSON.stringify(draft) !== baseline);
@@ -122,6 +131,14 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
       workoutTemplateId: entry.templateId,
     });
   }, [demoMode, entry.athleteId, entry.templateId, runtime.commands]);
+
+  useEffect(() => {
+    if (demoMode || handoffChecked) return;
+    if (entry.handoffToken && !readQuickAssignBuilderHandoff(entry.handoffToken, entry.athleteId)) {
+      setFeedback({ tone: "error", message: "Контекст назначения устарел. Шаблон можно сохранить, но возврат к назначению недоступен." });
+    }
+    setHandoffChecked(true);
+  }, [demoMode, entry.athleteId, entry.handoffToken, handoffChecked]);
 
   useEffect(() => {
     if (recoveryChecked) return;
@@ -318,7 +335,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
         setFeedback({ tone: "success", message: `Версия ${confirmed.revision} шаблона «${confirmed.title}» опубликована.` });
         setCommandState({ status: "idle" });
         commandInFlightRef.current = false;
-        if (andAssign && entry.athleteId) setAssignAfterPublish(true);
+        if (andAssign && entry.athleteId) returnToQuickAssign(confirmed);
         else setPublishReceipt({ templateId: confirmed.id, title: confirmed.title, revision: confirmed.revision, athleteId: entry.athleteId });
       } catch {
         setFeedback({ tone: "error", message: "Не удалось опубликовать шаблон." });
@@ -381,11 +398,56 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
 
   function openAssignment(template: WorkoutTemplateDraft) {
     if (!entry.athleteId || template.status !== "published") return;
+    if (!demoMode) {
+      returnToQuickAssign(template);
+      return;
+    }
     setDraft(template);
     setBaseline(JSON.stringify(template));
     setQuickAssignOpen(true);
     setPublishReceipt(null);
     setAssignAfterPublish(false);
+  }
+
+  function returnToQuickAssign(template: WorkoutTemplateDraft) {
+    if (!entry.athleteId || !template.revisionId) {
+      setFeedback({ tone: "error", message: "Не удалось подтвердить опубликованную версию шаблона." });
+      return;
+    }
+    const existing = entry.handoffToken
+      ? publishQuickAssignBuilderHandoff({
+          token: entry.handoffToken,
+          athleteUserId: entry.athleteId,
+          publishedRevisionId: template.revisionId,
+        })
+      : null;
+    if (entry.handoffToken && !existing) {
+      setFeedback({ tone: "error", message: "Контекст назначения истёк. Шаблон опубликован, но вернуться к назначению нужно из профиля спортсмена." });
+      return;
+    }
+    const base = existing ?? createQuickAssignBuilderHandoff({
+      athleteUserId: entry.athleteId,
+      transitionContext: entry.transitionContext
+        ?? encodeTrainerWorkflowContext(createTrainerWorkflowContext({
+          origin: "direct",
+          athleteUserId: entry.athleteId,
+          returnTo: `/trainer/clients/${entry.athleteId}?tab=training`,
+          returnAnchor: "next-assignment",
+        })),
+      query: "",
+      scheduledFor: "",
+      trainerNote: "",
+    });
+    const published = existing ?? publishQuickAssignBuilderHandoff({
+      token: base.token,
+      athleteUserId: entry.athleteId,
+      publishedRevisionId: template.revisionId,
+    });
+    if (!published) {
+      setFeedback({ tone: "error", message: "Контекст назначения истёк. Вернитесь к профилю спортсмена и откройте назначение снова." });
+      return;
+    }
+    router.push(quickAssignHrefFromHandoff(published));
   }
 
   useEffect(() => {
@@ -442,11 +504,11 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
       <Dialog open={Boolean(publishReceipt)} onOpenChange={(open) => !open && setPublishReceipt(null)}>
         <DialogContent className="max-w-[calc(100vw-32px)] border-zinc-800 bg-zinc-950 sm:max-w-lg">
           <DialogHeader><div className="flex size-11 items-center justify-center rounded-full border border-lime-300/25 bg-lime-300/10 text-lime-200"><CheckCircle2 className="size-5" /></div><DialogTitle className="pt-3">Шаблон опубликован</DialogTitle><DialogDescription className="text-zinc-400">«{publishReceipt?.title}» готов к назначению. Опубликованный вариант открыт только для чтения.</DialogDescription></DialogHeader>
-          <DialogFooter className="flex-col-reverse sm:flex-row"><Button type="button" variant="outline" onClick={() => setPublishReceipt(null)} className="min-h-11 rounded-full border-zinc-700 text-zinc-100">Остаться в конструкторе</Button>{entry.athleteId && draft ? <Button type="button" onClick={() => openAssignment(draft)} className="min-h-11 rounded-full bg-lime-300 text-black hover:bg-lime-200"><Dumbbell className="size-4" />Назначить спортсмену</Button> : null}</DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row"><Button type="button" variant="outline" onClick={() => setPublishReceipt(null)} className="min-h-11 rounded-full border-zinc-700 text-zinc-100">Остаться в конструкторе</Button>{entry.athleteId && draft ? <Button type="button" onClick={() => openAssignment(draft)} className="min-h-11 rounded-full bg-lime-300 text-black hover:bg-lime-200"><Dumbbell className="size-4" />Перейти к назначению</Button> : null}</DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {demoMode ? <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}».` : "Переход из конструктора тренировок.", returnTo: safeTrainerReturnPath(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setFeedback({ tone: "success", message: `${receipt.templateTitle} назначена для ${receipt.athleteName}.` })} /> : <CanonicalBuilderAssignmentDialog athleteId={entry.athleteId ?? null} template={draft} transitionContext={entry.transitionContext} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(templateTitle) => setFeedback({ tone: "success", message: `«${templateTitle}» назначена спортсмену.` })} />}
+      {demoMode ? <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}».` : "Переход из конструктора тренировок.", returnTo: safeTrainerReturnPath(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setFeedback({ tone: "success", message: `${receipt.templateTitle} назначена для ${receipt.athleteName}.` })} /> : null}
     </TrainerShell>
   );
 }

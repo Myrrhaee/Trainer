@@ -15,6 +15,7 @@ import type { TeamActivityItem, TeamClient } from "@/components/trainer-os/home/
 import type { TrainerDashboardSnapshot } from "@/lib/server/trainer-dashboard/trainer-dashboard-types";
 import { WorkflowReturnReceipt } from "@/components/trainer/workflow-return-receipt";
 import { createTrainerWorkflowContext, trainerWorkflowHref } from "@/lib/trainer-workflow-transition";
+import { quickAssignHref } from "@/lib/quick-assign-navigation";
 
 const LivingTeamMap = dynamic(
   () => import("@/components/trainer-os/home/living-team-map").then((module) => module.LivingTeamMap),
@@ -138,13 +139,13 @@ export function CanonicalTrainerDashboard() {
 
   function openAssignment(client: TeamClient) {
     const position = dashboard?.attentionItems.findIndex((item) => item.clientId === client.id) ?? 0;
-    router.push(trainerWorkflowHref(`/trainer/builder?athleteId=${client.id}`, createTrainerWorkflowContext({
+    router.push(quickAssignHref({ athleteUserId: client.id, context: createTrainerWorkflowContext({
       origin: "dashboard",
       athleteUserId: client.id,
       queue: { filter: "all", order: "priority", position: Math.max(0, position) },
       returnTo: "/trainer/dashboard",
       returnAnchor: "workflow-receipt",
-    })));
+    }) }));
   }
 
   return (

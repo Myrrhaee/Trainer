@@ -64,6 +64,7 @@ export function QuickAssignAssignmentForm({
                 value={draft.scheduledFor}
                 onChange={(event) => onDateChange(event.target.value)}
                 disabled={fieldsDisabled}
+                aria-label="Выбрать дату тренировки"
                 aria-invalid={Boolean(errors.scheduledFor)}
                 aria-describedby={errors.scheduledFor ? "quick-assign-date-error" : "quick-assign-timezone-copy"}
                 className="h-11 border-zinc-800 bg-black pl-10"

@@ -16,6 +16,7 @@ export default async function TrainerBuilderRoute({ searchParams }: { searchPara
         templateId: value("templateId"),
         returnTo: value("returnTo"),
         transitionContext: value("flow"),
+        handoffToken: value("handoff"),
         source: value("from") === "quick-assign" ? "quick-assign" : value("templateId") ? "templates" : "direct",
         initialGoal: value("goal") ?? value("category"),
         emptyWorkspace: value("demo") === "empty",

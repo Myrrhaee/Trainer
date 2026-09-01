@@ -92,7 +92,7 @@ export function TemplatesWorkspace({
           <div className="mt-5 flex flex-col gap-3 rounded-lg border border-lime-300/20 bg-lime-300/[0.055] p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-medium uppercase text-lime-200/70">Контекст спортсмена сохранён</p>
-              <p className="mt-1 text-sm text-zinc-300">После публикации можно сразу назначить тренировку этому спортсмену.</p>
+              <p className="mt-1 text-sm text-zinc-300">После публикации можно вернуться к подтверждению назначения для этого спортсмена.</p>
             </div>
             <span className="text-xs text-zinc-500">Без автоматического назначения</span>
           </div>
@@ -150,7 +150,7 @@ export function TemplatesWorkspace({
                 </div>
                 {athleteId && summary.status === "published" ? (
                   <Button type="button" variant="ghost" onClick={() => onAssign(template)} className="mt-2 min-h-11 rounded-full text-lime-200 hover:bg-lime-300/10">
-                    <Dumbbell className="size-4" />Назначить спортсмену
+                    <Dumbbell className="size-4" />Перейти к назначению
                   </Button>
                 ) : null}
               </article>

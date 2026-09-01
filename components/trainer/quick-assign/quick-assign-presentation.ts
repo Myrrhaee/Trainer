@@ -40,6 +40,15 @@ export function quickAssignReceiptNavigation(
   transition: TrainerWorkflowTransition,
 ): QuickAssignReceiptNavigation {
   const origin = transition.context.origin;
+  if (origin === "clients") {
+    return {
+      allCalmCopy: transition.allCalm ? "Других задач сейчас нет." : null,
+      actions: compactActions([
+        { label: "К списку спортсменов", href: transition.returnHref, emphasis: "primary" },
+        { label: "Открыть профиль", href: transition.profileHref, emphasis: "secondary" },
+      ]),
+    };
+  }
   if (transition.allCalm) {
     return {
       allCalmCopy: "Других задач сейчас нет.",
@@ -67,16 +76,6 @@ export function quickAssignReceiptNavigation(
         transition.nextItem ? { label: "Следующая задача", href: transition.nextItem.href, emphasis: "primary" } : null,
         { label: "К профилю", href: transition.profileHref, emphasis: transition.nextItem ? "secondary" : "primary" },
         { label: "К рабочей очереди", href: transition.queueHref, emphasis: "tertiary" },
-      ]),
-    };
-  }
-
-  if (origin === "clients") {
-    return {
-      allCalmCopy: null,
-      actions: compactActions([
-        { label: "К списку спортсменов", href: "/trainer/clients", emphasis: "primary" },
-        { label: "Открыть профиль", href: transition.profileHref, emphasis: "secondary" },
       ]),
     };
   }

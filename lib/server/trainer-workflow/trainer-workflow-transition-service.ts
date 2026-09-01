@@ -12,6 +12,7 @@ import {
   type TrainerWorkflowNextItem,
   type TrainerWorkflowTransition,
 } from "@/lib/trainer-workflow-transition";
+import { quickAssignHref } from "@/lib/quick-assign-navigation";
 
 type ReviewResult = {
   kind: "review" | "manual_resolution" | "current";
@@ -71,8 +72,8 @@ export class TrainerWorkflowTransitionService {
       "next-assignment",
       context,
     );
-    const returnHref = context.origin === "dashboard" && context.returnTo
-      ? withReceipt(context.returnTo, "assignment", assignment.id, "workflow-receipt", context)
+    const returnHref = (context.origin === "dashboard" || context.origin === "clients") && context.returnTo
+      ? withReceipt(context.returnTo, "assignment", assignment.id, context.origin === "clients" ? "row" : "workflow-receipt", context)
       : profileHref;
     return {
       context,
@@ -149,7 +150,7 @@ export class TrainerWorkflowTransitionService {
         kind: "assignment",
         athleteUserId: selected.athleteUserId,
         athleteDisplayName: selected.athleteDisplayName,
-        href: trainerWorkflowHref(`/trainer/builder?athleteId=${selected.athleteUserId}`, nextContext),
+        href: quickAssignHref({ athleteUserId: selected.athleteUserId, context: nextContext }),
       };
     }
     return { nextItem, queueHref: fallbackQueueHref, allCalm: candidates.length === 0 };

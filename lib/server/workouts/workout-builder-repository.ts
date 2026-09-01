@@ -240,7 +240,7 @@ export class WorkoutBuilderRepository {
     const sets = new Map<string, BuilderSet[]>();
     for (const row of rows) sets.set(row.exercise_id, [...(sets.get(row.exercise_id) ?? []), mapSet(row)]);
     return {
-      id: head.id, title: head.title, status: head.status, revision: head.revision_number,
+      id: head.id, revisionId: head.revision_id, title: head.title, status: head.status, revision: head.revision_number,
       description: head.description, category: head.category,
       estimatedDurationMin: head.estimated_duration_min === null ? "" : String(head.estimated_duration_min),
       generalInstruction: head.general_instruction, items: mapItems(exercises.rows, sets),

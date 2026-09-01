@@ -39,6 +39,9 @@ export async function POST(request: Request) {
   if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await readSmallJsonObject(request);
   if (!body) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  if (!hasStrictAssignmentContract(body)) {
+    return NextResponse.json({ error: "assignment_validation_failed" }, { status: 400 });
+  }
 
   try {
     const access = await new AccessService().context(actor);
@@ -81,4 +84,16 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ error: "temporarily_unavailable" }, { status: 503 });
   }
+}
+
+function hasStrictAssignmentContract(body: Record<string, unknown>) {
+  return typeof body.assignmentId === "string"
+    && typeof body.athleteUserId === "string"
+    && typeof body.templateId === "string"
+    && typeof body.templateRevisionId === "string"
+    && typeof body.scheduledFor === "string"
+    && typeof body.trainerNote === "string"
+    && typeof body.assignmentStateToken === "string"
+    && typeof body.allowAdditionalAssignment === "boolean"
+    && typeof body.transitionContext === "string";
 }

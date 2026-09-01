@@ -52,6 +52,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
     const athleteTwo = await athleteTwoContext.newPage();
     const observed: string[] = [];
     let athleteOneId = "";
+    let athleteTwoId = "";
     let athleteOneRelationId = "";
     let athleteOneProfilePath = "";
     let templateId = "";
@@ -129,11 +130,21 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         const athleteTwoRow = trainer.getByRole("row", { name: new RegExp(athleteTwoName) });
         await expect(athleteOneRow).toBeVisible();
         await expect(athleteTwoRow).toBeVisible();
+        const athleteTwoHref = await athleteTwoRow.getByRole("link", { name: athleteTwoName, exact: true }).getAttribute("href");
+        athleteTwoId = athleteTwoHref?.split("/").at(-1) ?? "";
+        expect(athleteTwoId).not.toBe("");
         await athleteOneRow.getByRole("button", { name: `Назначить тренировку для ${athleteOneName}` }).click();
-        await expect(trainer.getByRole("dialog", { name: "Назначить тренировку" })).toBeVisible();
-        await trainer.getByLabel("Комментарий спортсмену").fill("Остановись с запасом в два повтора.");
-        await trainer.getByRole("button", { name: "Назначить", exact: true }).click();
-        await expect(trainer.getByText(`Назначено: ${workoutTitle} · ${athleteOneName}`, { exact: true })).toBeVisible();
+        const sheet = trainer.getByRole("dialog", { name: "Назначить тренировку" });
+        await expect(sheet).toBeVisible();
+        athleteOneProfilePath = new URL(trainer.url()).pathname;
+        athleteOneId = athleteOneProfilePath.split("/").at(-1) ?? "";
+        await sheet.getByRole("radio", { name: new RegExp(workoutTitle) }).click();
+        await sheet.getByRole("button", { name: "Сегодня" }).click();
+        await sheet.getByLabel("Заметка спортсмену").fill("Остановись с запасом в два повтора.");
+        await sheet.getByRole("button", { name: "Назначить тренировку", exact: true }).click();
+        await expect(sheet.getByRole("status").getByText("Тренировка назначена", { exact: true })).toBeVisible();
+        await sheet.getByRole("link", { name: "К списку спортсменов", exact: true }).click();
+        await expect(trainer).toHaveURL(/\/trainer\/clients/);
       });
 
       await test.step("trainer opens the canonical athlete profile and URL-driven tabs", async () => {
@@ -141,7 +152,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await athleteRow.getByRole("link", { name: athleteOneName, exact: true }).click();
         await expect(trainer).toHaveURL(/\/trainer\/clients\/[0-9a-f-]+$/);
         athleteOneProfilePath = new URL(trainer.url()).pathname;
-        athleteOneId = athleteOneProfilePath.split("/").at(-1) ?? "";
+        athleteOneId = athleteOneProfilePath.split("/").at(-1) ?? athleteOneId;
         await expect(trainer.getByRole("heading", { name: athleteOneName, exact: true })).toBeVisible();
         await expect(trainer.getByText("Тренировка назначена", { exact: true })).toBeVisible();
         await trainer.getByRole("link", { name: "Тренировки", exact: true }).click();
@@ -304,6 +315,10 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await trainer.getByRole("button", { name: "Подтвердить и закрыть разбор", exact: true }).click();
         await expect(trainer.getByRole("status").getByText("Обратная связь сохранена", { exact: true })).toBeVisible();
         await expect.poll(() => trainer.evaluate(() => document.activeElement?.id)).toBe("review-completion-receipt-heading");
+        await trainer.getByRole("link", { name: "Назначить следующую тренировку", exact: true }).click();
+        await expect(trainer.getByRole("dialog", { name: "Назначить тренировку" })).toContainText(athleteOneName);
+        await trainer.getByRole("button", { name: "Закрыть назначение" }).click();
+        await expect(trainer).toHaveURL(new RegExp(`/trainer/review/${sessionId}$`));
       });
 
       await test.step("manual resolution stores a private reason and sends no athlete feedback", async () => {
@@ -321,6 +336,69 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         const athleteFeedbackBody = await athleteFeedback.json() as { feedback: unknown[] };
         expect(athleteFeedbackBody.feedback).toEqual([]);
         expect(JSON.stringify(athleteFeedbackBody)).not.toContain("Проверено на очной тренировке");
+      });
+
+      await test.step("dashboard and roster open the same athlete-bound Quick Assign host", async () => {
+        await trainer.goto("/trainer/dashboard");
+        const dashboardItem = trainer.locator("article").filter({ hasText: athleteOneName });
+        await dashboardItem.getByRole("button", { name: "Назначить", exact: true }).click();
+        await expect(trainer).toHaveURL(new RegExp(`/trainer/clients/${athleteOneId}\\?[^#]*tab=training[^#]*assign=1`));
+        await expect(trainer.getByRole("dialog", { name: "Назначить тренировку" })).toContainText(athleteOneName);
+        await trainer.getByRole("button", { name: "Закрыть назначение" }).click();
+        await expect(trainer).toHaveURL(/\/trainer\/dashboard/);
+
+        await trainer.goto(`/trainer/clients?search=${encodeURIComponent("Анна")}&filter=attention`);
+        await trainer.getByRole("button", { name: `Назначить тренировку для ${athleteOneName}` }).click();
+        await expect(trainer).toHaveURL(new RegExp(`/trainer/clients/${athleteOneId}\\?[^#]*tab=training[^#]*assign=1`));
+        await expect(trainer.getByRole("dialog", { name: "Назначить тренировку" })).toContainText("Из списка спортсменов");
+        await trainer.getByRole("button", { name: "Закрыть назначение" }).click();
+        await expect(trainer).toHaveURL(/\/trainer\/clients\?[^#]*search=/);
+        await expect(trainer.getByLabel("Поиск спортсмена")).toHaveValue("Анна");
+        await expect.poll(() => trainer.evaluate(() => document.activeElement?.getAttribute("data-roster-athlete"))).toBe(athleteOneId);
+      });
+
+      await test.step("builder returns an exact published revision without creating an assignment", async () => {
+        const token = "r2c3_builder_handoff_token_000001";
+        const scheduledFor = new Date().toISOString().slice(0, 10);
+        const flow = JSON.stringify({
+          version: 1,
+          origin: "profile",
+          athleteUserId: athleteTwoId,
+          tab: "training",
+          returnTo: `/trainer/clients/${athleteTwoId}?tab=training`,
+          returnAnchor: "next-assignment",
+        });
+        await trainer.goto("/trainer/dashboard");
+        await trainer.evaluate(({ tokenValue, athleteUserId, transitionContext, date }) => {
+          const createdAt = Date.now();
+          window.sessionStorage.setItem(`quick-assign-builder-handoff:v1:${tokenValue}`, JSON.stringify({
+            version: 1,
+            token: tokenValue,
+            createdAt,
+            expiresAt: createdAt + 30 * 60 * 1000,
+            athleteUserId,
+            transitionContext,
+            query: "контрольная",
+            scheduledFor: date,
+            trainerNote: "Восстановленная заметка",
+            status: "editing",
+          }));
+        }, { tokenValue: token, athleteUserId: athleteTwoId, transitionContext: flow, date: scheduledFor });
+        const before = await athleteTwo.request.get("/api/workout-assignments");
+        const beforeBody = await before.json() as { assignments: Array<{ id: string }> };
+        await trainer.goto(`/trainer/builder?athleteId=${athleteTwoId}&handoff=${token}&from=quick-assign`);
+        const templateCard = trainer.locator("article").filter({ hasText: workoutTitle });
+        await templateCard.getByRole("button", { name: "Перейти к назначению", exact: true }).click();
+        await expect(trainer).toHaveURL(new RegExp(`/trainer/clients/${athleteTwoId}\\?[^#]*assign=1[^#]*handoff=`));
+        const sheet = trainer.getByRole("dialog", { name: "Назначить тренировку" });
+        await expect(sheet.getByRole("heading", { name: workoutTitle, exact: true })).toBeVisible();
+        await expect(sheet.getByLabel("Поиск шаблонов")).toHaveValue("контрольная");
+        await expect(sheet.getByLabel("Выбрать дату тренировки")).toHaveValue(scheduledFor);
+        await expect(sheet.getByLabel("Заметка спортсмену")).toHaveValue("Восстановленная заметка");
+        const after = await athleteTwo.request.get("/api/workout-assignments");
+        const afterBody = await after.json() as { assignments: Array<{ id: string }> };
+        expect(afterBody.assignments.map((item) => item.id)).toEqual(beforeBody.assignments.map((item) => item.id));
+        await trainer.getByRole("button", { name: "Закрыть назначение" }).click();
       });
 
       await test.step("quick assign uses a saved template and returns a durable profile receipt", async () => {
@@ -580,13 +658,19 @@ async function createCompletedReviewFixture(
   templateId: string,
   suffix: string,
 ) {
+  const strict = await strictAssignmentData(trainer, athleteUserId, templateId);
   const assignmentResponse = await trainer.request.post("/api/workout-assignments", {
     headers: { Origin: baseURL },
     data: {
+      assignmentId: crypto.randomUUID(),
       athleteUserId,
       templateId,
+      templateRevisionId: strict.templateRevisionId,
       scheduledFor: new Date().toISOString().slice(0, 10),
       trainerNote: `Canonical Review ${suffix}`,
+      assignmentStateToken: strict.assignmentStateToken,
+      allowAdditionalAssignment: false,
+      transitionContext: JSON.stringify({ version: 1, origin: "direct", athleteUserId, tab: "training" }),
     },
   });
   expect(assignmentResponse.status()).toBe(201);
@@ -644,6 +728,23 @@ async function createCompletedReviewFixture(
   });
   expect(completeResponse.status()).toBe(200);
   return session.id;
+}
+
+async function strictAssignmentData(trainer: Page, athleteUserId: string, templateId: string) {
+  const response = await trainer.request.get(`/api/trainer/athletes/${athleteUserId}/quick-assign?first=50`);
+  expect(response.status()).toBe(200);
+  const body = await response.json() as {
+    quickAssign: {
+      athlete: { assignmentStateToken: string };
+      templates: { items: Array<{ templateId: string; revisionId: string }> };
+    };
+  };
+  const template = body.quickAssign.templates.items.find((item) => item.templateId === templateId);
+  expect(template?.revisionId).toMatch(/^[0-9a-f-]{36}$/);
+  return {
+    templateRevisionId: template!.revisionId,
+    assignmentStateToken: body.quickAssign.athlete.assignmentStateToken,
+  };
 }
 
 function observeRuntimeErrors(page: Page, errors: string[] = []) {

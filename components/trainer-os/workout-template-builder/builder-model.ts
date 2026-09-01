@@ -56,6 +56,7 @@ export type WorkoutTemplateItemDraft =
 
 export type WorkoutTemplateDraft = {
   id: string;
+  revisionId?: string;
   title: string;
   status: TemplateStatus;
   revision: number;
@@ -105,6 +106,7 @@ export type BuilderEntryContext = {
   templateId?: string;
   returnTo?: string;
   transitionContext?: string;
+  handoffToken?: string;
   source: "quick-assign" | "templates" | "direct";
   initialGoal?: string;
   emptyWorkspace?: boolean;

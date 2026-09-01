@@ -146,15 +146,21 @@ async function createCompletedSession(
   templateId: string,
   suffix: string,
 ): Promise<SessionFixture> {
+  const strict = await strictAssignmentData(trainer, athleteId, templateId);
   const assignment = await responseJson<{ assignment: { id: string } }>(await trainer.request.post(
     `${baseURL}/api/workout-assignments`,
     {
       headers: { Origin: baseURL },
       data: {
+        assignmentId: crypto.randomUUID(),
         athleteUserId: athleteId,
         templateId,
+        templateRevisionId: strict.templateRevisionId,
         scheduledFor: "2026-08-31",
         trainerNote: `Long Review ${suffix}`,
+        assignmentStateToken: strict.assignmentStateToken,
+        allowAdditionalAssignment: false,
+        transitionContext: JSON.stringify({ version: 1, origin: "direct", athleteUserId: athleteId, tab: "training" }),
       },
     },
   ), 201);
@@ -231,6 +237,21 @@ async function createCompletedSession(
     legacyPlannedWeight: legacy.set.plannedWeightKg,
     legacyNeighborPlannedWeight: legacyNeighbor.set.plannedWeightKg,
     longCommentAnchorId: setAnchor(flattened[9].exercise.assignmentExerciseId, flattened[9].set.id),
+  };
+}
+
+async function strictAssignmentData(trainer: Page, athleteUserId: string, templateId: string) {
+  const response = await responseJson<{
+    quickAssign: {
+      athlete: { assignmentStateToken: string };
+      templates: { items: Array<{ templateId: string; revisionId: string }> };
+    };
+  }>(await trainer.request.get(`${baseURL}/api/trainer/athletes/${athleteUserId}/quick-assign?first=50`), 200);
+  const template = response.quickAssign.templates.items.find((item) => item.templateId === templateId);
+  if (!template) throw new Error("quick_assign_template_missing");
+  return {
+    templateRevisionId: template.revisionId,
+    assignmentStateToken: response.quickAssign.athlete.assignmentStateToken,
   };
 }
 

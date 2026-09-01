@@ -14,6 +14,8 @@ import type { AthleteProfileFrameReadModel, AthleteProfileTab } from "@/lib/serv
 import type { AthleteTrainingViewResult } from "@/lib/server/athlete-profile/athlete-training-types";
 import { WorkoutService } from "@/lib/server/workouts/workout-service";
 import type { WorkoutAssignment } from "@/lib/server/workouts/workout-types";
+import { isQuickAssignHandoffToken } from "@/lib/quick-assign-navigation";
+import { decodeTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
 
 type TrainerClientProfileRouteProps = {
   params: Promise<{ clientId: string }>;
@@ -84,7 +86,8 @@ export default async function TrainerClientProfileRoute({ params, searchParams }
         quickAssign={firstValue(query.assign) === "1" ? {
           open: true,
           transitionContext: firstValue(query.flow) ?? "",
-          originPhrase: quickAssignOriginPhrase(frame),
+          originPhrase: quickAssignOriginPhrase(frame, firstValue(query.flow)),
+          handoffToken: handoffValue(firstValue(query.handoff)),
         } : null}
       />
     );
@@ -142,7 +145,11 @@ function firstValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function quickAssignOriginPhrase(frame: AthleteProfileFrameReadModel) {
+function quickAssignOriginPhrase(frame: AthleteProfileFrameReadModel, flow?: string) {
+  const origin = decodeTrainerWorkflowContext(flow)?.origin;
+  if (origin === "dashboard") return "Из рабочей очереди тренера";
+  if (origin === "clients") return "Из списка спортсменов";
+  if (origin === "review") return "После разбора тренировки";
   if (frame.entryContext.attention) return frame.entryContext.attention.reason;
   if (frame.entryContext.source === "dashboard") return "Из рабочей очереди тренера";
   if (frame.entryContext.source === "clients") return "Из списка спортсменов";
@@ -156,6 +163,10 @@ function profileTab(value: string | undefined): AthleteProfileTab {
 
 function uuidValue(value: string | undefined) {
   return value && isUuid(value) ? value : undefined;
+}
+
+function handoffValue(value: string | undefined) {
+  return isQuickAssignHandoffToken(value) ? value : undefined;
 }
 
 function isUuid(value: string) {

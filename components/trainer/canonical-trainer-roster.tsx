@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, ClipboardCheck, Copy, Dumbbell, Link2, Loader2, Search, UserRound, Users } from "lucide-react";
 import { toast } from "sonner";
 
-import { CanonicalRosterAssignmentDialog } from "@/components/trainer/canonical-roster-assignment-dialog";
 import {
   buildCanonicalTrainerRoster,
   filterCanonicalTrainerRoster,
@@ -18,7 +18,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { TrainerDashboardSnapshot } from "@/lib/server/trainer-dashboard/trainer-dashboard-types";
-import type { WorkoutTemplate } from "@/lib/server/workouts/workout-types";
+import { quickAssignHref } from "@/lib/quick-assign-navigation";
+import { createTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
 import { cn } from "@/lib/utils";
 
 async function copyInvitationUrl(value: string) {
@@ -32,28 +33,23 @@ async function copyInvitationUrl(value: string) {
 }
 
 export function CanonicalTrainerRoster() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [snapshot, setSnapshot] = useState<TrainerDashboardSnapshot | null>(null);
-  const [templates, setTemplates] = useState<WorkoutTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<CanonicalRosterFilter>("all");
-  const [assignmentAthlete, setAssignmentAthlete] = useState<CanonicalRosterAthlete | null>(null);
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
+  const [filter, setFilter] = useState<CanonicalRosterFilter>(() => rosterFilter(searchParams.get("filter")));
   const [inviting, setInviting] = useState(false);
   const [inviteUrl, setInviteUrl] = useState("");
-  const [receipt, setReceipt] = useState("");
 
   async function load() {
     setLoading(true);
     setFailed(false);
     try {
-      const [dashboardResponse, templatesResponse] = await Promise.all([
-        fetch("/api/trainer/dashboard", { cache: "no-store" }),
-        fetch("/api/trainer/workout-templates", { cache: "no-store" }),
-      ]);
-      if (!dashboardResponse.ok || !templatesResponse.ok) throw new Error("load_failed");
+      const dashboardResponse = await fetch("/api/trainer/dashboard", { cache: "no-store" });
+      if (!dashboardResponse.ok) throw new Error("load_failed");
       setSnapshot(await dashboardResponse.json() as TrainerDashboardSnapshot);
-      setTemplates((await templatesResponse.json() as { templates: WorkoutTemplate[] }).templates);
     } catch {
       setFailed(true);
     } finally {
@@ -63,11 +59,51 @@ export function CanonicalTrainerRoster() {
 
   useEffect(() => { void load(); }, []);
 
+  useEffect(() => {
+    if (loading || searchParams.get("focus") !== "row") return;
+    const athleteUserId = searchParams.get("athlete");
+    if (!athleteUserId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(`[data-roster-athlete="${athleteUserId}"]`);
+      const target = row ?? document.getElementById("roster-heading");
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, searchParams]);
+
   const roster = useMemo(() => snapshot ? buildCanonicalTrainerRoster(snapshot) : null, [snapshot]);
   const visibleAthletes = useMemo(
     () => filterCanonicalTrainerRoster(roster?.athletes ?? [], filter, search),
     [filter, roster?.athletes, search],
   );
+
+  function updateListState(next: { search?: string; filter?: CanonicalRosterFilter }) {
+    const nextSearch = next.search ?? search;
+    const nextFilter = next.filter ?? filter;
+    setSearch(nextSearch);
+    setFilter(nextFilter);
+    const params = new URLSearchParams();
+    if (nextSearch) params.set("search", nextSearch);
+    if (nextFilter !== "all") params.set("filter", nextFilter);
+    router.replace(`/trainer/clients${params.size ? `?${params}` : ""}`, { scroll: false });
+  }
+
+  function openAssignment(athlete: CanonicalRosterAthlete) {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (filter !== "all") params.set("filter", filter);
+    params.set("focus", "row");
+    params.set("athlete", athlete.athleteUserId);
+    const returnTo = `/trainer/clients?${params}`;
+    const context = createTrainerWorkflowContext({
+      origin: "clients",
+      athleteUserId: athlete.athleteUserId,
+      returnTo,
+      returnAnchor: "next-assignment",
+    });
+    router.push(quickAssignHref({ athleteUserId: athlete.athleteUserId, context }));
+  }
 
   async function createInvitation() {
     if (inviting) return;
@@ -100,7 +136,6 @@ export function CanonicalTrainerRoster() {
       <main className="min-h-screen bg-black px-4 py-5 pb-28 text-zinc-100 sm:px-6 lg:px-8 lg:pb-8">
         <div className="mx-auto w-full max-w-[1440px] space-y-5">
           {inviteUrl ? <InvitationReceipt inviteUrl={inviteUrl} /> : null}
-          {receipt ? <p role="status" className="flex items-center gap-2 border-y border-lime-300/20 bg-lime-300/[0.055] px-4 py-3 text-sm text-lime-100"><CheckCircle2 className="size-4" />{receipt}</p> : null}
 
           {loading ? (
             <div className="grid min-h-[60vh] place-items-center" aria-label="Загрузка спортсменов"><Loader2 className="size-6 animate-spin text-zinc-500" /></div>
@@ -123,9 +158,9 @@ export function CanonicalTrainerRoster() {
                   <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
                     <div className="relative min-w-0 sm:w-72">
                       <Search className="pointer-events-none absolute left-3 top-3 size-4 text-zinc-600" />
-                      <Input aria-label="Поиск спортсмена" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Имя или статус" className="h-10 border-zinc-800 bg-black pl-9" />
+                      <Input aria-label="Поиск спортсмена" value={search} onChange={(event) => updateListState({ search: event.target.value })} placeholder="Имя или статус" className="h-10 border-zinc-800 bg-black pl-9" />
                     </div>
-                    <RosterFilters filter={filter} onChange={setFilter} summary={roster.summary} />
+                    <RosterFilters filter={filter} onChange={(next) => updateListState({ filter: next })} summary={roster.summary} />
                   </div>
                 </div>
 
@@ -135,28 +170,17 @@ export function CanonicalTrainerRoster() {
                       <span role="columnheader">Спортсмен</span><span role="columnheader">Статус</span><span role="columnheader">Следующий шаг</span><span role="columnheader">Активность</span><span role="columnheader" className="text-right">Действие</span>
                     </div>
                     <div className="divide-y divide-zinc-800/85">
-                      {visibleAthletes.map((athlete) => <RosterRow key={athlete.athleteUserId} athlete={athlete} onAssign={setAssignmentAthlete} />)}
+                      {visibleAthletes.map((athlete) => <RosterRow key={athlete.athleteUserId} athlete={athlete} onAssign={openAssignment} />)}
                     </div>
                   </div>
                 ) : (
-                  <div className="px-5 py-16 text-center"><Search className="mx-auto size-7 text-zinc-700" /><p className="mt-3 font-medium">Ничего не найдено</p><button type="button" onClick={() => { setSearch(""); setFilter("all"); }} className="mt-2 text-sm text-lime-200 hover:text-lime-100">Сбросить поиск и фильтры</button></div>
+                  <div className="px-5 py-16 text-center"><Search className="mx-auto size-7 text-zinc-700" /><p className="mt-3 font-medium">Ничего не найдено</p><button type="button" onClick={() => updateListState({ search: "", filter: "all" })} className="mt-2 text-sm text-lime-200 hover:text-lime-100">Сбросить поиск и фильтры</button></div>
                 )}
               </section>
             </>
           )}
         </div>
       </main>
-
-      {assignmentAthlete ? (
-        <CanonicalRosterAssignmentDialog
-          key={assignmentAthlete.athleteUserId}
-          athlete={assignmentAthlete}
-          templates={templates}
-          open
-          onOpenChange={(open) => { if (!open) setAssignmentAthlete(null); }}
-          onAssigned={(message) => { setReceipt(message); void load(); }}
-        />
-      ) : null}
     </TrainerShell>
   );
 }
@@ -190,7 +214,7 @@ function RosterFilters({ filter, onChange, summary }: { filter: CanonicalRosterF
 
 function RosterRow({ athlete, onAssign }: { athlete: CanonicalRosterAthlete; onAssign: (athlete: CanonicalRosterAthlete) => void }) {
   return (
-    <div role="row" aria-label={`${athlete.displayName} ${athlete.statusLabel}`} className="grid gap-3 px-4 py-4 transition hover:bg-zinc-900/45 sm:px-5 lg:grid-cols-[minmax(240px,1.1fr)_190px_minmax(220px,1fr)_130px_150px] lg:items-center lg:gap-4">
+    <div role="row" tabIndex={-1} data-roster-athlete={athlete.athleteUserId} aria-label={`${athlete.displayName} ${athlete.statusLabel}`} className="grid gap-3 px-4 py-4 outline-none transition hover:bg-zinc-900/45 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-200 sm:px-5 lg:grid-cols-[minmax(240px,1.1fr)_190px_minmax(220px,1fr)_130px_150px] lg:items-center lg:gap-4">
       <div role="cell" className="flex min-w-0 items-center gap-3"><Avatar className="size-11 shrink-0 border border-zinc-800"><AvatarFallback className="bg-zinc-900 text-sm font-semibold text-zinc-100">{athlete.initials}</AvatarFallback></Avatar><span className="min-w-0"><Link href={`/trainer/clients/${athlete.athleteUserId}`} className="block truncate font-medium text-zinc-50 hover:text-lime-100">{athlete.displayName}</Link><span className="mt-0.5 block text-xs text-zinc-600">Активная связь</span></span></div>
       <div role="cell"><StatusBadge status={athlete.status} label={athlete.statusLabel} /></div>
       <div role="cell" className="min-w-0"><p className="truncate text-sm text-zinc-200">{athlete.nextStep}</p><p className="mt-0.5 truncate text-xs text-zinc-600">{athlete.nextStepDetail}</p></div>
@@ -203,6 +227,10 @@ function RosterRow({ athlete, onAssign }: { athlete: CanonicalRosterAthlete; onA
       </div>
     </div>
   );
+}
+
+function rosterFilter(value: string | null): CanonicalRosterFilter {
+  return value === "attention" || value === "waiting_review" || value === "on_track" ? value : "all";
 }
 
 function StatusBadge({ status, label }: { status: CanonicalRosterStatus; label: string }) {

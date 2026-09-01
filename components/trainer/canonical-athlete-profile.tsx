@@ -49,6 +49,7 @@ export function CanonicalAthleteProfile({
     open: boolean;
     transitionContext: string;
     originPhrase: string;
+    handoffToken?: string | null;
   } | null;
 }) {
   return (
@@ -100,6 +101,7 @@ export function CanonicalAthleteProfile({
           initialOpen
           transitionContext={quickAssign.transitionContext}
           originPhrase={quickAssign.originPhrase}
+          handoffToken={quickAssign.handoffToken}
         />
       ) : null}
     </TrainerShell>

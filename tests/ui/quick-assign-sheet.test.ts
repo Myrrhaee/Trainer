@@ -4,6 +4,8 @@ import test from "node:test";
 
 import type { QuickAssignReadModel, QuickAssignTemplateListItem, QuickAssignTemplatePreview } from "../../lib/server/quick-assign/quick-assign-types";
 import type { TrainerWorkflowTransition } from "../../lib/trainer-workflow-transition";
+import { quickAssignHref } from "../../lib/quick-assign-navigation";
+import { createTrainerWorkflowContext } from "../../lib/trainer-workflow-transition";
 import {
   formatQuickAssignCalendarDate,
   quickAssignHeaderSummary,
@@ -30,6 +32,29 @@ test("neutral state has no selected template or date", () => {
   assert.equal(state.draft.selected, null);
   assert.equal(state.draft.scheduledFor, "");
   assert.equal(state.mobileStep, "selection");
+});
+
+test("shared href always hosts Quick Assign in the athlete Training profile", () => {
+  const context = createTrainerWorkflowContext({ origin: "dashboard", athleteUserId: ATHLETE_ID });
+  const href = quickAssignHref({ athleteUserId: ATHLETE_ID, context });
+  const url = new URL(href, "http://trainer.local");
+  assert.equal(url.pathname, `/trainer/clients/${ATHLETE_ID}`);
+  assert.equal(url.searchParams.get("tab"), "training");
+  assert.equal(url.searchParams.get("assign"), "1");
+  assert.ok(url.searchParams.get("flow"));
+});
+
+test("builder presentation restores query, date and note without selecting a template", () => {
+  const state = quickAssignReducer(initialQuickAssignState(), {
+    type: "presentation_restored",
+    query: "сила",
+    scheduledFor: "2026-09-03",
+    trainerNote: "Без отказа",
+  });
+  assert.equal(state.query, "сила");
+  assert.equal(state.draft.scheduledFor, "2026-09-03");
+  assert.equal(state.draft.trainerNote, "Без отказа");
+  assert.equal(state.draft.selected, null);
 });
 
 test("selection is explicit and enters mobile review without losing query", () => {
@@ -157,6 +182,28 @@ test("production sheet has no demo store and sends only strict command builder p
   assert.match(source, /buildStrictAssignmentPayload/);
   assert.match(source, /templateRevisionId/);
   assert.match(source, /assignmentStateToken/);
+});
+
+test("production assignment entries converge on the shared profile host", () => {
+  const source = [
+    readFileSync("components/trainer/canonical-trainer-dashboard.tsx", "utf8"),
+    readFileSync("components/trainer/canonical-trainer-roster.tsx", "utf8"),
+    readFileSync("components/trainer/review/canonical-review-action-region.tsx", "utf8"),
+    readFileSync("lib/server/trainer-workflow/trainer-workflow-transition-service.ts", "utf8"),
+  ].join("\n");
+  assert.match(source, /quickAssignHref/);
+  assert.doesNotMatch(source, /CanonicalRosterAssignmentDialog|\/trainer\/builder\?athleteId/);
+  const builder = readFileSync("components/trainer-os/workout-template-builder/workout-template-builder-page.tsx", "utf8");
+  assert.doesNotMatch(builder, /CanonicalBuilderAssignmentDialog|fetch\("\/api\/workout-assignments"/);
+  assert.match(builder, /publishQuickAssignBuilderHandoff/);
+});
+
+test("production Assignment route rejects the legacy reduced payload", () => {
+  const source = readFileSync("app/api/workout-assignments/route.ts", "utf8");
+  for (const field of ["assignmentId", "templateRevisionId", "assignmentStateToken", "allowAdditionalAssignment", "transitionContext"]) {
+    assert.match(source, new RegExp(`body\\.${field}`));
+  }
+  assert.match(source, /assignment_validation_failed/);
 });
 
 test("search and preview use independent latest-request guards", () => {

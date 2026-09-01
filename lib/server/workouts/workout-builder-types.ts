@@ -44,6 +44,7 @@ export type BuilderItem =
 
 export type BuilderTemplate = {
   id: string;
+  revisionId: string;
   title: string;
   status: BuilderTemplateStatus;
   revision: number;
@@ -56,6 +57,6 @@ export type BuilderTemplate = {
   usageCount: number;
 };
 
-export type SaveBuilderTemplateInput = Omit<BuilderTemplate, "id" | "status" | "updatedLabel" | "usageCount"> & {
+export type SaveBuilderTemplateInput = Omit<BuilderTemplate, "id" | "revisionId" | "status" | "updatedLabel" | "usageCount"> & {
   id?: string;
 };

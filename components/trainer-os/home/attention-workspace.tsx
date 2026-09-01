@@ -272,7 +272,7 @@ function AllCalmState() {
           <Link href="/trainer/clients"><UsersRound className="size-4" />Клиенты</Link>
         </Button>
         <Button asChild variant="outline" className="rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
-          <Link href="/trainer/builder"><Dumbbell className="size-4" />Назначить тренировку</Link>
+          <Link href="/trainer/builder"><Dumbbell className="size-4" />Создать шаблон</Link>
         </Button>
       </div>
     </div>

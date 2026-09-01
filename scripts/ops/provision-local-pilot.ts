@@ -100,15 +100,28 @@ async function verifyWorkoutLoop(trainer: AuthenticatedAccount, athletes: Authen
     },
   });
   const template = templateResponse.body.template as Record<string, unknown> | undefined;
-  if (typeof template?.id !== "string") throw new Error("pilot_template_missing");
+  if (typeof template?.id !== "string" || typeof template.revisionId !== "string") throw new Error("pilot_template_missing");
+
+  const quickAssignResponse = await get(
+    `/api/trainer/athletes/${athleteUserId}/quick-assign?templateRevisionId=${template.revisionId}`,
+    trainer.cookie,
+  );
+  const quickAssign = quickAssignResponse.body.quickAssign as Record<string, unknown> | undefined;
+  const quickAssignAthlete = quickAssign?.athlete as Record<string, unknown> | undefined;
+  if (typeof quickAssignAthlete?.assignmentStateToken !== "string") throw new Error("pilot_quick_assign_missing");
 
   const assignmentResponse = await post("/api/workout-assignments", {
     cookie: trainer.cookie,
     body: {
+      assignmentId: crypto.randomUUID(),
       athleteUserId,
       templateId: template.id,
+      templateRevisionId: template.revisionId,
       scheduledFor: localDate(),
       trainerNote: "Локальная проверка полного цикла",
+      assignmentStateToken: quickAssignAthlete.assignmentStateToken,
+      allowAdditionalAssignment: false,
+      transitionContext: JSON.stringify({ version: 1, origin: "direct", athleteUserId, tab: "training" }),
     },
   });
   const assignment = assignmentResponse.body.assignment as Record<string, unknown> | undefined;

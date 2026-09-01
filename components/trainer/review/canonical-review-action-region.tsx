@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
-import { CheckCircle2, ChevronDown, Loader2, MessageSquareText, Send } from "lucide-react";
+import { CheckCircle2, ChevronDown, Dumbbell, Loader2, MessageSquareText, Send } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ReviewFeedback, ReviewReadModel } from "@/lib/server/reviews/review-types";
 import type { TrainerWorkflowTransition } from "@/lib/trainer-workflow-transition";
 import { cn } from "@/lib/utils";
+import { quickAssignHref } from "@/lib/quick-assign-navigation";
+import { createTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
 import { shortId } from "./canonical-review-presentation";
 
 type FeedbackMode = "detailed" | "acknowledgement";
@@ -443,6 +445,17 @@ export function CanonicalReviewCompletionReceipt({
   const followUp = transition.result.kind === "review"
     && (transition.result.title === "Уточнение сохранено"
       || review.existingFeedback.some((item) => item.id === transition.result.entityId && item.kind === "follow_up"));
+  const assignHref = quickAssignHref({
+    athleteUserId: review.athlete.id,
+    context: createTrainerWorkflowContext({
+      origin: "review",
+      athleteUserId: review.athlete.id,
+      sourceSessionId: review.session.id,
+      queue: transition.context.queue,
+      returnTo: `/trainer/review/${review.session.id}`,
+      returnAnchor: "next-assignment",
+    }),
+  });
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true });
     headingRef.current?.scrollIntoView({
@@ -472,6 +485,9 @@ export function CanonicalReviewCompletionReceipt({
         ) : transition.allCalm ? (
           <Link href="/trainer/clients" className="inline-flex min-h-11 items-center rounded-[8px] border border-lime-300/25 px-3 text-lime-100 hover:border-lime-300/40">В очереди всё спокойно · к спортсменам</Link>
         ) : null}
+        <Link href={assignHref} className="inline-flex min-h-11 items-center gap-2 rounded-[8px] border border-zinc-700 px-3 text-zinc-200 hover:border-zinc-600 hover:text-white">
+          <Dumbbell className="size-4" />Назначить следующую тренировку
+        </Link>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
           <Link href={transition.profileHref} className="inline-flex min-h-11 items-center text-zinc-300 hover:text-white">К профилю</Link>
           <Link href={transition.queueHref} className="inline-flex min-h-11 items-center text-zinc-300 hover:text-white">К очереди</Link>

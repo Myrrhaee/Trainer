@@ -39,6 +39,7 @@ export type QuickAssignClientState = {
 };
 
 export type QuickAssignAction =
+  | { type: "presentation_restored"; query: string; scheduledFor: string; trainerNote: string }
   | { type: "query_changed"; query: string }
   | { type: "template_selected"; template: QuickAssignTemplateListItem }
   | { type: "return_to_selection" }
@@ -72,6 +73,16 @@ export function quickAssignReducer(
   action: QuickAssignAction,
 ): QuickAssignClientState {
   switch (action.type) {
+    case "presentation_restored":
+      return {
+        ...state,
+        query: action.query,
+        draft: {
+          ...state.draft,
+          scheduledFor: action.scheduledFor,
+          trainerNote: action.trainerNote.slice(0, 2_000),
+        },
+      };
     case "query_changed":
       return { ...state, query: action.query };
     case "template_selected":

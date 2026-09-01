@@ -95,19 +95,31 @@ export function safeTrainerWorkflowDestination(value: unknown): string | null {
   }
   if (url.origin !== "http://trainer.local" || url.username || url.password) return null;
   const profileMatch = url.pathname.match(/^\/trainer\/clients\/([0-9a-f-]{36})$/i);
+  const reviewMatch = url.pathname.match(/^\/trainer\/review\/([0-9a-f-]{36})$/i);
   const allowedPath = url.pathname === "/trainer/dashboard"
     || url.pathname === "/trainer/attention"
     || url.pathname === "/trainer/clients"
-    || Boolean(profileMatch && UUID_PATTERN.test(profileMatch[1]));
+    || Boolean(profileMatch && UUID_PATTERN.test(profileMatch[1]))
+    || Boolean(reviewMatch && UUID_PATTERN.test(reviewMatch[1]));
   if (!allowedPath) return null;
 
-  const allowedKeys = profileMatch
+  const allowedKeys = reviewMatch
+    ? new Set<string>()
+    : profileMatch
     ? new Set(["tab", "from", "attentionItem", "focus", "receipt", "receiptId"])
-    : new Set(["filter", "order", "position", "focus", "receipt", "receiptId"]);
+    : url.pathname === "/trainer/clients"
+      ? new Set(["search", "filter", "focus", "athlete", "receipt", "receiptId"])
+      : new Set(["filter", "order", "position", "focus", "receipt", "receiptId"]);
   for (const key of url.searchParams.keys()) {
     if (!allowedKeys.has(key)) return null;
   }
   if (profileMatch && url.searchParams.has("tab") && url.searchParams.get("tab") !== "training") return null;
+  if (url.pathname === "/trainer/clients") {
+    if (url.searchParams.get("search")?.length && url.searchParams.get("search")!.length > 120) return null;
+    if (url.searchParams.has("filter") && !new Set(["all", "attention", "waiting_review", "on_track"]).has(url.searchParams.get("filter")!)) return null;
+    if (url.searchParams.has("focus") && url.searchParams.get("focus") !== "row") return null;
+    if (url.searchParams.has("athlete") && !UUID_PATTERN.test(url.searchParams.get("athlete")!)) return null;
+  }
   return `${url.pathname}${url.search}${url.hash}`;
 }
 

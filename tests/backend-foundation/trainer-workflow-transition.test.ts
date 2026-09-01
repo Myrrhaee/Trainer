@@ -47,3 +47,17 @@ test("invalid return context degrades to a direct safe context without retaining
   assert.equal(context.returnTo, undefined);
   assert.equal(context.athleteUserId, ATHLETE_ID);
 });
+
+test("clients return context accepts bounded list state and rejects foreign focus", () => {
+  const safe = `/trainer/clients?search=${encodeURIComponent("Артём")}&filter=attention&focus=row&athlete=${ATHLETE_ID}`;
+  assert.equal(safeTrainerWorkflowDestination(safe), safe);
+  assert.equal(safeTrainerWorkflowDestination("/trainer/clients?focus=row&athlete=foreign"), null);
+  assert.equal(safeTrainerWorkflowDestination("/trainer/clients?search=x&unknown=1"), null);
+});
+
+test("review return context accepts only an exact canonical session route", () => {
+  const sessionId = "11111111-1111-4111-8111-111111111111";
+  assert.equal(safeTrainerWorkflowDestination(`/trainer/review/${sessionId}`), `/trainer/review/${sessionId}`);
+  assert.equal(safeTrainerWorkflowDestination(`/trainer/review/${sessionId}?next=/trainer/dashboard`), null);
+  assert.equal(safeTrainerWorkflowDestination("/trainer/review/not-a-session"), null);
+});
