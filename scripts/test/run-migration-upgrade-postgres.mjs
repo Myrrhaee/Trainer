@@ -317,6 +317,24 @@ async function verifyExerciseBackfill(databaseName, fixture, expectSourceColumn 
   }
 }
 
+async function verifyTemplateCommandHardening(databaseName, expected = true) {
+  const state = await query(databaseName, `
+    SELECT
+      EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'app' AND table_name = 'workout_template_revisions'
+          AND column_name = 'lock_version') AS has_lock_version,
+      EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'app' AND table_name = 'workout_templates'
+          AND column_name = 'lifecycle_version') AS has_lifecycle_version,
+      to_regclass('app.workout_template_command_receipts') IS NOT NULL AS has_receipts,
+      to_regprocedure('app.workout_template_publication_issues(uuid)') IS NOT NULL AS has_publication_gate
+  `);
+  const row = state.rows[0];
+  if (Object.values(row).some((value) => value !== expected)) {
+    throw new Error(`template_command_hardening_state_mismatch:${JSON.stringify({ expected, row })}`);
+  }
+}
+
 async function runCleanUpgrade() {
   const databaseName = databaseNames.clean;
   const env = scenarioEnv(databaseName);
@@ -332,23 +350,51 @@ async function runCleanUpgrade() {
   if (r2d1.migration_count !== 13) throw new Error("clean_upgrade_expected_13_migrations");
   await verifyLifecycleBackfill(databaseName, fixture);
 
-  run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const after = await verifyState(databaseName, "0014_canonical_exercise_library", true);
-  if (after.migration_count !== 14) throw new Error("clean_upgrade_expected_14_migrations");
+  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0014_canonical_exercise_library"], env);
+  const exerciseLibrary = await verifyState(databaseName, "0014_canonical_exercise_library", true);
+  if (exerciseLibrary.migration_count !== 14) throw new Error("clean_upgrade_expected_14_migrations");
   await verifyExerciseBackfill(databaseName, fixture);
   await verifyLifecycleBackfill(databaseName, fixture);
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const repeated = await verifyState(databaseName, "0014_canonical_exercise_library", true);
-  if (repeated.migration_count !== 14) throw new Error("clean_upgrade_idempotency_failed");
+  const after = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
+  if (after.migration_count !== 15) throw new Error("clean_upgrade_expected_15_migrations");
+  await verifyTemplateCommandHardening(databaseName);
+  await verifyExerciseBackfill(databaseName, fixture);
+  await verifyLifecycleBackfill(databaseName, fixture);
+
+  run(process.execPath, ["scripts/db/migrate.mjs"], env);
+  const repeated = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
+  if (repeated.migration_count !== 15) throw new Error("clean_upgrade_idempotency_failed");
 
   run(process.execPath, ["scripts/db/rollback.mjs"], env);
-  const rolledBack = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
-  if (rolledBack.migration_count !== 13) throw new Error("rollback_expected_13_migrations");
-  await verifyExerciseBackfill(databaseName, fixture, false);
+  const rolledBack = await verifyState(databaseName, "0014_canonical_exercise_library", true);
+  if (rolledBack.migration_count !== 14) throw new Error("rollback_expected_14_migrations");
+  await verifyTemplateCommandHardening(databaseName, false);
   await verifyLifecycleBackfill(databaseName, fixture);
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
+  await verifyTemplateCommandHardening(databaseName);
   await verifyExerciseBackfill(databaseName, fixture);
+
+  const partial = await query(databaseName, `
+    INSERT INTO app.workout_template_exercises
+      (revision_id, instance_key, position, source_exercise_key, title, category,
+       prescription_type, repetition_mode, sets, repetitions, rest_seconds,
+       per_set_mode, trainer_note)
+    VALUES ($1, 'r2d3-partial-down-preflight', 1, 'legacy-partial-source',
+      'Partial down preflight', '', 'repetitions', 'fixed', NULL, NULL, NULL, false, '')
+    RETURNING id
+  `, [fixture.draftOnly[1]]);
+  const lossyRollback = execute(process.execPath, ["scripts/db/rollback.mjs"], env, true);
+  const lossyOutput = `${lossyRollback.stdout ?? ""}\n${lossyRollback.stderr ?? ""}`;
+  if (lossyRollback.status === 0 || !lossyOutput.includes("r2d3_lossy_down_migration_blocked")) {
+    throw new Error(`r2d3_lossy_down_preflight_missing:${lossyOutput}`);
+  }
+  await query(databaseName, "DELETE FROM app.workout_template_exercises WHERE id = $1", [partial.rows[0].id]);
+  run(process.execPath, ["scripts/db/rollback.mjs"], env);
+  await verifyTemplateCommandHardening(databaseName, false);
+  run(process.execPath, ["scripts/db/migrate.mjs"], env);
+  await verifyTemplateCommandHardening(databaseName);
 
   run(process.execPath, ["scripts/database/seed-system-exercises.mjs"], env);
   run(process.execPath, ["scripts/database/seed-system-exercises.mjs"], env);
@@ -492,8 +538,9 @@ async function runLegacyRecovery() {
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const state = await verifyState(databaseName, "0014_canonical_exercise_library", true);
-  if (state.migration_count !== 14) throw new Error("legacy_upgrade_expected_14_migrations");
+  const state = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
+  if (state.migration_count !== 15) throw new Error("legacy_upgrade_expected_15_migrations");
+  await verifyTemplateCommandHardening(databaseName);
   process.stdout.write(`LEGACY RECOVERY PASS ${JSON.stringify({
     legacyOwner: legacy.legacyOwner,
     catalogObjects: legacy.catalog.length,

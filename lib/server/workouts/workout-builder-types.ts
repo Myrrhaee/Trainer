@@ -18,6 +18,7 @@ export type BuilderSet = {
 export type BuilderExercise = {
   instanceId: string;
   exerciseId: string;
+  sourceExerciseId?: string;
   title: string;
   category: string;
   equipment?: string;
@@ -57,11 +58,73 @@ export type BuilderTemplate = {
   usageCount: number;
   latestPublishedRevision: { revisionId: string; revision: number } | null;
   editableRevision: { revisionId: string; revision: number } | null;
+  editToken: string | null;
+  templateToken: string;
 };
 
 export type SaveBuilderTemplateInput = Omit<BuilderTemplate,
   "id" | "revisionId" | "status" | "updatedLabel" | "usageCount" |
-  "latestPublishedRevision" | "editableRevision"
+  "latestPublishedRevision" | "editableRevision" | "editToken" | "templateToken"
 > & {
   id?: string;
+};
+
+export type WorkoutBuilderOperation =
+  | "create_draft"
+  | "save_draft"
+  | "create_revision"
+  | "publish_revision"
+  | "duplicate_template"
+  | "archive_template";
+
+export type WorkoutBuilderValidationIssue = {
+  path: string;
+  code: string;
+};
+
+export type WorkoutBuilderCommandResult = {
+  template: BuilderTemplate;
+  replay: boolean;
+  outcome: "created" | "saved" | "published" | "existing_draft" | "duplicated" | "archived" | "already_archived";
+};
+
+export type SaveDraftCommandInput = {
+  commandId: string;
+  templateId: string;
+  revisionId: string;
+  expectedEditToken: string | null;
+  content: SaveBuilderTemplateInput;
+  requestFingerprint: string;
+};
+
+export type PublishRevisionCommandInput = {
+  commandId: string;
+  templateId: string;
+  revisionId: string;
+  expectedEditToken: string;
+  requestFingerprint: string;
+};
+
+export type CreateRevisionCommandInput = {
+  commandId: string;
+  templateId: string;
+  expectedTemplateToken: string | null;
+  requestFingerprint: string;
+};
+
+export type DuplicateTemplateCommandInput = {
+  commandId: string;
+  sourceTemplateId: string;
+  sourceRevisionIntent: "editable" | "published" | "latest_saved";
+  newTemplateId: string;
+  newRevisionId: string;
+  title: string;
+  requestFingerprint: string;
+};
+
+export type ArchiveTemplateCommandInput = {
+  commandId: string;
+  templateId: string;
+  expectedTemplateToken: string | null;
+  requestFingerprint: string;
 };

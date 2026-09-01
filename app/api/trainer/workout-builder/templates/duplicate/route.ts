@@ -8,7 +8,7 @@ import { WorkoutBuilderService } from "@/lib/server/workouts/workout-builder-ser
 
 export const runtime = "nodejs";
 
-export async function POST(request: Request, context: { params: Promise<{ templateId: string }> }) {
+export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const body = await readJsonObject(request, 16 * 1024);
   if (!body) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -17,9 +17,8 @@ export async function POST(request: Request, context: { params: Promise<{ templa
     if (!actor || (await new AccessService().context(actor)).trainer?.status !== "active") {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
-    const { templateId } = await context.params;
-    const result = await new WorkoutBuilderService().publish(actor, templateId, body);
-    return NextResponse.json(result);
+    const result = await new WorkoutBuilderService().duplicate(actor, body);
+    return NextResponse.json(result, { status: result.replay ? 200 : 201 });
   } catch (error) {
     return workoutBuilderErrorResponse(error);
   }

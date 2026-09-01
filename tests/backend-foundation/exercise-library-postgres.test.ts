@@ -18,6 +18,7 @@ import { QuickAssignQueryService } from "../../lib/server/quick-assign/quick-ass
 import { QuickAssignRepository } from "../../lib/server/quick-assign/quick-assign-repository";
 import { WorkoutBuilderRepository } from "../../lib/server/workouts/workout-builder-repository";
 import type { SaveBuilderTemplateInput } from "../../lib/server/workouts/workout-builder-types";
+import { publishBuilderDraft, saveBuilderDraft } from "./workout-builder-test-driver";
 import { PostgresWorkoutRepository } from "../../lib/server/workouts/workout-repository";
 
 const connectionString = process.env.TEST_DATABASE_URL;
@@ -362,7 +363,7 @@ test("canonical source provenance preserves Template and Assignment snapshots", 
       imageUrl: "/exercises/test/r2d2-source.webp",
     });
 
-    const saved = await builder.saveDraft(trainer, snapshotDraft());
+    const saved = await saveBuilderDraft(builder, trainer, snapshotDraft());
     assert.ok(saved);
     const revision = await admin.query<{ id: string }>(`
       SELECT id FROM app.workout_template_revisions
@@ -391,7 +392,7 @@ test("canonical source provenance preserves Template and Assignment snapshots", 
       /source is not selectable/,
     );
 
-    const published = await builder.publish(trainer, saved.id);
+    const published = await publishBuilderDraft(builder, trainer, saved.id);
     assert.ok(published);
     const quickAssign = await new QuickAssignQueryService(new QuickAssignRepository(app)).find(trainer, athlete.userId);
     assert.ok(quickAssign);
@@ -429,7 +430,7 @@ test("canonical source provenance preserves Template and Assignment snapshots", 
     assert.equal(archivedDetail?.sourceAvailability, "archived");
     assert.equal(createExerciseSelectionSnapshot(archivedDetail!), null);
 
-    const ambiguous = await builder.saveDraft(trainer, ambiguousDraft());
+    const ambiguous = await saveBuilderDraft(builder, trainer, ambiguousDraft());
     assert.ok(ambiguous);
     await insertTrainerExercise(admin, {
       owner: trainer.userId,

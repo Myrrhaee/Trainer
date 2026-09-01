@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 import { AccessService } from "@/lib/server/access/access-service";
 import { resolveRequestActor } from "@/lib/server/auth/actor";
-import { isSameOriginRequest, readSmallJsonObject } from "@/lib/server/http/request-security";
-import { WorkoutService, WorkoutValidationError } from "@/lib/server/workouts/workout-service";
+import { isSameOriginRequest } from "@/lib/server/http/request-security";
+import { WorkoutService } from "@/lib/server/workouts/workout-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,23 +36,12 @@ export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  const body = await readSmallJsonObject(request);
-  if (!body) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-
-  try {
-    const auth = await activeTrainer();
-    if (!auth.actor) {
-      return NextResponse.json(
-        { error: auth.status === 401 ? "unauthorized" : "trainer_not_active" },
-        { status: auth.status },
-      );
-    }
-    const template = await new WorkoutService().createTemplate(auth.actor, body);
-    return NextResponse.json({ ok: true, template }, { status: 201 });
-  } catch (error) {
-    if (error instanceof WorkoutValidationError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-    return NextResponse.json({ error: "temporarily_unavailable" }, { status: 503 });
+  const auth = await activeTrainer();
+  if (!auth.actor) {
+    return NextResponse.json(
+      { error: auth.status === 401 ? "unauthorized" : "trainer_not_active" },
+      { status: auth.status },
+    );
   }
+  return NextResponse.json({ error: "legacy_template_mutation_removed" }, { status: 410 });
 }

@@ -116,27 +116,8 @@ test.describe("Canonical three-role closed-alpha flow", () => {
       });
 
       await test.step("trainer sees canonical names and assigns a workout", async () => {
-        const templateResponse = await trainer.request.post("/api/trainer/workout-templates", {
-          headers: { Origin: baseURL },
-          data: {
-            title: workoutTitle,
-            description: "Контрольная тренировка для canonical E2E.",
-            generalInstruction: "Один технический подход без отказа.",
-            estimatedDurationMin: 20,
-            exercises: [{
-              instanceKey: "canonical-e2e-squat",
-              title: "Приседание с собственным весом",
-              sets: 1,
-              repetitions: 8,
-              targetWeightKg: null,
-              restSeconds: 90,
-              trainerNote: "Остановись с запасом в два повтора.",
-            }],
-          },
-        });
-        expect(templateResponse.status()).toBe(201);
-        const templateBody = await templateResponse.json() as { template: { id: string } };
-        templateId = templateBody.template.id;
+        const template = await createCanonicalTemplate(trainer, workoutTitle);
+        templateId = template.id;
 
         await trainer.goto("/trainer/clients");
         const athleteOneRow = trainer.getByRole("row", { name: new RegExp(athleteOneName) });
@@ -551,6 +532,68 @@ async function signInWithDevelopmentOtp(page: Page, email: string) {
   await page.getByRole("button", { name: "Продолжить" }).click();
   await expect(page.getByRole("heading", { name: "Email подтверждён" })).toBeVisible();
   await page.getByRole("link", { name: "Продолжить" }).click();
+}
+
+async function createCanonicalTemplate(page: Page, title: string) {
+  const templateId = crypto.randomUUID();
+  const revisionId = crypto.randomUUID();
+  const content = {
+    id: templateId,
+    revisionId,
+    title,
+    revision: 1,
+    description: "Контрольная тренировка для canonical E2E.",
+    category: "Сила",
+    estimatedDurationMin: "20",
+    generalInstruction: "Один технический подход без отказа.",
+    items: [{
+      id: "canonical-e2e-row",
+      kind: "exercise",
+      exercise: {
+        instanceId: "canonical-e2e-squat",
+        exerciseId: "canonical-e2e-squat",
+        title: "Приседание с собственным весом",
+        category: "Сила",
+        prescription: {
+          type: "repetitions",
+          sets: "1",
+          repetitionMode: "fixed",
+          repetitionsMin: "8",
+          repetitionsMax: "8",
+          durationSec: "",
+          targetWeightKg: "",
+          restSec: "90",
+        },
+        perSetMode: false,
+        setOverrides: [],
+        trainerNote: "Остановись с запасом в два повтора.",
+      },
+    }],
+  };
+  const draftResponse = await page.request.post("/api/trainer/workout-builder/templates", {
+    headers: { Origin: baseURL },
+    data: {
+      commandId: crypto.randomUUID(), templateId, revisionId,
+      expectedEditToken: null, content,
+    },
+  });
+  expect(draftResponse.status()).toBe(201);
+  const draft = await draftResponse.json() as {
+    template: { id: string; revisionId: string; editToken: string };
+  };
+  const publishResponse = await page.request.post(
+    `/api/trainer/workout-builder/templates/${draft.template.id}/publish`,
+    {
+      headers: { Origin: baseURL },
+      data: {
+        commandId: crypto.randomUUID(),
+        revisionId: draft.template.revisionId,
+        expectedEditToken: draft.template.editToken,
+      },
+    },
+  );
+  expect(publishResponse.status()).toBe(200);
+  return (await publishResponse.json() as { template: { id: string; revisionId: string } }).template;
 }
 
 async function saveDisplayName(page: Page, displayName: string) {

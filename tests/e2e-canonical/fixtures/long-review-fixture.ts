@@ -1,4 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
 import type { APIResponse, Page } from "@playwright/test";
@@ -69,13 +70,33 @@ export async function provisionLongReviewFixture(trainer: Page, athlete: Page): 
   }), 200);
 
   const templateInput = longTemplateInput();
-  const draft = await responseJson<{ template: { id: string } }>(await trainer.request.post(
+  const templateId = randomUUID();
+  const revisionId = randomUUID();
+  const draft = await responseJson<{
+    template: { id: string; revisionId: string; editToken: string };
+  }>(await trainer.request.post(
     `${baseURL}/api/trainer/workout-builder/templates`,
-    { headers: { Origin: baseURL }, data: templateInput },
+    {
+      headers: { Origin: baseURL },
+      data: {
+        commandId: randomUUID(),
+        templateId,
+        revisionId,
+        expectedEditToken: null,
+        content: { ...templateInput, id: templateId, revisionId },
+      },
+    },
   ), 201);
   const published = await responseJson<{ template: { id: string } }>(await trainer.request.post(
     `${baseURL}/api/trainer/workout-builder/templates/${draft.template.id}/publish`,
-    { headers: { Origin: baseURL }, data: { ...templateInput, id: draft.template.id } },
+    {
+      headers: { Origin: baseURL },
+      data: {
+        commandId: randomUUID(),
+        revisionId: draft.template.revisionId,
+        expectedEditToken: draft.template.editToken,
+      },
+    },
   ), 200);
 
   const open = await createCompletedSession(trainer, athlete, athleteId, published.template.id, "open");

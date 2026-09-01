@@ -10,6 +10,12 @@ import {
 } from "../../lib/server/workouts/workout-builder-repository";
 import type { SaveBuilderTemplateInput } from "../../lib/server/workouts/workout-builder-types";
 import {
+  archiveBuilderTemplate,
+  createBuilderRevision,
+  publishBuilderDraft,
+  saveBuilderDraft,
+} from "./workout-builder-test-driver";
+import {
   PostgresWorkoutRepository,
   WorkoutAssignmentIdempotencyConflictError,
 } from "../../lib/server/workouts/workout-repository";
@@ -82,30 +88,33 @@ test("builder persists a rich draft, publishes it and creates an isolated next r
   const owner = await trainer(admin, "B6 Builder Owner");
   const stranger = await trainer(admin, "B6 Other Trainer");
   try {
-    const empty = await repository.saveDraft(owner, { ...draft(""), title: "", items: [] });
+    const empty = await saveBuilderDraft(repository, owner, { ...draft(""), title: "", items: [] });
     assert.ok(empty);
     assert.equal(empty.status, "draft");
     assert.equal(empty.items.length, 0);
 
-    const saved = await repository.saveDraft(owner, { ...draft(), id: empty.id });
+    const saved = await saveBuilderDraft(repository, owner, { ...draft(), id: empty.id });
     assert.ok(saved);
     assert.equal(saved.items[0].kind, "exercise");
     if (saved.items[0].kind !== "exercise") throw new Error("unexpected_item");
     assert.equal(saved.items[0].exercise.setOverrides[0].kind, "warmup");
     assert.equal(saved.items[0].exercise.prescription.repetitionsMax, "8");
 
-    const published = await repository.publish(owner, saved.id);
+    const published = await publishBuilderDraft(repository, owner, saved.id);
     assert.equal(published?.status, "published");
     await assert.rejects(
-      repository.publish(owner, saved.id),
+      publishBuilderDraft(repository, owner, saved.id),
       (error: unknown) => error instanceof WorkoutBuilderCommandError
         && error.commandCode === "revision_already_published",
     );
-    assert.equal(await repository.saveDraft(owner, { ...draft("Mutation"), id: saved.id }), null);
+    await assert.rejects(
+      saveBuilderDraft(repository, owner, { ...draft("Mutation"), id: saved.id }),
+      WorkoutBuilderCommandError,
+    );
     assert.equal((await repository.list(stranger)).length, 0);
     assert.equal((await repository.list(owner)).find((item) => item.id === saved.id)?.status, "published");
 
-    const revision = await repository.createRevision(owner, saved.id);
+    const revision = await createBuilderRevision(repository, owner, saved.id);
     assert.equal(revision?.status, "draft");
     assert.equal(revision?.revision, 2);
     assert.equal(revision?.latestPublishedRevision?.revision, 1);
@@ -113,14 +122,14 @@ test("builder persists a rich draft, publishes it and creates an isolated next r
     assert.equal(revision?.items.length, 1);
     if (revision?.items[0].kind !== "exercise") throw new Error("unexpected_item");
     assert.equal(revision.items[0].exercise.setOverrides[1].targetWeightKg, "80");
-    const replayedRevision = await repository.createRevision(owner, saved.id);
+    const replayedRevision = await createBuilderRevision(repository, owner, saved.id);
     assert.equal(replayedRevision?.revisionId, revision.revisionId);
     const revisionCount = await admin.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM app.workout_template_revisions WHERE template_id = $1",
       [saved.id],
     );
     assert.equal(revisionCount.rows[0].count, "2");
-    assert.equal(await repository.createRevision(stranger, saved.id), null);
+    await assert.rejects(createBuilderRevision(repository, stranger, saved.id), WorkoutBuilderCommandError);
 
     const appClient = await app.connect();
     try {
@@ -166,12 +175,15 @@ test("archived builder templates are immutable and invisible to unrelated traine
   const owner = await trainer(admin, "B6 Archive Owner");
   const stranger = await trainer(admin, "B6 Archive Stranger");
   try {
-    const saved = await repository.saveDraft(owner, draft("Архивный шаблон"));
+    const saved = await saveBuilderDraft(repository, owner, draft("Архивный шаблон"));
     assert.ok(saved);
-    const archived = await repository.archive(owner, saved.id);
+    const archived = await archiveBuilderTemplate(repository, owner, saved.id);
     assert.equal(archived?.status, "archived");
-    assert.equal(await repository.saveDraft(owner, { ...draft("Нельзя изменить"), id: saved.id }), null);
-    assert.equal(await repository.archive(stranger, saved.id), null);
+    await assert.rejects(
+      saveBuilderDraft(repository, owner, { ...draft("Нельзя изменить"), id: saved.id }),
+      WorkoutBuilderCommandError,
+    );
+    await assert.rejects(archiveBuilderTemplate(repository, stranger, saved.id), WorkoutBuilderCommandError);
   } finally {
     await Promise.all([admin.end(), app.end()]);
   }
@@ -190,9 +202,9 @@ test("assignment copies rich per-set data and survives later template revisions"
     (trainer_user_id, athlete_user_id, status, is_primary)
     VALUES ($1, $2, 'active', true)`, [owner.userId, recipient.userId]);
   try {
-    const saved = await builder.saveDraft(owner, draft("Снимок подходов"));
+    const saved = await saveBuilderDraft(builder, owner, draft("Снимок подходов"));
     assert.ok(saved);
-    const published = await builder.publish(owner, saved.id);
+    const published = await publishBuilderDraft(builder, owner, saved.id);
     assert.ok(published);
     const assignment = await workouts.createAssignment(owner, {
       assignmentId: "11111111-2222-4333-8444-555555555555",
@@ -233,12 +245,12 @@ test("assignment copies rich per-set data and survives later template revisions"
       WHERE exercise.assignment_id = $1 AND assignment_set.position = 2`, [assignment.id]);
     assert.equal(Number(snapshot.rows[0].target_weight_kg_snapshot), 80);
 
-    const revision = await builder.createRevision(owner, published.id);
+    const revision = await createBuilderRevision(builder, owner, published.id);
     assert.ok(revision);
     const changed = draft("Снимок подходов v2");
     if (changed.items[0].kind !== "exercise") throw new Error("unexpected_item");
     changed.items[0].exercise.setOverrides[1].targetWeightKg = "90";
-    assert.ok(await builder.saveDraft(owner, { ...changed, id: revision.id, revision: 2 }));
+    assert.ok(await saveBuilderDraft(builder, owner, { ...changed, id: revision.id, revision: 2 }));
     const unchanged = await admin.query<{ target_weight_kg_snapshot: string }>(`
       SELECT assignment_set.target_weight_kg_snapshot
       FROM app.workout_assignment_exercise_sets assignment_set

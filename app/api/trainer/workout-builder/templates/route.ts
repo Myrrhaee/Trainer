@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { AccessService } from "@/lib/server/access/access-service";
 import { resolveRequestActor } from "@/lib/server/auth/actor";
 import { isSameOriginRequest, readJsonObject } from "@/lib/server/http/request-security";
-import { WorkoutBuilderService, WorkoutBuilderValidationError } from "@/lib/server/workouts/workout-builder-service";
-import { WorkoutBuilderCommandError } from "@/lib/server/workouts/workout-builder-repository";
+import { workoutBuilderErrorResponse } from "@/lib/server/workouts/workout-builder-http";
+import { WorkoutBuilderService } from "@/lib/server/workouts/workout-builder-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,22 +28,14 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  const body = await readJsonObject(request, 64 * 1024);
-  if (!body) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  const body = await readJsonObject(request, 512 * 1024);
+  if (!body) return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
   try {
     const actor = await trainerActor();
     if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    const template = await new WorkoutBuilderService().saveDraft(actor, body);
-    return template
-      ? NextResponse.json({ template }, { status: 201 })
-      : NextResponse.json({ error: "template_not_found" }, { status: 404 });
+    const result = await new WorkoutBuilderService().saveDraft(actor, body);
+    return NextResponse.json(result, { status: result.replay ? 200 : 201 });
   } catch (error) {
-    if (error instanceof WorkoutBuilderCommandError) {
-      return NextResponse.json({ error: error.commandCode }, { status: 409 });
-    }
-    if (error instanceof WorkoutBuilderValidationError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-    return NextResponse.json({ error: "temporarily_unavailable" }, { status: 503 });
+    return workoutBuilderErrorResponse(error);
   }
 }

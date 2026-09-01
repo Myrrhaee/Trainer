@@ -82,24 +82,7 @@ async function verifyWorkoutLoop(trainer: AuthenticatedAccount, athletes: Authen
   const athleteUserId = athleteRows[0]?.athleteUserId;
   if (typeof athleteUserId !== "string") throw new Error("pilot_roster_empty");
 
-  const templateResponse = await post("/api/trainer/workout-templates", {
-    cookie: trainer.cookie,
-    body: {
-      title: "Локальная пилотная тренировка",
-      description: "Синтетическая проверка canonical API",
-      generalInstruction: "Спокойный технический подход",
-      estimatedDurationMin: 20,
-      exercises: [{
-        title: "Приседание с собственным весом",
-        sets: 1,
-        repetitions: 8,
-        targetWeightKg: null,
-        restSeconds: 60,
-        trainerNote: "",
-      }],
-    },
-  });
-  const template = templateResponse.body.template as Record<string, unknown> | undefined;
+  const template = await createCanonicalTemplate(trainer);
   if (typeof template?.id !== "string" || typeof template.revisionId !== "string") throw new Error("pilot_template_missing");
 
   const quickAssignResponse = await get(
@@ -208,6 +191,64 @@ async function verifyWorkoutLoop(trainer: AuthenticatedAccount, athletes: Authen
     throw new Error("pilot_feedback_not_visible_to_athlete");
   }
   process.stdout.write("PASS canonical_workout_review_feedback_loop\n");
+}
+
+async function createCanonicalTemplate(trainer: AuthenticatedAccount) {
+  const templateId = crypto.randomUUID();
+  const revisionId = crypto.randomUUID();
+  const content = {
+    id: templateId,
+    revisionId,
+    title: "Локальная пилотная тренировка",
+    revision: 1,
+    description: "Синтетическая проверка canonical API",
+    category: "Сила",
+    estimatedDurationMin: "20",
+    generalInstruction: "Спокойный технический подход",
+    items: [{
+      id: "local-pilot-row",
+      kind: "exercise",
+      exercise: {
+        instanceId: "local-pilot-squat",
+        exerciseId: "local-pilot-squat",
+        title: "Приседание с собственным весом",
+        category: "Сила",
+        prescription: {
+          type: "repetitions",
+          sets: "1",
+          repetitionMode: "fixed",
+          repetitionsMin: "8",
+          repetitionsMax: "8",
+          durationSec: "",
+          targetWeightKg: "",
+          restSec: "60",
+        },
+        perSetMode: false,
+        setOverrides: [],
+        trainerNote: "",
+      },
+    }],
+  };
+  const draftResponse = await post("/api/trainer/workout-builder/templates", {
+    cookie: trainer.cookie,
+    body: {
+      commandId: crypto.randomUUID(), templateId, revisionId,
+      expectedEditToken: null, content,
+    },
+  });
+  const draft = draftResponse.body.template as Record<string, unknown> | undefined;
+  if (typeof draft?.id !== "string" || typeof draft.revisionId !== "string" || typeof draft.editToken !== "string") {
+    throw new Error("pilot_draft_missing");
+  }
+  const published = await post(`/api/trainer/workout-builder/templates/${draft.id}/publish`, {
+    cookie: trainer.cookie,
+    body: {
+      commandId: crypto.randomUUID(),
+      revisionId: draft.revisionId,
+      expectedEditToken: draft.editToken,
+    },
+  });
+  return published.body.template as Record<string, unknown> | undefined;
 }
 
 async function main() {

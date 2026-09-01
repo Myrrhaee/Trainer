@@ -57,6 +57,8 @@ export type WorkoutTemplateItemDraft =
 export type WorkoutTemplateDraft = {
   id: string;
   revisionId?: string;
+  editToken?: string | null;
+  templateToken?: string;
   title: string;
   status: TemplateStatus;
   revision: number;

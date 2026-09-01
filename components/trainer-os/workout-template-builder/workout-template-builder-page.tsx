@@ -43,6 +43,7 @@ import { createTrainerWorkflowContext, encodeTrainerWorkflowContext } from "@/li
 import {
   archiveCanonicalBuilderTemplate,
   createCanonicalBuilderRevision,
+  duplicateCanonicalBuilderTemplate,
   loadCanonicalBuilderTemplates,
   publishCanonicalBuilderTemplate,
   saveCanonicalBuilderDraft,
@@ -200,7 +201,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     const copy = cloneTemplate(template);
     if (!demoMode) {
       try {
-        const confirmed = await saveCanonicalBuilderDraft(copy);
+        const confirmed = await duplicateCanonicalBuilderTemplate(template, copy.title);
         upsertCanonical(confirmed);
         openTemplate(confirmed);
       } catch {
@@ -219,7 +220,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   async function archiveTemplate(template: WorkoutTemplateDraft) {
     if (!demoMode) {
       try {
-        const confirmed = await archiveCanonicalBuilderTemplate(template.id);
+        const confirmed = await archiveCanonicalBuilderTemplate(template);
         upsertCanonical(confirmed);
         if (draft?.id === template.id) {
           setDraft(confirmed);
@@ -327,7 +328,8 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     const published = publishTemplate(draft);
     if (!demoMode) {
       try {
-        const confirmed = await publishCanonicalBuilderTemplate(published);
+        const persisted = dirty ? await saveCanonicalBuilderDraft(draft) : draft;
+        const confirmed = await publishCanonicalBuilderTemplate(persisted);
         upsertCanonical(confirmed);
         setDraft(confirmed);
         setBaseline(JSON.stringify(confirmed));
@@ -370,7 +372,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     setFeedback(null);
     if (!demoMode) {
       try {
-        const confirmed = await createCanonicalBuilderRevision(draft.id);
+        const confirmed = await createCanonicalBuilderRevision(draft);
         upsertCanonical(confirmed);
         openTemplate(confirmed);
         setCommandState({ status: "idle" });

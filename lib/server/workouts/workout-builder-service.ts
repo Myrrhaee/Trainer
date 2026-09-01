@@ -2,155 +2,248 @@ import "server-only";
 
 import type { Actor } from "@/lib/server/database/actor-context";
 import { WorkoutBuilderRepository } from "@/lib/server/workouts/workout-builder-repository";
-import type { BuilderExercise, BuilderItem, BuilderSet, SaveBuilderTemplateInput } from "@/lib/server/workouts/workout-builder-types";
+import { workoutTemplateRequestFingerprint } from "@/lib/server/workouts/workout-template-command-crypto";
+import type {
+  ArchiveTemplateCommandInput,
+  BuilderExercise,
+  BuilderItem,
+  BuilderSet,
+  CreateRevisionCommandInput,
+  DuplicateTemplateCommandInput,
+  PublishRevisionCommandInput,
+  SaveBuilderTemplateInput,
+  SaveDraftCommandInput,
+  WorkoutBuilderValidationIssue,
+} from "@/lib/server/workouts/workout-builder-types";
 
-export class WorkoutBuilderValidationError extends Error {}
-
-function object(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new WorkoutBuilderValidationError("invalid_request");
+export class WorkoutBuilderValidationError extends Error {
+  constructor(
+    public readonly validationCode: "draft_validation_failed" | "payload_too_large",
+    public readonly issues: WorkoutBuilderValidationIssue[] = [],
+  ) {
+    super(validationCode);
   }
+}
+
+function issue(path: string, code: string): never {
+  throw new WorkoutBuilderValidationError("draft_validation_failed", [{ path, code }]);
+}
+
+function object(value: unknown, path = "request") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) issue(path, "invalid_object");
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown, max: number, required = false) {
-  if (typeof value !== "string") throw new WorkoutBuilderValidationError("invalid_text");
+function text(value: unknown, max: number, path: string, required = false) {
+  if (typeof value !== "string") issue(path, "invalid_text");
   const result = value.trim();
-  if ((required && !result) || result.length > max) throw new WorkoutBuilderValidationError("invalid_text");
+  if ((required && !result) || result.length > max) issue(path, required && !result ? "required" : "too_long");
   return result;
 }
 
-function oneOf<T extends string>(value: unknown, values: readonly T[]): T {
-  if (typeof value !== "string" || !values.includes(value as T)) {
-    throw new WorkoutBuilderValidationError("invalid_option");
-  }
+function optionalText(value: unknown, max: number, path: string) {
+  if (value === undefined || value === null || value === "") return "";
+  return text(value, max, path);
+}
+
+function oneOf<T extends string>(value: unknown, values: readonly T[], path: string): T {
+  if (typeof value !== "string" || !values.includes(value as T)) issue(path, "invalid_option");
   return value as T;
 }
 
-function numericText(value: unknown, min: number, max: number, required = false) {
-  if (typeof value !== "string") throw new WorkoutBuilderValidationError("invalid_number");
-  if (!value.trim() && !required) return "";
+function numericText(value: unknown, min: number, max: number, path: string) {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string" && typeof value !== "number") issue(path, "invalid_number");
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
-    throw new WorkoutBuilderValidationError("invalid_number");
-  }
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) issue(path, "invalid_number");
   return String(parsed);
 }
 
-function id(value: unknown) {
-  return text(value, 160, true);
+function semanticId(value: unknown, path: string) {
+  return text(value, 160, path, true);
 }
 
-function setInput(value: unknown, expectedOrder: number, type: "repetitions" | "duration"): BuilderSet {
-  const row = object(value);
+function uuid(value: unknown, path: string) {
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    issue(path, "invalid_id");
+  }
+  return value;
+}
+
+function commandId(value: unknown) {
+  return uuid(value, "commandId");
+}
+
+function setInput(value: unknown, expectedOrder: number, type: "repetitions" | "duration", exerciseKey: string): BuilderSet {
+  const row = object(value, `exercises.${exerciseKey}.sets`);
+  const setKey = semanticId(row.id, `exercises.${exerciseKey}.sets.identity`);
+  const path = `exercises.${exerciseKey}.sets.${setKey}`;
   const order = Number(row.order);
-  if (!Number.isInteger(order) || order !== expectedOrder) {
-    throw new WorkoutBuilderValidationError("invalid_set_order");
+  if (!Number.isInteger(order) || order !== expectedOrder) issue(path, "invalid_order");
+  const repetitionsMin = type === "repetitions" ? numericText(row.repetitionsMin, 1, 500, `${path}.repetitionsMin`) : "";
+  const repetitionsMax = type === "repetitions" ? numericText(row.repetitionsMax, 1, 500, `${path}.repetitionsMax`) : "";
+  if (repetitionsMin && repetitionsMax && Number(repetitionsMax) < Number(repetitionsMin)) {
+    issue(`${path}.repetitions`, "invalid_range");
   }
   return {
-    id: id(row.id),
+    id: setKey,
     order,
-    kind: oneOf(row.kind, ["warmup", "working"] as const),
-    repetitionsMin: type === "repetitions" ? numericText(row.repetitionsMin, 1, 500, true) : "",
-    repetitionsMax: type === "repetitions" ? numericText(row.repetitionsMax, 1, 500, true) : "",
-    durationSec: type === "duration" ? numericText(row.durationSec, 1, 86400, true) : "",
-    targetWeightKg: numericText(row.targetWeightKg, 0, 2000),
-    restSec: numericText(row.restSec, 0, 3600, true),
+    kind: oneOf(row.kind, ["warmup", "working"] as const, `${path}.kind`),
+    repetitionsMin,
+    repetitionsMax,
+    durationSec: type === "duration" ? numericText(row.durationSec, 1, 86400, `${path}.durationSec`) : "",
+    targetWeightKg: numericText(row.targetWeightKg, 0, 2000, `${path}.targetWeightKg`),
+    restSec: numericText(row.restSec, 0, 3600, `${path}.restSec`),
     usesOverride: Boolean(row.usesOverride),
   };
 }
 
 function exerciseInput(value: unknown): BuilderExercise {
-  const row = object(value);
-  const prescription = object(row.prescription);
-  const type = oneOf(prescription.type, ["repetitions", "duration"] as const);
-  const repetitionMode = oneOf(prescription.repetitionMode, ["fixed", "range"] as const);
-  const sets = numericText(prescription.sets, 1, 20, true);
+  const row = object(value, "exercise");
+  const instanceId = semanticId(row.instanceId, "exercise.instanceId");
+  const path = `exercises.${instanceId}`;
+  const prescription = object(row.prescription, `${path}.prescription`);
+  const type = oneOf(prescription.type, ["repetitions", "duration"] as const, `${path}.prescription.type`);
+  const repetitionMode = oneOf(prescription.repetitionMode, ["fixed", "range"] as const, `${path}.prescription.repetitionMode`);
+  const sets = numericText(prescription.sets, 1, 20, `${path}.prescription.sets`);
   const setOverrides = Array.isArray(row.setOverrides)
-    ? row.setOverrides.map((set, index) => setInput(set, index + 1, type))
+    ? row.setOverrides.map((set, index) => setInput(set, index + 1, type, instanceId))
     : [];
-  if (setOverrides.length > 20 || (Boolean(row.perSetMode) && setOverrides.length !== Number(sets))) {
-    throw new WorkoutBuilderValidationError("invalid_sets");
-  }
-  const repetitionsMin = type === "repetitions" ? numericText(prescription.repetitionsMin, 1, 500, true) : "";
-  const repetitionsMax = type === "repetitions"
-    ? numericText(repetitionMode === "fixed" ? prescription.repetitionsMin : prescription.repetitionsMax, 1, 500, true)
+  if (setOverrides.length > 20) issue(`${path}.sets`, "too_many_sets");
+  const repetitionsMin = type === "repetitions"
+    ? numericText(prescription.repetitionsMin, 1, 500, `${path}.prescription.repetitionsMin`)
     : "";
-  if (type === "repetitions" && Number(repetitionsMax) < Number(repetitionsMin)) {
-    throw new WorkoutBuilderValidationError("invalid_repetition_range");
+  const requestedMax = repetitionMode === "fixed" && repetitionsMin ? repetitionsMin : prescription.repetitionsMax;
+  const repetitionsMax = type === "repetitions"
+    ? numericText(requestedMax, 1, 500, `${path}.prescription.repetitionsMax`)
+    : "";
+  if (repetitionsMin && repetitionsMax && Number(repetitionsMax) < Number(repetitionsMin)) {
+    issue(`${path}.prescription.repetitions`, "invalid_range");
   }
   return {
-    instanceId: id(row.instanceId),
-    exerciseId: id(row.exerciseId),
-    title: text(row.title, 160, true),
-    category: text(row.category, 120),
-    ...(row.equipment ? { equipment: text(row.equipment, 160) } : {}),
-    ...(row.description ? { description: text(row.description, 4000) } : {}),
-    ...(row.imageUrl ? { imageUrl: text(row.imageUrl, 2000) } : {}),
+    instanceId,
+    exerciseId: semanticId(row.exerciseId, `${path}.sourceExerciseKey`),
+    ...(row.sourceExerciseId ? { sourceExerciseId: uuid(row.sourceExerciseId, `${path}.sourceExerciseId`) } : {}),
+    title: text(row.title, 160, `${path}.title`, true),
+    category: optionalText(row.category, 120, `${path}.category`),
+    ...(row.equipment ? { equipment: text(row.equipment, 160, `${path}.equipment`) } : {}),
+    ...(row.description ? { description: text(row.description, 4000, `${path}.description`) } : {}),
+    ...(row.imageUrl ? { imageUrl: text(row.imageUrl, 2000, `${path}.imageUrl`) } : {}),
     prescription: {
       type,
       sets,
       repetitionMode,
       repetitionsMin,
       repetitionsMax,
-      durationSec: type === "duration" ? numericText(prescription.durationSec, 1, 86400, true) : "",
-      targetWeightKg: numericText(prescription.targetWeightKg, 0, 2000),
-      restSec: numericText(prescription.restSec, 0, 3600, true),
+      durationSec: type === "duration"
+        ? numericText(prescription.durationSec, 1, 86400, `${path}.prescription.durationSec`)
+        : "",
+      targetWeightKg: numericText(prescription.targetWeightKg, 0, 2000, `${path}.prescription.targetWeightKg`),
+      restSec: numericText(prescription.restSec, 0, 3600, `${path}.prescription.restSec`),
     },
     perSetMode: Boolean(row.perSetMode),
     setOverrides,
-    trainerNote: text(row.trainerNote, 2000),
+    trainerNote: optionalText(row.trainerNote, 2000, `${path}.trainerNote`),
   };
 }
 
 function itemInput(value: unknown): BuilderItem {
-  const row = object(value);
-  const kind = oneOf(row.kind, ["exercise", "superset"] as const);
-  if (kind === "exercise") {
-    return { id: id(row.id), kind, exercise: exerciseInput(row.exercise) };
-  }
-  if (!Array.isArray(row.exercises) || row.exercises.length < 2 || row.exercises.length > 4) {
-    throw new WorkoutBuilderValidationError("invalid_superset");
+  const row = object(value, "item");
+  const kind = oneOf(row.kind, ["exercise", "superset"] as const, "item.kind");
+  const itemId = semanticId(row.id, "item.id");
+  if (kind === "exercise") return { id: itemId, kind, exercise: exerciseInput(row.exercise) };
+  if (!Array.isArray(row.exercises) || row.exercises.length < 1 || row.exercises.length > 4) {
+    issue(`supersets.${itemId}.members`, "invalid_storage_cardinality");
   }
   return {
-    id: id(row.id),
+    id: itemId,
     kind,
-    label: text(row.label, 160),
-    instruction: text(row.instruction, 2000),
+    label: optionalText(row.label, 160, `supersets.${itemId}.label`),
+    instruction: optionalText(row.instruction, 2000, `supersets.${itemId}.instruction`),
     exercises: row.exercises.map(exerciseInput),
   };
 }
 
-function templateInput(value: unknown, publishing: boolean): SaveBuilderTemplateInput {
-  const row = object(value);
+function templateContent(value: unknown): SaveBuilderTemplateInput {
+  const row = object(value, "content");
   const items = Array.isArray(row.items) ? row.items.map(itemInput) : [];
   const exercises = items.flatMap((item) => item.kind === "exercise" ? [item.exercise] : item.exercises);
-  if (items.length > 30 || exercises.length > 40) throw new WorkoutBuilderValidationError("too_many_exercises");
-  if (publishing && exercises.length === 0) throw new WorkoutBuilderValidationError("template_empty");
-  const uniqueInstances = new Set(exercises.map((exercise) => exercise.instanceId));
-  const uniqueSets = new Set(exercises.flatMap((exercise) => exercise.setOverrides.map((set) => set.id)));
-  if (uniqueInstances.size !== exercises.length || uniqueSets.size !== exercises.flatMap((exercise) => exercise.setOverrides).length) {
-    throw new WorkoutBuilderValidationError("duplicate_ids");
-  }
-  const revision = Number(row.revision);
-  if (!Number.isInteger(revision) || revision < 1) throw new WorkoutBuilderValidationError("invalid_revision");
+  if (items.length > 30 || exercises.length > 40) issue("template.exercises", "too_many_exercises");
+  const instanceIds = exercises.map((exercise) => exercise.instanceId);
+  const setIds = exercises.flatMap((exercise) => exercise.setOverrides.map((set) => set.id));
+  const itemIds = items.map((item) => item.id);
+  if (new Set(instanceIds).size !== instanceIds.length) issue("template.exercises", "duplicate_instance_key");
+  if (new Set(setIds).size !== setIds.length) issue("template.sets", "duplicate_set_key");
+  if (new Set(itemIds).size !== itemIds.length) issue("template.items", "duplicate_item_key");
+  const revision = Number(row.revision ?? 1);
+  if (!Number.isInteger(revision) || revision < 1) issue("template.revision", "invalid_revision");
   return {
-    ...(typeof row.id === "string" && /^[0-9a-f-]{36}$/i.test(row.id) ? { id: row.id } : {}),
-    title: text(row.title, 120, publishing),
+    title: optionalText(row.title, 120, "template.title"),
     revision,
-    description: text(row.description, 2000),
-    category: text(row.category, 120),
-    estimatedDurationMin: numericText(row.estimatedDurationMin, 1, 600),
-    generalInstruction: text(row.generalInstruction, 4000),
+    description: optionalText(row.description, 2000, "template.description"),
+    category: optionalText(row.category, 120, "template.category"),
+    estimatedDurationMin: numericText(row.estimatedDurationMin, 1, 600, "template.estimatedDurationMin"),
+    generalInstruction: optionalText(row.generalInstruction, 4000, "template.generalInstruction"),
     items,
   };
 }
 
-function uuid(value: unknown) {
-  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    throw new WorkoutBuilderValidationError("invalid_id");
-  }
-  return value;
+function saveInput(value: unknown): SaveDraftCommandInput {
+  const row = object(value);
+  const content = templateContent(row.content);
+  const input = {
+    commandId: commandId(row.commandId),
+    templateId: uuid(row.templateId, "templateId"),
+    revisionId: uuid(row.revisionId, "revisionId"),
+    expectedEditToken: typeof row.expectedEditToken === "string" ? row.expectedEditToken : null,
+    content,
+  };
+  return { ...input, requestFingerprint: workoutTemplateRequestFingerprint(input) };
+}
+
+function publishInput(templateId: unknown, value: unknown): PublishRevisionCommandInput {
+  const row = object(value);
+  if ("content" in row) issue("content", "publish_content_forbidden");
+  const input = {
+    commandId: commandId(row.commandId),
+    templateId: uuid(templateId, "templateId"),
+    revisionId: uuid(row.revisionId, "revisionId"),
+    expectedEditToken: text(row.expectedEditToken, 2048, "expectedEditToken", true),
+  };
+  return { ...input, requestFingerprint: workoutTemplateRequestFingerprint(input) };
+}
+
+function createRevisionInput(templateId: unknown, value: unknown): CreateRevisionCommandInput {
+  const row = object(value);
+  const input = {
+    commandId: commandId(row.commandId),
+    templateId: uuid(templateId, "templateId"),
+    expectedTemplateToken: typeof row.expectedTemplateToken === "string" ? row.expectedTemplateToken : null,
+  };
+  return { ...input, requestFingerprint: workoutTemplateRequestFingerprint(input) };
+}
+
+function duplicateInput(value: unknown): DuplicateTemplateCommandInput {
+  const row = object(value);
+  const input = {
+    commandId: commandId(row.commandId),
+    sourceTemplateId: uuid(row.sourceTemplateId, "sourceTemplateId"),
+    sourceRevisionIntent: oneOf(row.sourceRevisionIntent, ["editable", "published", "latest_saved"] as const, "sourceRevisionIntent"),
+    newTemplateId: uuid(row.newTemplateId, "newTemplateId"),
+    newRevisionId: uuid(row.newRevisionId, "newRevisionId"),
+    title: text(row.title, 120, "template.title", true),
+  };
+  return { ...input, requestFingerprint: workoutTemplateRequestFingerprint(input) };
+}
+
+function archiveInput(templateId: unknown, value: unknown): ArchiveTemplateCommandInput {
+  const row = object(value);
+  const input = {
+    commandId: commandId(row.commandId),
+    templateId: uuid(templateId, "templateId"),
+    expectedTemplateToken: typeof row.expectedTemplateToken === "string" ? row.expectedTemplateToken : null,
+  };
+  return { ...input, requestFingerprint: workoutTemplateRequestFingerprint(input) };
 }
 
 export class WorkoutBuilderService {
@@ -161,20 +254,22 @@ export class WorkoutBuilderService {
   }
 
   saveDraft(actor: Actor, value: unknown) {
-    return this.repository.saveDraft(actor, templateInput(value, false));
+    return this.repository.saveDraft(actor, saveInput(value));
   }
 
-  async publish(actor: Actor, templateId: unknown, value: unknown) {
-    const parsedId = uuid(templateId);
-    await this.repository.saveDraft(actor, { ...templateInput(value, true), id: parsedId });
-    return this.repository.publish(actor, parsedId);
+  publish(actor: Actor, templateId: unknown, value: unknown) {
+    return this.repository.publish(actor, publishInput(templateId, value));
   }
 
-  createRevision(actor: Actor, templateId: unknown) {
-    return this.repository.createRevision(actor, uuid(templateId));
+  createRevision(actor: Actor, templateId: unknown, value: unknown) {
+    return this.repository.createRevision(actor, createRevisionInput(templateId, value));
   }
 
-  archive(actor: Actor, templateId: unknown) {
-    return this.repository.archive(actor, uuid(templateId));
+  duplicate(actor: Actor, value: unknown) {
+    return this.repository.duplicate(actor, duplicateInput(value));
+  }
+
+  archive(actor: Actor, templateId: unknown, value: unknown) {
+    return this.repository.archive(actor, archiveInput(templateId, value));
   }
 }
