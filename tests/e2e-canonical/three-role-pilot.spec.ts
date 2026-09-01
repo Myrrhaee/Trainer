@@ -74,6 +74,18 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await trainer.getByRole("link", { name: "Открыть кабинет" }).click();
         await expect(trainer).toHaveURL(/\/trainer\/dashboard$/);
         await expect(trainer.getByRole("heading", { name: "Команда", exact: true })).toBeVisible();
+
+        const libraryResponse = await trainer.request.get("/api/trainer/exercises?first=5");
+        expect(libraryResponse.status()).toBe(200);
+        const libraryBody = await libraryResponse.json() as {
+          exerciseLibrary: { items: Array<{ exerciseId: string; scope: string }> };
+        };
+        expect(libraryBody.exerciseLibrary.items).toHaveLength(5);
+        expect(libraryBody.exerciseLibrary.items.every((item) => item.scope === "system")).toBe(true);
+        const detailResponse = await trainer.request.get(
+          `/api/trainer/exercises/${libraryBody.exerciseLibrary.items[0].exerciseId}`,
+        );
+        expect(detailResponse.status()).toBe(200);
       });
 
       let athleteOneInvite = "";
@@ -89,6 +101,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
       await test.step("two athletes register and accept only their own invitation", async () => {
         await registerAthlete(athleteOne, athleteOneInvite, athleteOneEmail, athleteOneName);
         await registerAthlete(athleteTwo, athleteTwoInvite, athleteTwoEmail, athleteTwoName);
+        expect((await athleteOne.request.get("/api/trainer/exercises")).status()).toBe(403);
         await expectNoHorizontalOverflow(athleteOne);
         await expectNoHorizontalOverflow(athleteTwo);
 

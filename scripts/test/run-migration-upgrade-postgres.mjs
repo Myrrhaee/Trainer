@@ -165,6 +165,31 @@ async function seedLegacyLifecycleStates(databaseName) {
   const archivedPublishedRevision = await revision(archived, 1, "published", "Archived v1");
   const archivedEditableRevision = await revision(archived, 2, "draft", "Archived v2");
 
+  const mappedExercise = await query(databaseName, `
+    INSERT INTO app.workout_template_exercises
+      (revision_id, instance_key, position, title, sets, repetitions,
+       target_weight_kg, rest_seconds, trainer_note, source_exercise_key,
+       category, equipment, description, image_url, prescription_type,
+       repetition_mode, repetitions_min, repetitions_max, per_set_mode)
+    VALUES
+      ($1, 'legacy-mapped-instance', 1, 'Legacy mapped snapshot', 3, 8,
+       70, 120, 'Keep this note', 'demo-ex-back-1',
+       'Legacy category', 'Legacy equipment', 'Legacy description', '/legacy.webp',
+       'repetitions', 'fixed', 8, 8, false)
+    RETURNING id
+  `, [publishedOnlyRevision]);
+  const unmatchedExercise = await query(databaseName, `
+    INSERT INTO app.workout_template_exercises
+      (revision_id, instance_key, position, title, sets, repetitions,
+       rest_seconds, source_exercise_key, category, prescription_type,
+       repetition_mode, repetitions_min, repetitions_max, per_set_mode)
+    VALUES
+      ($1, 'legacy-unmatched-instance', 2, 'Legacy unmatched snapshot', 2, 12,
+       90, 'legacy-unmatched-key', 'Legacy category', 'repetitions',
+       'fixed', 12, 12, false)
+    RETURNING id
+  `, [publishedOnlyRevision]);
+
   const assignment = await query(databaseName, `
     INSERT INTO app.workout_assignments
       (relation_id, trainer_user_id, athlete_user_id, source_template_id,
@@ -183,6 +208,24 @@ async function seedLegacyLifecycleStates(databaseName) {
   const snapshot = await query(databaseName,
     `SELECT to_jsonb(assignment) AS value FROM app.workout_assignments assignment WHERE id = $1`,
     [assignment.rows[0].id]);
+  await query(databaseName, `
+    INSERT INTO app.workout_assignment_exercises
+      (assignment_id, source_template_exercise_id, instance_key, position,
+       title_snapshot, sets_snapshot, repetitions_snapshot, target_weight_kg_snapshot,
+       rest_seconds_snapshot, trainer_note_snapshot, source_exercise_key_snapshot,
+       category_snapshot, equipment_snapshot, prescription_type_snapshot,
+       repetition_mode_snapshot, repetitions_min_snapshot, repetitions_max_snapshot,
+       per_set_mode_snapshot)
+    VALUES
+      ($1, $2, 'legacy-mapped-instance', 1, 'Legacy mapped snapshot', 3, 8, 70,
+       120, 'Keep this note', 'demo-ex-back-1', 'Legacy category',
+       'Legacy equipment', 'repetitions', 'fixed', 8, 8, false)
+  `, [assignment.rows[0].id, mappedExercise.rows[0].id]);
+  const assignmentExerciseSnapshot = await query(databaseName, `
+    SELECT to_jsonb(exercise) AS value
+    FROM app.workout_assignment_exercises exercise
+    WHERE assignment_id = $1
+  `, [assignment.rows[0].id]);
 
   return {
     publishedOnly: [publishedOnly, publishedOnlyRevision],
@@ -191,6 +234,9 @@ async function seedLegacyLifecycleStates(databaseName) {
     archived: [archived, archivedPublishedRevision, archivedEditableRevision],
     assignmentId: assignment.rows[0].id,
     assignmentSnapshot: snapshot.rows[0].value,
+    assignmentExerciseSnapshot: assignmentExerciseSnapshot.rows[0].value,
+    mappedExerciseId: mappedExercise.rows[0].id,
+    unmatchedExerciseId: unmatchedExercise.rows[0].id,
   };
 }
 
@@ -229,6 +275,46 @@ async function verifyLifecycleBackfill(databaseName, fixture) {
   if (JSON.stringify(snapshot.rows[0].value) !== JSON.stringify(fixture.assignmentSnapshot)) {
     throw new Error("existing_assignment_snapshot_changed");
   }
+  const assignmentExercise = await query(databaseName, `
+    SELECT to_jsonb(exercise) AS value
+    FROM app.workout_assignment_exercises exercise
+    WHERE assignment_id = $1
+  `, [fixture.assignmentId]);
+  if (JSON.stringify(assignmentExercise.rows[0].value) !== JSON.stringify(fixture.assignmentExerciseSnapshot)) {
+    throw new Error("existing_assignment_exercise_snapshot_changed");
+  }
+}
+
+async function verifyExerciseBackfill(databaseName, fixture, expectSourceColumn = true) {
+  const sourceColumn = await query(databaseName, `
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'app' AND table_name = 'workout_template_exercises'
+        AND column_name = 'source_exercise_id'
+    ) AS exists
+  `);
+  if (sourceColumn.rows[0].exists !== expectSourceColumn) {
+    throw new Error("exercise_source_column_state_mismatch");
+  }
+  if (!expectSourceColumn) return;
+  const rows = await query(databaseName, `
+    SELECT template_exercise.id, template_exercise.title, template_exercise.source_exercise_id,
+      source.stable_key
+    FROM app.workout_template_exercises template_exercise
+    LEFT JOIN app.exercises source ON source.id = template_exercise.source_exercise_id
+    WHERE template_exercise.id = ANY($1::uuid[])
+    ORDER BY template_exercise.id
+  `, [[fixture.mappedExerciseId, fixture.unmatchedExerciseId]]);
+  const byId = new Map(rows.rows.map((row) => [row.id, row]));
+  const mapped = byId.get(fixture.mappedExerciseId);
+  const unmatched = byId.get(fixture.unmatchedExerciseId);
+  if (!mapped?.source_exercise_id || mapped.stable_key !== "demo-ex-back-1"
+    || mapped.title !== "Legacy mapped snapshot") {
+    throw new Error(`exercise_source_backfill_failed:${JSON.stringify(mapped)}`);
+  }
+  if (unmatched?.source_exercise_id !== null || unmatched?.title !== "Legacy unmatched snapshot") {
+    throw new Error(`exercise_unmatched_source_not_safe:${JSON.stringify(unmatched)}`);
+  }
 }
 
 async function runCleanUpgrade() {
@@ -241,14 +327,39 @@ async function runCleanUpgrade() {
   if (before.migration_count !== 12) throw new Error("clean_upgrade_expected_12_migrations");
   const fixture = await seedLegacyLifecycleStates(databaseName);
 
-  run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const after = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
-  if (after.migration_count !== 13) throw new Error("clean_upgrade_expected_13_migrations");
+  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0013_workout_template_revision_lifecycle"], env);
+  const r2d1 = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
+  if (r2d1.migration_count !== 13) throw new Error("clean_upgrade_expected_13_migrations");
   await verifyLifecycleBackfill(databaseName, fixture);
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const repeated = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
-  if (repeated.migration_count !== 13) throw new Error("clean_upgrade_idempotency_failed");
+  const after = await verifyState(databaseName, "0014_canonical_exercise_library", true);
+  if (after.migration_count !== 14) throw new Error("clean_upgrade_expected_14_migrations");
+  await verifyExerciseBackfill(databaseName, fixture);
+  await verifyLifecycleBackfill(databaseName, fixture);
+
+  run(process.execPath, ["scripts/db/migrate.mjs"], env);
+  const repeated = await verifyState(databaseName, "0014_canonical_exercise_library", true);
+  if (repeated.migration_count !== 14) throw new Error("clean_upgrade_idempotency_failed");
+
+  run(process.execPath, ["scripts/db/rollback.mjs"], env);
+  const rolledBack = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
+  if (rolledBack.migration_count !== 13) throw new Error("rollback_expected_13_migrations");
+  await verifyExerciseBackfill(databaseName, fixture, false);
+  await verifyLifecycleBackfill(databaseName, fixture);
+  run(process.execPath, ["scripts/db/migrate.mjs"], env);
+  await verifyExerciseBackfill(databaseName, fixture);
+
+  run(process.execPath, ["scripts/database/seed-system-exercises.mjs"], env);
+  run(process.execPath, ["scripts/database/seed-system-exercises.mjs"], env);
+  const seed = await query(databaseName, `
+    SELECT count(*)::integer AS count, count(DISTINCT id)::integer AS ids,
+      count(DISTINCT stable_key)::integer AS keys
+    FROM app.exercises WHERE scope = 'system'
+  `);
+  if (seed.rows[0].count !== 182 || seed.rows[0].ids !== 182 || seed.rows[0].keys !== 182) {
+    throw new Error(`system_exercise_seed_not_deterministic:${JSON.stringify(seed.rows[0])}`);
+  }
   process.stdout.write(`CLEAN UPGRADE PASS ${JSON.stringify(repeated)}\n`);
 }
 
@@ -381,8 +492,8 @@ async function runLegacyRecovery() {
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const state = await verifyState(databaseName, "0013_workout_template_revision_lifecycle", true);
-  if (state.migration_count !== 13) throw new Error("legacy_upgrade_expected_13_migrations");
+  const state = await verifyState(databaseName, "0014_canonical_exercise_library", true);
+  if (state.migration_count !== 14) throw new Error("legacy_upgrade_expected_14_migrations");
   process.stdout.write(`LEGACY RECOVERY PASS ${JSON.stringify({
     legacyOwner: legacy.legacyOwner,
     catalogObjects: legacy.catalog.length,
