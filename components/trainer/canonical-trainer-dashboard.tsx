@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 
@@ -13,6 +13,8 @@ import { EmptyTeamState } from "@/components/trainer-os/home/empty-team-state";
 import { TeamActivityFeed } from "@/components/trainer-os/home/team-activity-feed";
 import type { TeamActivityItem, TeamClient } from "@/components/trainer-os/home/types";
 import type { TrainerDashboardSnapshot } from "@/lib/server/trainer-dashboard/trainer-dashboard-types";
+import { WorkflowReturnReceipt } from "@/components/trainer/workflow-return-receipt";
+import { createTrainerWorkflowContext, trainerWorkflowHref } from "@/lib/trainer-workflow-transition";
 
 const LivingTeamMap = dynamic(
   () => import("@/components/trainer-os/home/living-team-map").then((module) => module.LivingTeamMap),
@@ -26,6 +28,7 @@ const ActivityDrawer = dynamic(
 
 export function CanonicalTrainerDashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [snapshot, setSnapshot] = useState<TrainerDashboardSnapshot | null>(null);
   const [failed, setFailed] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -65,7 +68,13 @@ export function CanonicalTrainerDashboard() {
     () => visibleActivities.filter((item) => item.unread && !readActivityIds.has(item.id)),
     [readActivityIds, visibleActivities],
   );
+  const requestedPosition = Number(searchParams.get("position"));
+  const queueFocusRequested = searchParams.get("focus") === "queue";
+  const restoredAttention = dashboard?.attentionItems.length && Number.isInteger(requestedPosition) && requestedPosition >= 0
+    ? dashboard.attentionItems[Math.min(requestedPosition, dashboard.attentionItems.length - 1)]
+    : null;
   const currentAttention = dashboard?.attentionItems.find((item) => item.clientId === selectedClientId)
+    ?? restoredAttention
     ?? dashboard?.attentionItems[0]
     ?? null;
   const selectedActivity = selectedActivityId
@@ -74,6 +83,23 @@ export function CanonicalTrainerDashboard() {
   const highlightedActivityClientId = activeActivityClientId
     ?? (activityDrawerOpen ? selectedActivity?.clientId ?? null : null);
   const mapSelectedClientId = previewClientId ?? selectedClientId ?? currentAttention?.clientId ?? null;
+  const receiptId = searchParams.get("receiptId");
+  const receiptKind = searchParams.get("receipt");
+  const receiptActivity = receiptId && /^[0-9a-f-]{36}$/i.test(receiptId)
+    ? snapshot?.activities.find((item) => item.id === `${receiptKind === "assignment" ? "assignment" : "feedback"}:${receiptId}`)
+    : null;
+  useEffect(() => {
+    if (!dashboard?.attentionItems.length || !Number.isInteger(requestedPosition) || requestedPosition < 0) return;
+    if (!queueFocusRequested) return;
+    const frame = window.requestAnimationFrame(() => {
+      attentionSectionRef.current?.focus({ preventScroll: true });
+      attentionSectionRef.current?.scrollIntoView({
+        block: "center",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [dashboard?.attentionItems, queueFocusRequested, requestedPosition]);
 
   function selectActivity(item: TeamActivityItem) {
     setSelectedActivityId(item.id);
@@ -91,11 +117,34 @@ export function CanonicalTrainerDashboard() {
 
   function openReview(client: TeamClient) {
     const review = dashboard?.attentionItems.find((item) => item.clientId === client.id && item.reviewHref);
-    if (review?.reviewHref) router.push(`${review.reviewHref}?from=dashboard&attentionItem=${review.id}`);
+    if (review?.reviewHref) {
+      const sessionId = review.reviewHref.split("/trainer/review/")[1]?.split("?")[0];
+      if (!sessionId) return;
+      router.push(trainerWorkflowHref(`/trainer/review/${sessionId}`, createTrainerWorkflowContext({
+        origin: "dashboard",
+        athleteUserId: client.id,
+        sourceAttentionItemId: review.id,
+        sourceSessionId: sessionId,
+        queue: {
+          filter: "all",
+          order: "priority",
+          position: dashboard?.attentionItems.findIndex((item) => item.id === review.id) ?? 0,
+        },
+        returnTo: "/trainer/dashboard",
+        returnAnchor: "workflow-receipt",
+      })));
+    }
   }
 
   function openAssignment(client: TeamClient) {
-    router.push(`/trainer/builder?athleteId=${client.id}&from=quick-assign&returnTo=/trainer/dashboard`);
+    const position = dashboard?.attentionItems.findIndex((item) => item.clientId === client.id) ?? 0;
+    router.push(trainerWorkflowHref(`/trainer/builder?athleteId=${client.id}`, createTrainerWorkflowContext({
+      origin: "dashboard",
+      athleteUserId: client.id,
+      queue: { filter: "all", order: "priority", position: Math.max(0, position) },
+      returnTo: "/trainer/dashboard",
+      returnAnchor: "workflow-receipt",
+    })));
   }
 
   return (
@@ -122,6 +171,14 @@ export function CanonicalTrainerDashboard() {
             <EmptyTeamState />
           ) : dashboard ? (
             <>
+              {receiptActivity ? (
+                <WorkflowReturnReceipt receipt={{
+                  id: receiptId!,
+                  title: receiptKind === "assignment" ? "Тренировка назначена" : "Обратная связь сохранена",
+                  detail: `${receiptActivity.athleteDisplayName} · ${receiptActivity.detail}`,
+                  focusTarget: "workflow-receipt",
+                }} />
+              ) : null}
               <DashboardStatusHeader
                 summary={dashboard.summary}
                 onOpenAttention={() => attentionSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}

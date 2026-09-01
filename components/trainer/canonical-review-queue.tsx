@@ -7,6 +7,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, ClipboardCheck, Loader2, Message
 import { TrainerShell } from "@/components/trainer/trainer-shell";
 import { Button } from "@/components/ui/button";
 import type { TrainerReviewQueueItem } from "@/lib/server/reviews/review-types";
+import { createTrainerWorkflowContext, trainerWorkflowHref } from "@/lib/trainer-workflow-transition";
 
 function completedLabel(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
@@ -112,7 +113,15 @@ export function CanonicalReviewQueue() {
                   </div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
                     <Button asChild className="gap-2 rounded-lg bg-lime-300 text-black hover:bg-lime-200">
-                      <Link href={`/trainer/review/${item.sessionId}?from=dashboard&attentionItem=${item.id}&position=${index + 1}`}>
+                      <Link href={trainerWorkflowHref(`/trainer/review/${item.sessionId}`, createTrainerWorkflowContext({
+                        origin: "dashboard",
+                        athleteUserId: item.athleteUserId,
+                        sourceAttentionItemId: item.id,
+                        sourceSessionId: item.sessionId,
+                        queue: { filter: "review", order: "priority", position: index },
+                        returnTo: "/trainer/attention",
+                        returnAnchor: "workflow-receipt",
+                      }))}>
                         Открыть разбор <ArrowRight className="size-4" />
                       </Link>
                     </Button>

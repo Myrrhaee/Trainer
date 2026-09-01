@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 
 import { AthleteProfileScrollReset } from "@/components/trainer/athlete-profile-scroll-reset";
+import { AthleteTrainingLoading, AthleteTrainingTab } from "@/components/trainer/athlete-training-tab";
+import { CanonicalQuickAssignSheet } from "@/components/trainer/quick-assign/canonical-quick-assign-sheet";
+import { QuickAssignProfileTrigger } from "@/components/trainer/quick-assign/quick-assign-profile-trigger";
 import { TrainerShell } from "@/components/trainer/trainer-shell";
 import { Button } from "@/components/ui/button";
 import type {
@@ -22,16 +25,31 @@ import type {
   AthleteProfileFrameReadModel,
   AthleteProfileTab,
 } from "@/lib/server/athlete-profile/athlete-profile-types";
+import type { AthleteTrainingViewResult } from "@/lib/server/athlete-profile/athlete-training-types";
 import { cn } from "@/lib/utils";
+import type { WorkflowReturnReceiptModel } from "@/components/trainer/workflow-return-receipt";
+import { createTrainerWorkflowContext, trainerWorkflowHref } from "@/lib/trainer-workflow-transition";
 
 export function CanonicalAthleteProfile({
   frame,
   overview,
   activeTab,
+  training,
+  trainingHistory,
+  workflowReceipt,
+  quickAssign,
 }: {
   frame: AthleteProfileFrameReadModel;
   overview: AthleteOverviewReadModel;
   activeTab: AthleteProfileTab;
+  training?: AthleteTrainingViewResult | null;
+  trainingHistory?: ReactNode;
+  workflowReceipt?: WorkflowReturnReceiptModel | null;
+  quickAssign?: {
+    open: boolean;
+    transitionContext: string;
+    originPhrase: string;
+  } | null;
 }) {
   return (
     <TrainerShell
@@ -44,7 +62,7 @@ export function CanonicalAthleteProfile({
         </Button>
       )}
     >
-      <AthleteProfileScrollReset />
+      <AthleteProfileScrollReset preservePosition={Boolean(workflowReceipt)} />
       <main className="min-h-screen bg-black px-4 py-5 pb-28 text-zinc-100 sm:px-6 lg:px-8 lg:pb-10">
         <div className="mx-auto w-full max-w-[1180px]">
           <Link href={frame.entryContext.returnHref} className="mb-4 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200 lg:hidden">
@@ -59,11 +77,31 @@ export function CanonicalAthleteProfile({
 
           <div className="pt-5">
             {activeTab === "overview" ? <OverviewTab frame={frame} overview={overview} /> : null}
-            {activeTab === "training" ? <TrainingTab frame={frame} overview={overview} /> : null}
+            {activeTab === "training" ? (
+              training ? (
+                <AthleteTrainingTab
+                  athleteUserId={frame.identity.athleteUserId}
+                  training={training}
+                  sourceAttentionItemId={frame.entryContext.attention?.id ?? null}
+                  historySlot={trainingHistory}
+                  workflowReceipt={workflowReceipt}
+                />
+              ) : (
+                <AthleteTrainingLoading />
+              )
+            ) : null}
             {activeTab === "progress" ? <ProgressTab overview={overview} /> : null}
           </div>
         </div>
       </main>
+      {quickAssign?.open ? (
+        <CanonicalQuickAssignSheet
+          athleteUserId={frame.identity.athleteUserId}
+          initialOpen
+          transitionContext={quickAssign.transitionContext}
+          originPhrase={quickAssign.originPhrase}
+        />
+      ) : null}
     </TrainerShell>
   );
 }
@@ -97,7 +135,11 @@ function ProfileHeader({ frame }: { frame: AthleteProfileFrameReadModel }) {
         <CurrentState state={frame.currentState} />
         {primary ? (
           <Button asChild className="min-h-11 shrink-0 rounded-lg bg-lime-300 px-4 text-black hover:bg-lime-200">
-            <Link href={primary.href}><PrimaryIcon className="size-4" />{primary.label}</Link>
+            {primary.kind === "assign" ? (
+              <QuickAssignProfileTrigger href={primary.href} athleteUserId={frame.identity.athleteUserId} label={primary.label} />
+            ) : (
+              <Link href={primary.href}><PrimaryIcon className="size-4" />{primary.label}</Link>
+            )}
           </Button>
         ) : null}
       </div>
@@ -118,6 +160,7 @@ function CurrentState({ state }: { state: AthleteProfileFrameReadModel["currentS
     : state.kind === "review_required" ? ClipboardCheck
       : state.kind === "workout_active" ? PlayCircle
         : state.kind === "relation_unavailable" ? PauseCircle
+          : state.kind === "source_unavailable" ? AlertTriangle
           : state.kind === "no_next_assignment" ? Dumbbell : CheckCircle2;
   return (
     <div className="flex min-w-0 items-center gap-3 lg:max-w-xs">
@@ -151,7 +194,14 @@ function AttentionContextStrip({ frame }: { frame: AthleteProfileFrameReadModel 
         <p className="mt-1 truncate text-xs text-zinc-500">{attention.title}</p>
       </div>
       {attention.status === "open" ? (
-        <Link href={`/trainer/review/${attention.sessionId}?from=profile&attentionItem=${attention.id}`} className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-lime-200 hover:text-lime-100">
+        <Link href={trainerWorkflowHref(`/trainer/review/${attention.sessionId}`, createTrainerWorkflowContext({
+          origin: "profile",
+          athleteUserId: frame.identity.athleteUserId,
+          sourceAttentionItemId: attention.id,
+          sourceSessionId: attention.sessionId,
+          returnTo: `/trainer/clients/${frame.identity.athleteUserId}?tab=training`,
+          returnAnchor: "latest-feedback",
+        }))} className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-lime-200 hover:text-lime-100">
           Открыть источник <ClipboardCheck className="size-4" />
         </Link>
       ) : null}
@@ -278,38 +328,6 @@ function TrainingContext({ overview }: { overview: AthleteOverviewReadModel }) {
         <LocalEmpty icon={<Dumbbell className="size-5" />} title="Контекст пока не указан" description="Предпочтения, оборудование и график появятся после заполнения анкеты." />
       )}
     </Section>
-  );
-}
-
-function TrainingTab({ frame, overview }: { frame: AthleteProfileFrameReadModel; overview: AthleteOverviewReadModel }) {
-  const assignment = overview.recentWork.currentAssignment;
-  const session = overview.recentWork.lastSession;
-  return (
-    <div className="grid gap-5 lg:grid-cols-2">
-      <Section title="Текущее назначение" description="Ближайшая доступная или уже начатая тренировка.">
-        {assignment ? (
-          <div className="border-l-2 border-lime-300/60 pl-4">
-            <p className="text-lg font-semibold text-zinc-50">{assignment.title}</p>
-            <p className="mt-1 text-sm text-zinc-500">{assignment.status === "in_progress" ? "Выполняется сейчас" : `Назначено на ${formatDate(assignment.scheduledFor)}`}</p>
-          </div>
-        ) : (
-          <LocalEmpty icon={<Dumbbell className="size-5" />} title="Следующая тренировка не назначена" description="Профиль не подставляет демонстрационную программу вместо реальных данных." />
-        )}
-        {!assignment && frame.availableActions.primary?.kind === "assign" ? (
-          <Button asChild className="mt-5 rounded-lg bg-lime-300 text-black hover:bg-lime-200"><Link href={frame.availableActions.primary.href}><Dumbbell className="size-4" />Назначить тренировку</Link></Button>
-        ) : null}
-      </Section>
-      <Section title="Последняя тренировка" description="Последний завершённый результат из общей истории спортсмена.">
-        {session ? (
-          <div className="border-l-2 border-zinc-700 pl-4">
-            <p className="text-lg font-semibold text-zinc-50">{session.title}</p>
-            <p className="mt-1 text-sm text-zinc-500">{session.completedSets} из {session.totalSets} подходов · {formatDateTime(session.completedAt)}</p>
-          </div>
-        ) : (
-          <LocalEmpty icon={<ClipboardCheck className="size-5" />} title="История пока пуста" description="Здесь появится первая завершённая тренировка." />
-        )}
-      </Section>
-    </div>
   );
 }
 

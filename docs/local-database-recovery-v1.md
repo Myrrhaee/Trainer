@@ -1,42 +1,92 @@
-# Local database ownership recovery
+# Local PostgreSQL setup and ownership recovery
 
-## Status
+## Ownership model
 
-The canonical development database is a clean database created by the ordered bootstrap and migration sequence. An older local database may contain the same schema with objects owned by the original login role instead of `ai_strength_migrator`. That state is local infrastructure drift, not part of the product schema.
+The local login role owns the local database and may create roles. The canonical group role `ai_strength_migrator` owns the `app` and `app_private` schemas, their application objects, and `public.app_schema_migrations`. Product migrations run in a transaction after `SET LOCAL ROLE ai_strength_migrator`.
 
-Migration `0012_athlete_profile_read_model` intentionally contains no environment-specific `ALTER OWNER` statements.
+An older local database may have application objects owned by its original login role. That state is infrastructure drift, not canonical schema state. Migration `0012_athlete_profile_read_model` intentionally contains no environment-specific ownership repair.
 
-## Recommended local path
+## A. Recommended clean path
 
-If local data has no value, recreate the local database through the normal setup flow. This produces the most reproducible development environment. Database recreation is destructive and must remain an explicit developer decision.
-
-## Preserve-data recovery path
-
-If local data must be preserved, run the ownership recovery as the local database owner before the normal migrator:
+Start PostgreSQL, ensure roles, and apply all pending migrations:
 
 ```bash
-node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs
-node --env-file=.env.development.local scripts/db/migrate.mjs
+npm run local:setup
 ```
 
-The recovery script:
+This command is non-destructive and can be repeated. It does not erase an existing database.
 
-- refuses to run unless `APP_ENV` is `local`, `development`, or `test`;
-- refuses database names that do not clearly identify a local or test database;
-- requires the connected role to be able to set `ai_strength_migrator`;
-- changes ownership for application schemas, relations, sequences, routines, enum/domain types, and migration metadata;
-- normalizes default privileges for future migrator-owned objects;
-- performs all changes in one transaction;
-- does not modify application rows.
+To deliberately recreate the local database and apply all migrations from zero:
 
-It is idempotent and is not a product migration. Do not run it in staging or production.
+```bash
+node --env-file=.env.development.local scripts/local/reset-database.mjs --confirm-reset
+```
 
-## Upgrade verification
+The reset command refuses non-local hosts, non-local database names, and execution without `--confirm-reset`. It deletes all rows in the selected local database. Do not use it when local data must be preserved.
 
-The isolated upgrade check creates a disposable PostgreSQL database, applies migrations through `0011`, simulates legacy ownership, runs the recovery, and then applies `0012`:
+Verification commands:
 
 ```bash
 node --env-file=.env.development.local scripts/test/run-migration-upgrade-postgres.mjs
+npm run test:backend:postgres
+npm run test:e2e:canonical
 ```
 
-The check succeeds only when `0012` is recorded, the athlete profile columns exist, and application relations are owned by `ai_strength_migrator`.
+## B. Preserve an older local database
+
+Use ownership recovery only when the database contains useful local data and the migration preflight reports objects owned by a legacy role.
+
+Create a backup first:
+
+```bash
+pg_dump --dbname="$DATABASE_MIGRATION_URL" --format=custom --file=ai-strength-local-before-owner-recovery.dump
+```
+
+The connected administrative login must own the legacy objects and be able to set the requested target role. The target must exist and must not be a superuser, replication role, or RLS-bypass role.
+
+Inspect the exact database, connected login, database owner, schemas, tables, sequences, routines, enum/domain types, current owners, and target owner without changing anything:
+
+```bash
+node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs \
+  --dry-run \
+  --target-owner ai_strength_migrator
+```
+
+Apply ownership normalization explicitly:
+
+```bash
+node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs \
+  --apply \
+  --target-owner ai_strength_migrator
+```
+
+Then run the normal migrator and repeat dry-run verification:
+
+```bash
+node --env-file=.env.development.local scripts/db/migrate.mjs
+node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs \
+  --dry-run \
+  --target-owner ai_strength_migrator
+```
+
+The final dry-run must report `driftCount: 0`. Recovery is local/test-only, transactional, limited to application schemas plus migration metadata, and changes ownership/default privileges only. It does not update application rows. A backup is still required because ownership changes affect future administration and restore behavior.
+
+`DATABASE_MIGRATION_OWNER` may be used instead of `--target-owner`. The command deliberately has no implicit target owner.
+
+## C. Do not
+
+- Do not edit rows in `public.app_schema_migrations` manually.
+- Do not add a developer login, machine path, or `ALTER OWNER` recovery to migration `0012`.
+- Do not run local recovery against staging or production.
+- Do not treat an old local database as the canonical schema baseline.
+- Do not run reset without confirming that its data may be deleted.
+- Do not weaken application roles, grants, RLS, or authorization to bypass an ownership error.
+
+## Reproducible upgrade evidence
+
+`scripts/test/run-migration-upgrade-postgres.mjs` uses two disposable databases:
+
+1. Clean path: migrate through `0011`, verify the pre-`0012` schema, apply `0012`, rerun the migrator, and confirm exactly 12 applied migrations.
+2. Legacy path: migrate through `0011`, reassign application objects to the connected legacy login, confirm catalog ownership, require the migration preflight to fail, inspect with dry-run, apply recovery, confirm a zero-drift second dry-run, apply `0012`, and rerun the migrator.
+
+Both disposable databases are removed in the script's cleanup path.

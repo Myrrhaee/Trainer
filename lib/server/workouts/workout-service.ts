@@ -1,6 +1,8 @@
 import "server-only";
 
 import type { Actor } from "@/lib/server/database/actor-context";
+import { randomUUID } from "node:crypto";
+import { isAssignmentStateToken } from "@/lib/server/quick-assign/assignment-state-token";
 import { PostgresWorkoutRepository } from "@/lib/server/workouts/workout-repository";
 import type { CreateWorkoutTemplateInput, WorkoutExerciseInput } from "@/lib/server/workouts/workout-types";
 
@@ -109,15 +111,32 @@ export class WorkoutService {
       throw new WorkoutValidationError("invalid_request");
     }
     const input = value as Record<string, unknown>;
+    const hasRevision = input.templateRevisionId !== undefined;
+    const hasStateToken = input.assignmentStateToken !== undefined;
+    if (hasRevision !== hasStateToken) throw new WorkoutValidationError("invalid_quick_assign_contract");
+    if (hasStateToken && !isAssignmentStateToken(input.assignmentStateToken)) {
+      throw new WorkoutValidationError("invalid_assignment_state_token");
+    }
+    if (input.allowAdditionalAssignment !== undefined && typeof input.allowAdditionalAssignment !== "boolean") {
+      throw new WorkoutValidationError("invalid_confirmation");
+    }
     return this.repository.createAssignment(actor, {
+      assignmentId: input.assignmentId === undefined ? randomUUID() : uuid(input.assignmentId),
       athleteUserId: uuid(input.athleteUserId),
       templateId: uuid(input.templateId),
+      templateRevisionId: hasRevision ? uuid(input.templateRevisionId) : undefined,
       scheduledFor: date(input.scheduledFor),
       trainerNote: text(input.trainerNote, 2000),
+      assignmentStateToken: hasStateToken ? input.assignmentStateToken as string : undefined,
+      allowAdditionalAssignment: input.allowAdditionalAssignment === true,
     });
   }
 
   listAthleteAssignments(actor: Actor) {
     return this.repository.listAthleteAssignments(actor);
+  }
+
+  findTrainerAssignment(actor: Actor, assignmentIdValue: unknown) {
+    return this.repository.findTrainerAssignment(actor, uuid(assignmentIdValue));
   }
 }

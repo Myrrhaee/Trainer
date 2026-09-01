@@ -104,6 +104,7 @@ export type BuilderEntryContext = {
   athleteId?: string;
   templateId?: string;
   returnTo?: string;
+  transitionContext?: string;
   source: "quick-assign" | "templates" | "direct";
   initialGoal?: string;
   emptyWorkspace?: boolean;

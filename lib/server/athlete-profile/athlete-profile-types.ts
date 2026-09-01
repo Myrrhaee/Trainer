@@ -2,6 +2,7 @@ export type AthleteProfileTab = "overview" | "training" | "progress";
 
 export type AthleteProfileCurrentStateKind =
   | "relation_unavailable"
+  | "source_unavailable"
   | "discomfort"
   | "review_required"
   | "no_next_assignment"

@@ -5,7 +5,10 @@ import { Pool } from "pg";
 
 import { WorkoutBuilderRepository } from "../../lib/server/workouts/workout-builder-repository";
 import type { SaveBuilderTemplateInput } from "../../lib/server/workouts/workout-builder-types";
-import { PostgresWorkoutRepository } from "../../lib/server/workouts/workout-repository";
+import {
+  PostgresWorkoutRepository,
+  WorkoutAssignmentIdempotencyConflictError,
+} from "../../lib/server/workouts/workout-repository";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 
@@ -142,12 +145,36 @@ test("assignment copies rich per-set data and survives later template revisions"
     const published = await builder.publish(owner, saved.id);
     assert.ok(published);
     const assignment = await workouts.createAssignment(owner, {
+      assignmentId: "11111111-2222-4333-8444-555555555555",
       athleteUserId: recipient.userId,
       templateId: published.id,
       scheduledFor: "2026-08-10",
       trainerNote: "Первое назначение",
     });
     assert.ok(assignment);
+    const replay = await workouts.createAssignment(owner, {
+      assignmentId: assignment.id,
+      athleteUserId: recipient.userId,
+      templateId: published.id,
+      scheduledFor: "2026-08-10",
+      trainerNote: "Первое назначение",
+    });
+    assert.equal(replay?.id, assignment.id);
+    const assignmentCount = await admin.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM app.workout_assignments WHERE id = $1",
+      [assignment.id],
+    );
+    assert.equal(assignmentCount.rows[0].count, "1");
+    await assert.rejects(
+      workouts.createAssignment(owner, {
+        assignmentId: assignment.id,
+        athleteUserId: recipient.userId,
+        templateId: published.id,
+        scheduledFor: "2026-08-11",
+        trainerNote: "Другой запрос",
+      }),
+      WorkoutAssignmentIdempotencyConflictError,
+    );
     const snapshot = await admin.query<{ target_weight_kg_snapshot: string }>(`
       SELECT assignment_set.target_weight_kg_snapshot
       FROM app.workout_assignment_exercise_sets assignment_set

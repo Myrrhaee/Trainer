@@ -18,7 +18,7 @@ export default async function TrainerAthleteLayout({
     requireCapability("trainer", "/trainer/clients"),
     params,
   ]);
-  if (!await new AccessService().hasActiveAthleteRelation(actor, clientId)) {
+  if (!await new AccessService().hasCurrentAthleteRelation(actor, clientId)) {
     redirect("/trainer/clients");
   }
   return children;

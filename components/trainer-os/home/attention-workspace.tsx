@@ -56,8 +56,10 @@ export function AttentionWorkspace({
   return (
     <section
       ref={sectionRef}
+      id="attention-workspace"
+      tabIndex={-1}
       aria-labelledby="attention-heading"
-      className="rounded-lg border border-zinc-800/90 bg-zinc-950/90 p-4 shadow-2xl shadow-black/25 sm:p-5"
+      className="rounded-lg border border-zinc-800/90 bg-zinc-950/90 p-4 shadow-2xl shadow-black/25 outline-none focus-visible:ring-2 focus-visible:ring-lime-200/70 sm:p-5"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

@@ -9,6 +9,9 @@ import {
   ReviewInvalidFollowUpError,
 } from "@/lib/server/reviews/review-repository";
 import { ReviewService, ReviewValidationError } from "@/lib/server/reviews/review-service";
+import { revalidateTrainerWorkflow } from "@/lib/server/trainer-workflow/revalidation";
+import { TrainerWorkflowTransitionService } from "@/lib/server/trainer-workflow/trainer-workflow-transition-service";
+import { decodeTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
 
 export const runtime = "nodejs";
 
@@ -23,10 +26,25 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const { sessionId } = await context.params;
-    const feedback = await new ReviewService().sendFeedback(actor, sessionId, body);
-    return feedback
-      ? NextResponse.json({ feedback }, { status: 201 })
-      : NextResponse.json({ error: "review_not_found" }, { status: 404 });
+    const service = new ReviewService();
+    const feedback = await service.sendFeedback(actor, sessionId, body);
+    if (!feedback) return NextResponse.json({ error: "review_not_found" }, { status: 404 });
+    const review = await service.findReview(actor, sessionId);
+    if (!review) return NextResponse.json({ error: "review_not_found" }, { status: 404 });
+    const transition = await new TrainerWorkflowTransitionService().forReview(
+      actor,
+      review,
+      decodeTrainerWorkflowContext(body.transitionContext),
+      {
+        kind: "review",
+        entityId: feedback.id,
+        title: feedback.kind === "follow_up" ? "Уточнение сохранено" : "Обратная связь сохранена",
+        detail: `${review.athlete.displayName} · ${review.session.title}`,
+        resolutionState: review.attention.status === "resolved" ? "resolved" : undefined,
+      },
+    );
+    transition.refreshWarning = revalidateTrainerWorkflow(review.athlete.id) ?? undefined;
+    return NextResponse.json({ feedback, transition }, { status: 201 });
   } catch (error) {
     if (error instanceof ReviewValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });

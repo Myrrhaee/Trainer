@@ -60,10 +60,9 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   const [canonicalLoading, setCanonicalLoading] = useState(!demoMode);
   const templates = demoMode ? demoTemplates : canonicalTemplates;
   const initialRequestedTemplate = entry.templateId ? templates.find((template) => template.id === entry.templateId) : undefined;
-  const [view, setView] = useState<BuilderView>(() => entry.templateId ? (initialRequestedTemplate ? "editor" : "unknown") : entry.source === "quick-assign" ? "editor" : "templates");
+  const [view, setView] = useState<BuilderView>(() => entry.templateId ? (initialRequestedTemplate ? "editor" : "unknown") : "templates");
   const [draft, setDraft] = useState<WorkoutTemplateDraft | null>(() => {
     if (initialRequestedTemplate) return initialRequestedTemplate;
-    if (entry.source === "quick-assign") return { ...createBlankTemplate("quick-assign-new-draft"), category: entry.initialGoal ?? "" };
     return null;
   });
   const [baseline, setBaseline] = useState(() => initialRequestedTemplate ? JSON.stringify(initialRequestedTemplate) : "");
@@ -447,7 +446,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
         </DialogContent>
       </Dialog>
 
-      {demoMode ? <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}».` : "Переход из конструктора тренировок.", returnTo: safeTrainerReturnPath(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setFeedback({ tone: "success", message: `${receipt.templateTitle} назначена для ${receipt.athleteName}.` })} /> : <CanonicalBuilderAssignmentDialog athleteId={entry.athleteId ?? null} template={draft} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(templateTitle) => setFeedback({ tone: "success", message: `«${templateTitle}» назначена спортсмену.` })} />}
+      {demoMode ? <QuickAssignDrawer key={`${entry.athleteId ?? "none"}-${assignableTemplate?.id ?? "none"}-${assignableTemplate?.revision ?? 0}`} athleteId={entry.athleteId ?? null} context={{ source: "direct", reason: draft ? `Назначение опубликованного шаблона «${draft.title}».` : "Переход из конструктора тренировок.", returnTo: safeTrainerReturnPath(entry.returnTo) ?? "/trainer/builder" }} initialTemplate={assignableTemplate} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(receipt) => setFeedback({ tone: "success", message: `${receipt.templateTitle} назначена для ${receipt.athleteName}.` })} /> : <CanonicalBuilderAssignmentDialog athleteId={entry.athleteId ?? null} template={draft} transitionContext={entry.transitionContext} open={quickAssignOpen} onOpenChange={setQuickAssignOpen} onAssigned={(templateTitle) => setFeedback({ tone: "success", message: `«${templateTitle}» назначена спортсмену.` })} />}
     </TrainerShell>
   );
 }

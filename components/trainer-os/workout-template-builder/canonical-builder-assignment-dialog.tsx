@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CalendarDays, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { WorkoutTemplateDraft } from "./builder-model";
+import type { TrainerWorkflowTransition } from "@/lib/trainer-workflow-transition";
 
 function today() {
   const now = new Date();
@@ -18,34 +20,44 @@ function today() {
 export function CanonicalBuilderAssignmentDialog({
   athleteId,
   template,
+  transitionContext,
   open,
   onOpenChange,
   onAssigned,
 }: {
   athleteId: string | null;
   template: WorkoutTemplateDraft | null;
+  transitionContext?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAssigned: (title: string) => void;
 }) {
+  const router = useRouter();
   const [scheduledFor, setScheduledFor] = useState(today());
   const [trainerNote, setTrainerNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const assignmentIdRef = useRef<string | null>(null);
 
   async function assign() {
     if (!athleteId || !template || saving) return;
     setSaving(true);
     setError("");
     try {
+      const assignmentId = assignmentIdRef.current ?? crypto.randomUUID();
+      assignmentIdRef.current = assignmentId;
       const response = await fetch("/api/workout-assignments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ athleteUserId: athleteId, templateId: template.id, scheduledFor, trainerNote }),
+        body: JSON.stringify({ assignmentId, athleteUserId: athleteId, templateId: template.id, scheduledFor, trainerNote, transitionContext }),
       });
-      if (!response.ok) throw new Error("assignment_failed");
+      const body = await response.json().catch(() => ({})) as { transition?: TrainerWorkflowTransition; error?: string };
+      if (!response.ok || !body.transition) throw new Error(body.error || "assignment_failed");
+      assignmentIdRef.current = null;
       onAssigned(template.title);
       onOpenChange(false);
+      router.push(body.transition.returnHref);
+      router.refresh();
     } catch {
       setError("Не удалось назначить тренировку. Проверьте связь со спортсменом и повторите попытку.");
     } finally {

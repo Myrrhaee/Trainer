@@ -40,6 +40,32 @@ This is an operator transport fallback only. It does not change the PostgreSQL s
 
 The runner applies `*.up.sql` files in lexical order, records a SHA-256 checksum and rejects a changed migration that was already applied. Each migration uses a fresh connection, switches locally to `ai_strength_migrator`, serializes through a transaction-scoped lock on the checksum table and sends PostgreSQL-aware individual statements inside one transaction. This keeps dollar-quoted functions intact while remaining compatible with transaction poolers; a managed-database connection loss releases the lock for a safe retry. Rollback removes only the latest applied migration through its matching `*.down.sql` file.
 
+Before applying migrations, the runner checks ownership of application schemas, relations, sequences, routines, enum/domain types and migration metadata. It reports each incompatible object, its current owner, the expected migration owner, and the available local reset/recovery commands instead of failing later inside a product migration.
+
+## Local setup, reset and legacy recovery
+
+The normal local command is non-destructive and repeatable:
+
+```bash
+npm run local:setup
+```
+
+An explicit clean reset is available only for a local host and local-named database, and requires a confirmation flag:
+
+```bash
+node --env-file=.env.development.local scripts/local/reset-database.mjs --confirm-reset
+```
+
+If old local data must be preserved, inspect ownership first and create a backup before applying recovery:
+
+```bash
+node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs --dry-run --target-owner ai_strength_migrator
+node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs --apply --target-owner ai_strength_migrator
+node --env-file=.env.development.local scripts/db/migrate.mjs
+```
+
+The recovery command is not a product migration. It refuses staging/production-like environments and database names, requires an explicit mode and target owner, and does not modify application rows. Full instructions, backup guidance and the disposable `0011 -> 0012` verification are documented in `docs/local-database-recovery-v1.md`.
+
 ## Runtime Environment
 
 All values are server-only. None may use a `NEXT_PUBLIC_` prefix.

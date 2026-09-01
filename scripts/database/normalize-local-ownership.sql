@@ -1,20 +1,27 @@
--- Local recovery only. This is not a product migration and must never run in
--- staging or production. It changes ownership and default privileges only.
+-- Local recovery only. The runner supplies the target owner through a
+-- transaction-local setting after validating the environment and role.
 
 DO $guard$
+DECLARE
+  target_owner text := nullif(current_setting('ai_strength.ownership_target', true), '');
 BEGIN
   IF current_database() !~ '(^|_)(local|dev|development|test|backend|upgrade)(_|$)' THEN
     RAISE EXCEPTION 'ownership normalization is restricted to local/test databases';
   END IF;
 
-  IF NOT pg_has_role(current_user, 'ai_strength_migrator', 'MEMBER') THEN
-    RAISE EXCEPTION 'current role must be able to SET ROLE ai_strength_migrator';
+  IF target_owner IS NULL THEN
+    RAISE EXCEPTION 'ownership target is required';
+  END IF;
+
+  IF NOT pg_has_role(current_user, target_owner, 'MEMBER') THEN
+    RAISE EXCEPTION 'current role cannot set requested target owner';
   END IF;
 END
 $guard$;
 
 DO $relations$
 DECLARE
+  target_owner text := current_setting('ai_strength.ownership_target');
   object_record record;
   command text;
 BEGIN
@@ -30,7 +37,7 @@ BEGIN
       OR relation.oid = to_regclass('public.app_schema_migrations')
     )
       AND relation.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
-      AND pg_get_userbyid(relation.relowner) <> 'ai_strength_migrator'
+      AND pg_get_userbyid(relation.relowner) <> target_owner
     ORDER BY namespace.nspname, relation.relkind, relation.relname
   LOOP
     command := CASE object_record.relkind
@@ -42,10 +49,11 @@ BEGIN
     END;
 
     EXECUTE format(
-      '%s %I.%I OWNER TO ai_strength_migrator',
+      '%s %I.%I OWNER TO %I',
       command,
       object_record.schema_name,
-      object_record.object_name
+      object_record.object_name,
+      target_owner
     );
   END LOOP;
 END
@@ -53,6 +61,7 @@ $relations$;
 
 DO $routines$
 DECLARE
+  target_owner text := current_setting('ai_strength.ownership_target');
   routine_record record;
   command text;
 BEGIN
@@ -65,7 +74,7 @@ BEGIN
     FROM pg_proc routine
     JOIN pg_namespace namespace ON namespace.oid = routine.pronamespace
     WHERE namespace.nspname IN ('app', 'app_private')
-      AND pg_get_userbyid(routine.proowner) <> 'ai_strength_migrator'
+      AND pg_get_userbyid(routine.proowner) <> target_owner
     ORDER BY namespace.nspname, routine.proname, identity_arguments
   LOOP
     command := CASE routine_record.prokind
@@ -75,11 +84,12 @@ BEGIN
     END;
 
     EXECUTE format(
-      '%s %I.%I(%s) OWNER TO ai_strength_migrator',
+      '%s %I.%I(%s) OWNER TO %I',
       command,
       routine_record.schema_name,
       routine_record.routine_name,
-      routine_record.identity_arguments
+      routine_record.identity_arguments,
+      target_owner
     );
   END LOOP;
 END
@@ -87,6 +97,7 @@ $routines$;
 
 DO $types$
 DECLARE
+  target_owner text := current_setting('ai_strength.ownership_target');
   type_record record;
 BEGIN
   FOR type_record IN
@@ -95,13 +106,14 @@ BEGIN
     JOIN pg_namespace namespace ON namespace.oid = type_definition.typnamespace
     WHERE namespace.nspname IN ('app', 'app_private')
       AND type_definition.typtype IN ('d', 'e')
-      AND pg_get_userbyid(type_definition.typowner) <> 'ai_strength_migrator'
+      AND pg_get_userbyid(type_definition.typowner) <> target_owner
     ORDER BY namespace.nspname, type_definition.typname
   LOOP
     EXECUTE format(
-      'ALTER TYPE %I.%I OWNER TO ai_strength_migrator',
+      'ALTER TYPE %I.%I OWNER TO %I',
       type_record.schema_name,
-      type_record.type_name
+      type_record.type_name,
+      target_owner
     );
   END LOOP;
 END
@@ -109,36 +121,41 @@ $types$;
 
 DO $schemas$
 DECLARE
+  target_owner text := current_setting('ai_strength.ownership_target');
   schema_record record;
 BEGIN
   FOR schema_record IN
     SELECT nspname
     FROM pg_namespace
     WHERE nspname IN ('app', 'app_private')
-      AND pg_get_userbyid(nspowner) <> 'ai_strength_migrator'
+      AND pg_get_userbyid(nspowner) <> target_owner
   LOOP
     EXECUTE format(
-      'ALTER SCHEMA %I OWNER TO ai_strength_migrator',
-      schema_record.nspname
+      'ALTER SCHEMA %I OWNER TO %I',
+      schema_record.nspname,
+      target_owner
     );
   END LOOP;
 END
 $schemas$;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app
-  REVOKE ALL ON TABLES FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app
-  REVOKE ALL ON SEQUENCES FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app
-  REVOKE ALL ON FUNCTIONS FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app
-  REVOKE ALL ON TYPES FROM PUBLIC;
-
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app_private
-  REVOKE ALL ON TABLES FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app_private
-  REVOKE ALL ON SEQUENCES FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app_private
-  REVOKE ALL ON FUNCTIONS FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE ai_strength_migrator IN SCHEMA app_private
-  REVOKE ALL ON TYPES FROM PUBLIC;
+DO $default_privileges$
+DECLARE
+  target_owner text := current_setting('ai_strength.ownership_target');
+  schema_name text;
+  object_kind text;
+BEGIN
+  FOREACH schema_name IN ARRAY ARRAY['app', 'app_private']
+  LOOP
+    FOREACH object_kind IN ARRAY ARRAY['TABLES', 'SEQUENCES', 'FUNCTIONS', 'TYPES']
+    LOOP
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON %s FROM PUBLIC',
+        target_owner,
+        schema_name,
+        object_kind
+      );
+    END LOOP;
+  END LOOP;
+END
+$default_privileges$;

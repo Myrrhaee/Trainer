@@ -1,5 +1,6 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
 import type { Actor } from "@/lib/server/database/actor-context";
@@ -7,13 +8,45 @@ import { setTransactionActor, withActorTransaction } from "@/lib/server/database
 import { getDatabasePool } from "@/lib/server/database/pool";
 import { withDatabaseTransaction } from "@/lib/server/database/transaction";
 import { enqueueNotification } from "@/lib/server/notifications/notification-outbox";
+import {
+  assignmentStateTokensEqual,
+  projectAssignmentStateToken,
+} from "@/lib/server/quick-assign/assignment-state-token";
+import type { QuickAssignUpcomingAssignment } from "@/lib/server/quick-assign/quick-assign-types";
 import type {
+  CreateWorkoutAssignmentInput,
   CreateWorkoutTemplateInput,
   TrainerAthlete,
   WorkoutAssignment,
   WorkoutExerciseInput,
   WorkoutTemplate,
 } from "@/lib/server/workouts/workout-types";
+
+export type WorkoutAssignmentCommandErrorCode =
+  | "template_revision_stale"
+  | "template_unavailable"
+  | "template_not_found"
+  | "assignment_state_changed"
+  | "assignment_duplicate"
+  | "same_date_confirmation_required"
+  | "athlete_relation_changed"
+  | "assignment_forbidden"
+  | "assignment_idempotency_conflict";
+
+export class WorkoutAssignmentCommandError extends Error {
+  constructor(
+    public readonly commandCode: WorkoutAssignmentCommandErrorCode,
+    public readonly existingAssignmentId?: string,
+  ) {
+    super(commandCode);
+  }
+}
+
+export class WorkoutAssignmentIdempotencyConflictError extends WorkoutAssignmentCommandError {
+  constructor() {
+    super("assignment_idempotency_conflict");
+  }
+}
 
 interface AthleteRow {
   relation_id: string;
@@ -53,6 +86,7 @@ interface AssignmentRow {
   scheduled_for: string | Date;
   status: "available" | "cancelled";
   source_template_id: string;
+  source_revision_id: string;
   revision_number: number;
   exercises: TemplateRow["exercises"];
   created_at: Date;
@@ -92,9 +126,11 @@ function mapTemplate(row: TemplateRow): WorkoutTemplate {
 function mapAssignment(row: AssignmentRow): WorkoutAssignment {
   return {
     id: row.id,
+    assignmentId: row.id,
     athleteUserId: row.athlete_user_id,
     trainerUserId: row.trainer_user_id,
     title: row.title_snapshot,
+    titleSnapshot: row.title_snapshot,
     trainerNote: row.trainer_note,
     generalInstruction: row.instruction_snapshot,
     scheduledFor: row.scheduled_for instanceof Date
@@ -102,7 +138,9 @@ function mapAssignment(row: AssignmentRow): WorkoutAssignment {
       : row.scheduled_for.slice(0, 10),
     status: row.status,
     sourceTemplateId: row.source_template_id,
+    sourceRevisionId: row.source_revision_id,
     sourceRevision: row.revision_number,
+    sourceRevisionNumber: row.revision_number,
     exercises: mapExercises(row.exercises),
     createdAt: row.created_at.toISOString(),
   };
@@ -213,37 +251,119 @@ export class PostgresWorkoutRepository {
 
   async createAssignment(
     actor: Actor,
-    input: { athleteUserId: string; templateId: string; scheduledFor: string; trainerNote: string },
+    input: CreateWorkoutAssignmentInput,
   ) {
     return withDatabaseTransaction(this.pool, async (client) => {
       await setTransactionActor(client, actor);
-      const relation = await client.query<{ id: string }>(
-        `SELECT id FROM app.trainer_athlete_relations
-         WHERE trainer_user_id = $1 AND athlete_user_id = $2 AND status = 'active'
+      const assignmentId = input.assignmentId ?? randomUUID();
+      const existing = await this.findAssignment(client, assignmentId);
+      if (existing) {
+        assertAssignmentReplay(existing, actor.userId, input);
+        return existing;
+      }
+      const strictR2C = Boolean(input.templateRevisionId && input.assignmentStateToken);
+      const relation = await client.query<{ id: string; status: "active" | "suspended" }>(
+        `SELECT id, status::text
+         FROM app.trainer_athlete_relations
+         WHERE trainer_user_id = $1
+           AND athlete_user_id = $2
+           AND status IN ('active', 'suspended')
+         ORDER BY (status = 'active') DESC, accepted_at DESC, id DESC
+         LIMIT 1
          FOR UPDATE`,
         [actor.userId, input.athleteUserId],
       );
-      if (!relation.rowCount) return null;
+      if (!relation.rowCount) {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("assignment_forbidden");
+        return null;
+      }
+      if (relation.rows[0].status !== "active") {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("athlete_relation_changed");
+        return null;
+      }
 
-      const template = await client.query<{
+      const upcoming = await this.findUpcomingAssignments(
+        client,
+        actor.userId,
+        input.athleteUserId,
+        relation.rows[0].id,
+      );
+      const currentStateToken = projectAssignmentStateToken({
+        trainerUserId: actor.userId,
+        athleteUserId: input.athleteUserId,
+        relationId: relation.rows[0].id,
+        assignments: upcoming,
+      });
+      if (input.assignmentStateToken
+        && !assignmentStateTokensEqual(input.assignmentStateToken, currentStateToken)) {
+        throw new WorkoutAssignmentCommandError("assignment_state_changed");
+      }
+
+      const templateHead = await client.query<{
         id: string;
-        revision_id: string;
-        revision_number: number;
-        title: string;
-        general_instruction: string;
+        status: "draft" | "published" | "archived";
+        current_revision: number;
       }>(
-        `SELECT template.id, revision.id AS revision_id, revision.revision_number,
-                revision.title, revision.general_instruction
-         FROM app.workout_templates template
-         JOIN app.workout_template_revisions revision
-           ON revision.template_id = template.id
-          AND revision.revision_number = template.current_revision
-         WHERE template.id = $1
-           AND template.trainer_user_id = $2
-           AND template.status = 'published'`,
+        `SELECT id, status::text, current_revision
+         FROM app.workout_templates
+         WHERE id = $1 AND trainer_user_id = $2
+         FOR UPDATE`,
         [input.templateId, actor.userId],
       );
-      if (!template.rowCount) return null;
+      if (!templateHead.rowCount) {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("template_not_found");
+        return null;
+      }
+
+      const revisionResult = input.templateRevisionId
+        ? await client.query<{
+            revision_id: string;
+            revision_number: number;
+            revision_status: "draft" | "published";
+            title: string;
+            general_instruction: string;
+          }>(
+            `SELECT id AS revision_id, revision_number, status::text AS revision_status,
+                    title, general_instruction
+             FROM app.workout_template_revisions
+             WHERE id = $1 AND template_id = $2`,
+            [input.templateRevisionId, input.templateId],
+          )
+        : await client.query<{
+            revision_id: string;
+            revision_number: number;
+            revision_status: "draft" | "published";
+            title: string;
+            general_instruction: string;
+          }>(
+            `SELECT id AS revision_id, revision_number, status::text AS revision_status,
+                    title, general_instruction
+             FROM app.workout_template_revisions
+             WHERE template_id = $1 AND revision_number = $2`,
+            [input.templateId, templateHead.rows[0].current_revision],
+          );
+      if (!revisionResult.rowCount) {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("template_not_found");
+        return null;
+      }
+      const template = {
+        id: templateHead.rows[0].id,
+        status: templateHead.rows[0].status,
+        currentRevision: templateHead.rows[0].current_revision,
+        ...revisionResult.rows[0],
+      };
+      if (template.status === "archived") {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("template_unavailable");
+        return null;
+      }
+      if (template.revision_number !== template.currentRevision) {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("template_revision_stale");
+        return null;
+      }
+      if (template.status !== "published" || template.revision_status !== "published") {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("template_unavailable");
+        return null;
+      }
 
       const exercises = await client.query<{
         id: string;
@@ -271,30 +391,53 @@ export class PostgresWorkoutRepository {
       }>(
         `SELECT * FROM app.workout_template_exercises
          WHERE revision_id = $1 ORDER BY position`,
-        [template.rows[0].revision_id],
+        [template.revision_id],
       );
-      if (!exercises.rowCount) return null;
+      if (!exercises.rowCount) {
+        if (strictR2C) throw new WorkoutAssignmentCommandError("template_unavailable");
+        return null;
+      }
+
+      const duplicate = upcoming.find((item) => (
+        item.sourceRevisionId === template.revision_id
+        && item.scheduledFor === input.scheduledFor
+      ));
+      if (duplicate) {
+        throw new WorkoutAssignmentCommandError("assignment_duplicate", duplicate.assignmentId);
+      }
+      const sameDate = upcoming.find((item) => item.scheduledFor === input.scheduledFor);
+      if (sameDate && !input.allowAdditionalAssignment) {
+        throw new WorkoutAssignmentCommandError("same_date_confirmation_required", sameDate.assignmentId);
+      }
 
       const assignment = await client.query<{ id: string }>(
         `INSERT INTO app.workout_assignments (
-           relation_id, trainer_user_id, athlete_user_id,
+           id, relation_id, trainer_user_id, athlete_user_id,
            source_template_id, source_revision_id, source_revision_number,
            title_snapshot, instruction_snapshot, trainer_note, scheduled_for
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (id) DO NOTHING
          RETURNING id`,
         [
+          assignmentId,
           relation.rows[0].id,
           actor.userId,
           input.athleteUserId,
-          template.rows[0].id,
-          template.rows[0].revision_id,
-          template.rows[0].revision_number,
-          template.rows[0].title,
-          template.rows[0].general_instruction,
+          template.id,
+          template.revision_id,
+          template.revision_number,
+          template.title,
+          template.general_instruction,
           input.trainerNote,
           input.scheduledFor,
         ],
       );
+      if (!assignment.rowCount) {
+        const replay = await this.findAssignment(client, assignmentId);
+        if (!replay) throw new WorkoutAssignmentIdempotencyConflictError();
+        assertAssignmentReplay(replay, actor.userId, input);
+        return replay;
+      }
       for (const exercise of exercises.rows) {
         const assignmentExercise = await client.query<{ id: string }>(
           `INSERT INTO app.workout_assignment_exercises (
@@ -356,8 +499,8 @@ export class PostgresWorkoutRepository {
           actor.userId,
           input.athleteUserId,
           assignment.rows[0].id,
-          template.rows[0].id,
-          template.rows[0].revision_number,
+          template.id,
+          template.revision_number,
         ],
       );
       await enqueueNotification(client, {
@@ -382,6 +525,46 @@ export class PostgresWorkoutRepository {
       );
       return result.rows.map(mapAssignment);
     }, this.pool);
+  }
+
+  findTrainerAssignment(actor: Actor, assignmentId: string) {
+    return withActorTransaction(actor, (client) => this.findAssignment(client, assignmentId), this.pool);
+  }
+
+  private async findUpcomingAssignments(
+    client: PoolClient,
+    trainerUserId: string,
+    athleteUserId: string,
+    relationId: string,
+  ): Promise<QuickAssignUpcomingAssignment[]> {
+    const result = await client.query<{
+      assignment_id: string;
+      source_revision_id: string;
+      title_snapshot: string;
+      scheduled_for: string;
+      created_at: Date;
+    }>(`
+      SELECT assignment.id AS assignment_id,
+             assignment.source_revision_id,
+             assignment.title_snapshot,
+             assignment.scheduled_for::text AS scheduled_for,
+             assignment.created_at
+      FROM app.workout_assignments assignment
+      LEFT JOIN app.workout_sessions session ON session.assignment_id = assignment.id
+      WHERE assignment.relation_id = $3
+        AND assignment.trainer_user_id = $1
+        AND assignment.athlete_user_id = $2
+        AND assignment.status = 'available'
+        AND session.id IS NULL
+      ORDER BY assignment.scheduled_for ASC, assignment.created_at ASC, assignment.id ASC
+    `, [trainerUserId, athleteUserId, relationId]);
+    return result.rows.map((row) => ({
+      assignmentId: row.assignment_id,
+      sourceRevisionId: row.source_revision_id,
+      title: row.title_snapshot,
+      scheduledFor: row.scheduled_for.slice(0, 10),
+      createdAt: row.created_at.toISOString(),
+    }));
   }
 
   private async insertTemplateExercises(
@@ -417,6 +600,7 @@ export class PostgresWorkoutRepository {
                    assignment.title_snapshot, assignment.trainer_note,
                    assignment.instruction_snapshot, assignment.scheduled_for::text AS scheduled_for,
                    assignment.status::text, assignment.source_template_id,
+                   assignment.source_revision_id,
                    assignment.source_revision_number AS revision_number, assignment.created_at,
                    coalesce(jsonb_agg(
                      jsonb_build_object(
@@ -441,5 +625,20 @@ export class PostgresWorkoutRepository {
       [assignmentId],
     );
     return result.rowCount ? mapAssignment(result.rows[0]) : null;
+  }
+}
+
+function assertAssignmentReplay(
+  assignment: WorkoutAssignment,
+  trainerUserId: string,
+  input: CreateWorkoutAssignmentInput,
+) {
+  if (assignment.trainerUserId !== trainerUserId
+    || assignment.athleteUserId !== input.athleteUserId
+    || assignment.sourceTemplateId !== input.templateId
+    || (input.templateRevisionId !== undefined && assignment.sourceRevisionId !== input.templateRevisionId)
+    || assignment.scheduledFor !== input.scheduledFor
+    || assignment.trainerNote !== input.trainerNote) {
+    throw new WorkoutAssignmentIdempotencyConflictError();
   }
 }

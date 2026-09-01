@@ -2,10 +2,10 @@
 
 import { useEffect } from "react";
 
-export function AthleteProfileScrollReset() {
+export function AthleteProfileScrollReset({ preservePosition = false }: { preservePosition?: boolean }) {
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }, []);
+    if (!preservePosition) window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [preservePosition]);
 
   return null;
 }

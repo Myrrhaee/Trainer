@@ -3,6 +3,7 @@ import type {
   AthleteProfileCurrentState,
   AthleteProfileSnapshot,
 } from "@/lib/server/athlete-profile/athlete-profile-types";
+import { createTrainerWorkflowContext, trainerWorkflowHref } from "@/lib/trainer-workflow-transition";
 
 export class AthleteCapabilitiesService {
   primaryAction(
@@ -13,25 +14,32 @@ export class AthleteCapabilitiesService {
 
     const profileHref = `/trainer/clients/${snapshot.athleteUserId}?tab=overview`;
     if ((state.kind === "discomfort" || state.kind === "review_required") && state.sessionId) {
-      const params = new URLSearchParams({ from: "profile", returnTo: profileHref });
-      if (state.attentionItemId) params.set("attentionItem", state.attentionItemId);
+      const context = createTrainerWorkflowContext({
+        origin: "profile",
+        athleteUserId: snapshot.athleteUserId,
+        sourceAttentionItemId: state.attentionItemId ?? undefined,
+        sourceSessionId: state.sessionId,
+        returnTo: profileHref,
+        returnAnchor: "latest-feedback",
+      });
       return {
         kind: "review",
         label: "Разобрать тренировку",
-        href: `/trainer/review/${state.sessionId}?${params.toString()}`,
+        href: trainerWorkflowHref(`/trainer/review/${state.sessionId}`, context),
       };
     }
 
     if (state.kind === "no_next_assignment") {
-      const params = new URLSearchParams({
-        athleteId: snapshot.athleteUserId,
-        from: "quick-assign",
+      const context = createTrainerWorkflowContext({
+        origin: "profile",
+        athleteUserId: snapshot.athleteUserId,
         returnTo: profileHref,
+        returnAnchor: "next-assignment",
       });
       return {
         kind: "assign",
         label: "Назначить тренировку",
-        href: `/trainer/builder?${params.toString()}`,
+        href: trainerWorkflowHref(`/trainer/clients/${snapshot.athleteUserId}?tab=training&assign=1`, context),
       };
     }
 

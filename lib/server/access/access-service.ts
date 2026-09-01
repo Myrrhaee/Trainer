@@ -63,4 +63,14 @@ export class AccessService {
     }
     return this.repository.hasActiveAthleteRelation(actor, athleteUserId);
   }
+
+  hasCurrentAthleteRelation(actor: Actor, athleteUserId: unknown) {
+    if (
+      typeof athleteUserId !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(athleteUserId)
+    ) {
+      return Promise.resolve(false);
+    }
+    return this.repository.hasCurrentAthleteRelation(actor, athleteUserId);
+  }
 }

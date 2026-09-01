@@ -3,9 +3,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import type { Actor } from "@/lib/server/database/actor-context";
-import { WorkoutSessionRepository } from "@/lib/server/workout-sessions/workout-session-repository";
 import { ReviewRepository } from "./review-repository";
-import type { ReviewFeedbackKind, TrainerReviewDetails } from "./review-types";
+import type { ReviewFeedbackKind, ReviewReadModel } from "./review-types";
 
 export class ReviewValidationError extends Error {}
 
@@ -50,59 +49,16 @@ function feedbackKind(value: unknown): ReviewFeedbackKind {
 }
 
 export class ReviewService {
-  constructor(
-    private readonly repository = new ReviewRepository(),
-    private readonly sessions = new WorkoutSessionRepository(),
-  ) {}
+  constructor(private readonly repository = new ReviewRepository()) {}
 
   listQueue(actor: Actor) {
     return this.repository.listQueue(actor);
   }
 
-  async findReview(actor: Actor, sessionIdValue: unknown): Promise<TrainerReviewDetails | null> {
+  async findReview(actor: Actor, sessionIdValue: unknown): Promise<ReviewReadModel | null> {
     const sessionId = uuid(sessionIdValue);
-    const [source, session, feedback] = await Promise.all([
-      this.repository.findSource(actor, sessionId),
-      this.sessions.find(actor, sessionId),
-      this.repository.listSessionFeedback(actor, sessionId),
-    ]);
-    if (!source || !session || !session.completedAt || session.status === "active" || session.status === "abandoned") return null;
-    const displayName = source.athlete_display_name?.trim() || `Спортсмен ${source.athlete_user_id.slice(0, 6)}`;
-    return {
-      attention: {
-        id: source.attention_item_id,
-        status: source.attention_status,
-        createdAt: source.attention_created_at.toISOString(),
-        resolvedAt: source.attention_resolved_at?.toISOString() ?? null,
-        priorityReasons: source.priority_reasons,
-        manualResolutionReason: source.manual_resolution_reason,
-      },
-      session: {
-        id: session.id,
-        assignmentId: session.assignmentId,
-        title: session.title,
-        status: session.status,
-        startedAt: session.startedAt,
-        completedAt: session.completedAt,
-        durationMin: Math.max(0, Math.round((Date.parse(session.completedAt) - Date.parse(session.startedAt)) / 60_000)),
-      },
-      athlete: { id: source.athlete_user_id, displayName, initials: initials(displayName) },
-      assignment: {
-        id: source.assignment_id,
-        scheduledFor: source.scheduled_for instanceof Date
-          ? source.scheduled_for.toISOString().slice(0, 10)
-          : source.scheduled_for.slice(0, 10),
-      },
-      exercises: session.exercises.map((exercise) => ({
-        id: exercise.id,
-        title: exercise.title,
-        position: exercise.position,
-        status: exercise.status,
-        athleteNote: exercise.athleteNote,
-        sets: exercise.sets.map((set) => ({ ...set, position: set.position })),
-      })),
-      feedback,
-    };
+    const review = await this.repository.findReview(actor, sessionId);
+    return review?.capabilities.canRead ? review : null;
   }
 
   listAthleteFeedback(actor: Actor, sessionIdValue?: unknown) {
@@ -141,8 +97,4 @@ export class ReviewService {
       requestHash: requestHash(request),
     });
   }
-}
-
-function initials(name: string) {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "С";
 }

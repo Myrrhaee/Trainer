@@ -39,15 +39,30 @@ export type TrainerAthlete = {
 
 export type WorkoutAssignment = {
   id: string;
+  assignmentId: string;
   athleteUserId: string;
   trainerUserId: string;
   title: string;
+  titleSnapshot: string;
   trainerNote: string;
   generalInstruction: string;
   scheduledFor: string;
   status: "available" | "cancelled";
   sourceTemplateId: string;
+  sourceRevisionId: string;
   sourceRevision: number;
+  sourceRevisionNumber: number;
   exercises: WorkoutExerciseInput[];
   createdAt: string;
+};
+
+export type CreateWorkoutAssignmentInput = {
+  assignmentId?: string;
+  athleteUserId: string;
+  templateId: string;
+  templateRevisionId?: string;
+  scheduledFor: string;
+  trainerNote: string;
+  assignmentStateToken?: string;
+  allowAdditionalAssignment?: boolean;
 };

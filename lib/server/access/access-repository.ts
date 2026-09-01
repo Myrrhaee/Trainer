@@ -223,4 +223,17 @@ export class PostgresAccessRepository {
       return Boolean(result.rowCount);
     }, this.pool);
   }
+
+  async hasCurrentAthleteRelation(actor: Actor, athleteUserId: string) {
+    return withActorTransaction(actor, async (client) => {
+      const result = await client.query(
+        `SELECT id FROM app.trainer_athlete_relations
+         WHERE trainer_user_id = $1
+           AND athlete_user_id = $2
+           AND status IN ('active', 'suspended')`,
+        [actor.userId, athleteUserId],
+      );
+      return Boolean(result.rowCount);
+    }, this.pool);
+  }
 }

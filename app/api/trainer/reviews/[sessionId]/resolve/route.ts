@@ -8,6 +8,9 @@ import {
   ReviewIdempotencyConflictError,
 } from "@/lib/server/reviews/review-repository";
 import { ReviewService, ReviewValidationError } from "@/lib/server/reviews/review-service";
+import { revalidateTrainerWorkflow } from "@/lib/server/trainer-workflow/revalidation";
+import { TrainerWorkflowTransitionService } from "@/lib/server/trainer-workflow/trainer-workflow-transition-service";
+import { decodeTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
 
 export const runtime = "nodejs";
 
@@ -22,10 +25,25 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const { sessionId } = await context.params;
-    const resolution = await new ReviewService().resolveManually(actor, sessionId, body);
-    return resolution
-      ? NextResponse.json({ resolution }, { status: 201 })
-      : NextResponse.json({ error: "review_not_found" }, { status: 404 });
+    const service = new ReviewService();
+    const resolution = await service.resolveManually(actor, sessionId, body);
+    if (!resolution) return NextResponse.json({ error: "review_not_found" }, { status: 404 });
+    const review = await service.findReview(actor, sessionId);
+    if (!review) return NextResponse.json({ error: "review_not_found" }, { status: 404 });
+    const transition = await new TrainerWorkflowTransitionService().forReview(
+      actor,
+      review,
+      decodeTrainerWorkflowContext(body.transitionContext),
+      {
+        kind: "manual_resolution",
+        entityId: resolution.id,
+        title: "Разбор закрыт без сообщения",
+        detail: resolution.reason,
+        resolutionState: "resolved",
+      },
+    );
+    transition.refreshWarning = revalidateTrainerWorkflow(review.athlete.id) ?? undefined;
+    return NextResponse.json({ resolution, transition }, { status: 201 });
   } catch (error) {
     if (error instanceof ReviewValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });

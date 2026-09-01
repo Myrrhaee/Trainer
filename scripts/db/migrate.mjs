@@ -12,6 +12,7 @@ import { splitPostgresStatements } from "./sql-statements.mjs";
 
 const maxAttempts = 3;
 const statementsPerBatch = 8;
+const expectedMigrationOwner = "ai_strength_migrator";
 const transientCodes = new Set([
   "57P01",
   "08001",
@@ -66,6 +67,92 @@ async function inLockedTransaction(
     }
   });
 }
+
+async function assertMigrationOwnership() {
+  const drift = await withMigrationClient(async (client) => client.query(`
+    SELECT object_kind, object_identity, current_owner
+    FROM (
+      SELECT
+        'schema'::text AS object_kind,
+        quote_ident(namespace.nspname) AS object_identity,
+        pg_get_userbyid(namespace.nspowner) AS current_owner
+      FROM pg_namespace namespace
+      WHERE namespace.nspname IN ('app', 'app_private')
+        AND pg_get_userbyid(namespace.nspowner) <> $1
+
+      UNION ALL
+
+      SELECT
+        CASE relation.relkind
+          WHEN 'S' THEN 'sequence'
+          WHEN 'v' THEN 'view'
+          WHEN 'm' THEN 'materialized_view'
+          WHEN 'f' THEN 'foreign_table'
+          ELSE 'table'
+        END,
+        format('%I.%I', namespace.nspname, relation.relname),
+        pg_get_userbyid(relation.relowner)
+      FROM pg_class relation
+      JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      WHERE (
+        namespace.nspname IN ('app', 'app_private')
+        OR relation.oid = to_regclass('public.app_schema_migrations')
+      )
+        AND relation.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+        AND pg_get_userbyid(relation.relowner) <> $1
+
+      UNION ALL
+
+      SELECT
+        CASE routine.prokind WHEN 'p' THEN 'procedure' WHEN 'a' THEN 'aggregate' ELSE 'function' END,
+        format('%I.%I(%s)', namespace.nspname, routine.proname, pg_get_function_identity_arguments(routine.oid)),
+        pg_get_userbyid(routine.proowner)
+      FROM pg_proc routine
+      JOIN pg_namespace namespace ON namespace.oid = routine.pronamespace
+      WHERE namespace.nspname IN ('app', 'app_private')
+        AND pg_get_userbyid(routine.proowner) <> $1
+
+      UNION ALL
+
+      SELECT
+        CASE type_definition.typtype WHEN 'd' THEN 'domain' ELSE 'enum' END,
+        format('%I.%I', namespace.nspname, type_definition.typname),
+        pg_get_userbyid(type_definition.typowner)
+      FROM pg_type type_definition
+      JOIN pg_namespace namespace ON namespace.oid = type_definition.typnamespace
+      WHERE namespace.nspname IN ('app', 'app_private')
+        AND type_definition.typtype IN ('d', 'e')
+        AND pg_get_userbyid(type_definition.typowner) <> $1
+    ) ownership_drift
+    ORDER BY
+      CASE object_kind
+        WHEN 'table' THEN 0
+        WHEN 'sequence' THEN 1
+        WHEN 'schema' THEN 2
+        WHEN 'function' THEN 3
+        WHEN 'procedure' THEN 4
+        ELSE 5
+      END,
+      object_identity
+  `, [expectedMigrationOwner]));
+
+  if (!drift.rowCount) return;
+
+  const details = drift.rows
+    .slice(0, 30)
+    .map((row) => `- ${row.object_kind} ${row.object_identity}: ${row.current_owner}`)
+    .join("\n");
+  const omitted = drift.rowCount > 30 ? `\n- ... ${drift.rowCount - 30} more object(s)` : "";
+  throw new Error([
+    `Migration ownership preflight failed: ${drift.rowCount} object(s) are not owned by ${expectedMigrationOwner}.`,
+    details + omitted,
+    "Local clean reset: node --env-file=.env.development.local scripts/local/reset-database.mjs --confirm-reset",
+    `Local preserve-data inspection: node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs --dry-run --target-owner ${expectedMigrationOwner}`,
+    `Local preserve-data recovery: node --env-file=.env.development.local scripts/database/normalize-local-ownership.mjs --apply --target-owner ${expectedMigrationOwner}`,
+  ].join("\n"));
+}
+
+await assertMigrationOwnership();
 
 await withRetry("migration table setup", () => (
   inLockedTransaction(async (client) => {
