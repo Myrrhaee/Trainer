@@ -40,6 +40,7 @@ import {
   readQuickAssignBuilderHandoff,
 } from "@/components/trainer/quick-assign/quick-assign-handoff";
 import { createTrainerWorkflowContext, encodeTrainerWorkflowContext } from "@/lib/trainer-workflow-transition";
+import { safeTemplateWorkspaceReturnPath, templateWorkspaceReturnWithAnchor } from "@/lib/template-workspace-navigation";
 import {
   archiveCanonicalBuilderTemplate,
   createCanonicalBuilderRevision,
@@ -66,13 +67,17 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     [entry.emptyWorkspace, runtime.state]
   );
   const [canonicalTemplates, setCanonicalTemplates] = useState<WorkoutTemplateDraft[]>([]);
-  const [canonicalLoading, setCanonicalLoading] = useState(!demoMode);
+  const [canonicalLoading, setCanonicalLoading] = useState(!demoMode && !entry.createNew);
   const templates = demoMode ? demoTemplates : canonicalTemplates;
   const initialRequestedTemplate = entry.templateId ? templates.find((template) => template.id === entry.templateId) : undefined;
-  const [view, setView] = useState<BuilderView>(() => entry.templateId ? (initialRequestedTemplate ? "editor" : "unknown") : "templates");
+  const initialBlankTemplate = useMemo(
+    () => entry.createNew ? { ...createBlankTemplate(), category: entry.initialGoal ?? "" } : null,
+    [entry.createNew, entry.initialGoal],
+  );
+  const [view, setView] = useState<BuilderView>(() => entry.createNew ? "editor" : entry.templateId ? (initialRequestedTemplate ? "editor" : "unknown") : "templates");
   const [draft, setDraft] = useState<WorkoutTemplateDraft | null>(() => {
     if (initialRequestedTemplate) return initialRequestedTemplate;
-    return null;
+    return initialBlankTemplate;
   });
   const [baseline, setBaseline] = useState(() => initialRequestedTemplate ? JSON.stringify(initialRequestedTemplate) : "");
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(() => draft ? getTemplateExercises(draft)[0]?.instanceId ?? null : null);
@@ -88,10 +93,13 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   const [recoveryChecked, setRecoveryChecked] = useState(false);
   const [handoffChecked, setHandoffChecked] = useState(false);
   const commandInFlightRef = useRef(false);
+  const lastSavedTemplateIdRef = useRef<string | null>(entry.templateId ?? null);
   const libraryExercises = useMemo(() => getDemoLibraryExercises(), []);
   const dirty = Boolean(draft && JSON.stringify(draft) !== baseline);
   const validation = useMemo(() => draft ? validateTemplate(draft) : { errors: [], warnings: [], canPublish: false }, [draft]);
   const assignableTemplate = useMemo(() => draft ? toQuickAssignTemplate(draft) : undefined, [draft]);
+  const workspaceReturn = safeTemplateWorkspaceReturnPath(entry.returnTo);
+  const resolvedWorkspaceReturn = templateWorkspaceReturnWithAnchor(workspaceReturn, lastSavedTemplateIdRef.current);
 
   function upsertCanonical(template: WorkoutTemplateDraft) {
     setCanonicalTemplates((current) => [template, ...current.filter((item) => item.id !== template.id)]);
@@ -250,6 +258,10 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
       setUnsavedOpen(true);
       return;
     }
+    if (resolvedWorkspaceReturn) {
+      router.push(resolvedWorkspaceReturn);
+      return;
+    }
     setView("templates");
     setDraft(null);
     setSelectedExerciseId(null);
@@ -258,6 +270,10 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   function leaveWithoutSaving() {
     clearBuilderDraft();
     setUnsavedOpen(false);
+    if (resolvedWorkspaceReturn) {
+      router.push(resolvedWorkspaceReturn);
+      return;
+    }
     setView("templates");
     setDraft(null);
     setBaseline("");
@@ -275,6 +291,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
         const confirmed = await saveCanonicalBuilderDraft(saved);
         upsertCanonical(confirmed);
         setDraft(confirmed);
+        lastSavedTemplateIdRef.current = confirmed.id;
         setBaseline(JSON.stringify(confirmed));
         clearBuilderDraft();
         setFeedback({ tone: "success", message: confirmed.title ? `Черновик «${confirmed.title}» сохранён.` : "Черновик без названия сохранён." });
@@ -298,6 +315,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     }
     const confirmed = result.receipt.template;
     setDraft(confirmed);
+    lastSavedTemplateIdRef.current = confirmed.id;
     setBaseline(JSON.stringify(confirmed));
     clearBuilderDraft();
     setFeedback({ tone: "success", message: confirmed.title ? `Черновик «${confirmed.title}» сохранён.` : "Черновик без названия сохранён." });
@@ -309,6 +327,11 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
   async function saveDraftAndLeave() {
     if (!await saveDraft()) return;
     setUnsavedOpen(false);
+    const returnAfterSave = templateWorkspaceReturnWithAnchor(workspaceReturn, lastSavedTemplateIdRef.current);
+    if (returnAfterSave) {
+      router.push(returnAfterSave);
+      return;
+    }
     setView("templates");
     setDraft(null);
     setSelectedExerciseId(null);
@@ -332,6 +355,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
         const confirmed = await publishCanonicalBuilderTemplate(persisted);
         upsertCanonical(confirmed);
         setDraft(confirmed);
+        lastSavedTemplateIdRef.current = confirmed.id;
         setBaseline(JSON.stringify(confirmed));
         clearBuilderDraft();
         setFeedback({ tone: "success", message: `Версия ${confirmed.revision} шаблона «${confirmed.title}» опубликована.` });
@@ -356,6 +380,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
     }
     const confirmed = command.receipt.template;
     setDraft(confirmed);
+    lastSavedTemplateIdRef.current = confirmed.id;
     setBaseline(JSON.stringify(confirmed));
     clearBuilderDraft();
     setFeedback({ tone: "success", message: `Версия ${confirmed.revision} шаблона «${confirmed.title}» опубликована.` });
@@ -471,7 +496,7 @@ export function WorkoutTemplateBuilderPage({ entry }: { entry: BuilderEntryConte
       ) : view === "templates" ? (
         <TemplatesWorkspace templates={templates} athleteId={entry.athleteId} onCreate={createNew} onOpen={openTemplate} onDuplicate={duplicateAndOpen} onArchive={archiveTemplate} onAssign={openAssignment} />
       ) : view === "unknown" ? (
-        <UnknownTemplate templateId={entry.templateId} onTemplates={() => setView("templates")} onCreate={createNew} />
+        <UnknownTemplate templateId={entry.templateId} onTemplates={() => workspaceReturn ? router.push(workspaceReturn) : setView("templates")} onCreate={createNew} />
       ) : draft ? (
         <>
           <BuilderEditor draft={draft} libraryExercises={libraryExercises} athleteId={entry.athleteId} dirty={dirty} validation={validation} commandState={commandState} selectedExerciseId={selectedExerciseId} onDraftChange={updateDraft} onSelectedExerciseChange={setSelectedExerciseId} onBack={requestTemplates} onSaveDraft={saveDraft} onPublish={() => handlePublish(false)} onCreateRevision={createRevision} onDuplicateTemplate={() => duplicateAndOpen(draft)} onPreview={() => setPreviewOpen(true)} onAssign={() => openAssignment(draft)} onSaveAndAssign={() => handlePublish(true)} />

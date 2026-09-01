@@ -14,6 +14,7 @@ export default async function TrainerBuilderRoute({ searchParams }: { searchPara
       entry={{
         athleteId: value("athleteId") ?? value("clientId"),
         templateId: value("templateId"),
+        createNew: value("create") === "1",
         returnTo: value("returnTo"),
         transitionContext: value("flow"),
         handoffToken: value("handoff"),

@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/sheet";
 import { clearDemoSession, isDemoModeEnabled } from "@/lib/demo-mode";
 import { cn } from "@/lib/utils";
+import { templateWorkspaceBuilderHref } from "@/lib/template-workspace-navigation";
 
 type SearchItem = {
   title: string;
@@ -86,7 +87,7 @@ const trainerNavigationItems: TrainerNavigationItem[] = [
     label: "Шаблоны",
     title: "Шаблоны",
     helper: "Создание и редактирование шаблонов тренировок",
-    href: "/trainer/builder",
+    href: "/trainer/templates",
     icon: ClipboardList,
     keywords: ["шаблон", "тренировка", "builder"],
     activeMatch: "prefix",
@@ -115,6 +116,12 @@ const trainerNavigationItems: TrainerNavigationItem[] = [
 
 function isTrainerNavigationItemActive(pathname: string | null, item: TrainerNavigationItem) {
   if (!pathname) return false;
+  if (item.id === "templates") {
+    return pathname === "/trainer/templates"
+      || pathname.startsWith("/trainer/templates/")
+      || pathname === "/trainer/builder"
+      || pathname.startsWith("/trainer/builder/");
+  }
   if (item.activeMatch === "exact") return pathname === item.href;
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
@@ -182,7 +189,10 @@ const commandGroups: Array<{ title: string; items: SearchItem[] }> = [
       {
         title: "Создать шаблон",
         helper: "Открыть рабочую область шаблонов тренировок",
-        href: "/trainer/builder",
+        href: templateWorkspaceBuilderHref({
+          mode: "create",
+          returnState: { status: "all", q: "", category: "", page: 1, anchor: null },
+        }),
         icon: Hammer,
         keywords: ["создать", "шаблон", "тренировка", "новая"],
       },

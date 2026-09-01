@@ -106,6 +106,7 @@ export type TemplatePublishReceipt = {
 export type BuilderEntryContext = {
   athleteId?: string;
   templateId?: string;
+  createNew?: boolean;
   returnTo?: string;
   transitionContext?: string;
   handoffToken?: string;
