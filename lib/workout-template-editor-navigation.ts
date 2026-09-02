@@ -16,18 +16,33 @@ export function parseWorkoutTemplateEditorView(value: string | null | undefined)
 }
 
 export function workoutTemplateEditorHref(input:
-  | { mode: "new"; returnTo?: string | null }
-  | { mode: "exact"; templateId: string; view?: WorkoutTemplateEditorViewIntent; returnTo?: string | null }
+  | { mode: "new"; returnTo?: string | null; handoffToken?: string | null }
+  | { mode: "exact"; templateId: string; view?: WorkoutTemplateEditorViewIntent; receipt?: "published"; returnTo?: string | null; handoffToken?: string | null }
 ) {
   const pathname = input.mode === "new"
     ? "/trainer/builder/new"
     : isUuid(input.templateId) ? `/trainer/builder/${input.templateId}` : failInvalidTemplate();
   const params = new URLSearchParams();
   if (input.mode === "exact" && input.view && input.view !== "default") params.set("view", input.view);
+  if (input.mode === "exact" && input.view === "published" && input.receipt === "published") params.set("receipt", "published");
   const returnTo = safeWorkoutTemplateEditorReturnPath(input.returnTo);
   if (returnTo) params.set("returnTo", returnTo);
+  if (input.handoffToken && isQuickAssignHandoffToken(input.handoffToken)) {
+    params.set("handoff", input.handoffToken);
+  }
   const query = params.toString();
   return query ? `${pathname}?${query}` : pathname;
+}
+
+export function safeQuickAssignRestartPath(value: string | null | undefined) {
+  const safe = safeWorkoutTemplateEditorReturnPath(value);
+  if (!safe) return null;
+  const url = new URL(safe, "http://trainer.local");
+  if (!/^\/trainer\/clients\/[0-9a-f-]{36}$/i.test(url.pathname)
+    || url.searchParams.get("tab") !== "training"
+    || url.searchParams.get("assign") !== "1") return null;
+  url.searchParams.delete("handoff");
+  return safeWorkoutTemplateEditorReturnPath(`${url.pathname}${url.search}`);
 }
 
 export function safeWorkoutTemplateEditorReturnPath(value: string | null | undefined) {

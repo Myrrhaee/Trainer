@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ExerciseSelectionSnapshot } from "@/lib/exercise-library-contract";
 import type { WorkoutTemplateEditorIssue, WorkoutTemplateEditorReadModel } from "@/lib/workout-template-editor-contract";
-import { resolveWorkoutTemplateExitDestination, workoutTemplateEditorHref } from "@/lib/workout-template-editor-navigation";
+import { resolveWorkoutTemplateExitDestination, safeQuickAssignRestartPath, workoutTemplateEditorHref } from "@/lib/workout-template-editor-navigation";
 import { templateWorkspaceReturnWithAnchor } from "@/lib/template-workspace-navigation";
 import {
   publishQuickAssignBuilderHandoff,
@@ -68,6 +68,7 @@ type Props = {
   initialModel: WorkoutTemplateEditorReadModel;
   returnTo: string | null;
   handoffToken: string | null;
+  showPublishReceipt?: boolean;
 };
 
 type PendingConversion =
@@ -77,8 +78,9 @@ type PendingConversion =
 type BasicPrescription = Pick<EditorExerciseDraft, "setCount" | "repetitionsMin" | "repetitionsMax" | "durationSec" | "targetWeightKg" | "restSec">;
 type LeaveTarget = { href: string; source: "link" | "back" };
 type RecoveryHydration = { key: string; disposition: "none" | "eligible" | "stale" | "active" | "discarded" };
+type HandoffState = "none" | "checking" | "accepted" | "unavailable";
 
-export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, returnTo, handoffToken }: Props) {
+export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, returnTo, handoffToken, showPublishReceipt = false }: Props) {
   const router = useRouter();
   const [model, setModel] = useState(initialModel);
   const [baseline, setBaseline] = useState(() => draftFromEditorModel(initialModel));
@@ -95,13 +97,15 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
   const [recovery, setRecovery] = useState<EditorRecovery | null>(null);
   const [leaveTarget, setLeaveTarget] = useState<LeaveTarget | null>(null);
   const [pendingConversion, setPendingConversion] = useState<PendingConversion | null>(null);
-  const [receipt, setReceipt] = useState<WorkoutTemplateEditorReadModel | null>(null);
+  const [receipt, setReceipt] = useState<WorkoutTemplateEditorReadModel | null>(() => showPublishReceipt ? initialModel : null);
   const [handoff, setHandoff] = useState<QuickAssignBuilderHandoff | null>(null);
+  const [handoffState, setHandoffState] = useState<HandoffState>(handoffToken ? "checking" : "none");
   const [recoveryHydration, setRecoveryHydration] = useState<RecoveryHydration | null>(null);
   const historyGuardRef = useRef(false);
   const suppressPopRef = useRef(false);
   const pendingNavigationRef = useRef<(() => void) | null>(null);
   const receiptRef = useRef<HTMLElement>(null);
+  const handoffStatusRef = useRef<HTMLDivElement>(null);
   const conflictRef = useRef<HTMLHeadingElement>(null);
   const baseEditable = model.mode === "new" || model.mode === "editable";
   const editorLocked = commandLocksEditor(command);
@@ -112,11 +116,26 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
   const issues = useMemo(() => mergeIssues(serverIssues, localIssues), [localIssues, serverIssues]);
   const recoveryScope = model.identity?.templateId ?? "new";
   const recoveryHydrationKey = `${actorUserId}:${recoveryScope}:${model.concurrency.editToken ?? "new"}`;
+  const navigationReturnTo = handoffState === "unavailable" ? null : returnTo;
+  const activeHandoffToken = handoffState === "accepted" ? handoffToken : null;
+  const quickAssignRestartHref = handoffState === "unavailable" ? safeQuickAssignRestartPath(returnTo) : null;
 
   useEffect(() => {
-    if (!handoffToken) return;
-    queueMicrotask(() => setHandoff(readQuickAssignBuilderHandoff(handoffToken)));
+    if (!handoffToken) {
+      queueMicrotask(() => setHandoffState("none"));
+      return;
+    }
+    const accepted = readQuickAssignBuilderHandoff(handoffToken);
+    queueMicrotask(() => {
+      setHandoff(accepted);
+      setHandoffState(accepted ? "accepted" : "unavailable");
+    });
   }, [handoffToken]);
+
+  useEffect(() => {
+    if (handoffState !== "unavailable") return;
+    requestAnimationFrame(() => handoffStatusRef.current?.focus());
+  }, [handoffState]);
 
   useEffect(() => {
     if (recoveryHydration?.key === recoveryHydrationKey) return;
@@ -145,13 +164,13 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
       revisionId: model.identity?.selectedRevisionId ?? null,
       editToken: model.concurrency.editToken,
       content: draft,
-      returnTo,
-      handoffToken,
+      returnTo: navigationReturnTo,
+      handoffToken: activeHandoffToken,
     });
     if (recoveryHydration.disposition !== "active") {
       queueMicrotask(() => setRecoveryHydration({ key: recoveryHydrationKey, disposition: "active" }));
     }
-  }, [actorUserId, draft, dirty, handoffToken, model.concurrency.editToken, model.identity, recoveryHydration, recoveryHydrationKey, recoveryScope, returnTo]);
+  }, [activeHandoffToken, actorUserId, draft, dirty, model.concurrency.editToken, model.identity, navigationReturnTo, recoveryHydration, recoveryHydrationKey, recoveryScope]);
 
   useEffect(() => {
     if (recoveryHydration?.key !== recoveryHydrationKey || recoveryHydration.disposition !== "active" || dirty || recovery) return;
@@ -189,11 +208,11 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
       }
       if (!historyGuardRef.current) return;
       window.history.pushState({ workoutTemplateEditorGuard: true }, "", window.location.href);
-      setLeaveTarget({ href: returnTo ?? "/trainer/templates", source: "back" });
+      setLeaveTarget({ href: navigationReturnTo ?? "/trainer/templates", source: "back" });
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [returnTo]);
+  }, [navigationReturnTo]);
 
   useEffect(() => {
     if (guarded && !historyGuardRef.current) {
@@ -602,7 +621,20 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
     dispatchCommand({ type: "clear" });
     clearEditorRecovery(actorUserId, recoveryScope);
     setAnnouncement(attempt.operation === "create_revision" ? "Новая версия создана" : "Черновик сохранён");
-    const exactHref = workoutTemplateEditorHref({ mode: "exact", templateId: attempt.templateId, returnTo });
+    const currentHandoff = handoffToken ? readQuickAssignBuilderHandoff(handoffToken) : null;
+    if (handoffToken && !currentHandoff) {
+      setHandoff(null);
+      setHandoffState("unavailable");
+    } else if (currentHandoff) {
+      setHandoff(currentHandoff);
+      setHandoffState("accepted");
+    }
+    const exactHref = workoutTemplateEditorHref({
+      mode: "exact",
+      templateId: attempt.templateId,
+      returnTo: handoffToken && !currentHandoff ? null : returnTo,
+      handoffToken: currentHandoff?.token,
+    });
     if (attempt.operation === "save_draft" && attempt.exitTo) {
       setLeaveTarget(null);
       navigateAfterGuard(() => router.push(resolveWorkoutTemplateExitDestination(attempt.exitTo, attempt.templateId)));
@@ -625,8 +657,21 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
     dispatchCommand({ type: "clear" });
     clearEditorRecovery(actorUserId, recoveryScope);
     setAnnouncement("Шаблон опубликован");
-    if (handoffToken && handoff) setHandoff(publishQuickAssignBuilderHandoff({ token: handoffToken, athleteUserId: handoff.athleteUserId, publishedRevisionId: published.identity!.selectedRevisionId }));
-    navigateAfterGuard(() => router.replace(workoutTemplateEditorHref({ mode: "exact", templateId: published.identity!.templateId, view: "published", returnTo })));
+    const publishedHandoff = handoffToken && handoff
+      ? publishQuickAssignBuilderHandoff({ token: handoffToken, athleteUserId: handoff.athleteUserId, publishedRevisionId: published.identity!.selectedRevisionId })
+      : null;
+    if (handoffToken) {
+      setHandoff(publishedHandoff);
+      setHandoffState(publishedHandoff ? "accepted" : "unavailable");
+    }
+    navigateAfterGuard(() => router.replace(workoutTemplateEditorHref({
+      mode: "exact",
+      templateId: published.identity!.templateId,
+      view: "published",
+      receipt: "published",
+      returnTo: handoffToken && !publishedHandoff ? null : returnTo,
+      handoffToken: publishedHandoff?.token,
+    })));
   }
 
   async function openSavedVersion() {
@@ -644,7 +689,12 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
       setRecoveryHydration({ key: recoveryHydrationKey, disposition: "discarded" });
       dispatchCommand({ type: "clear" });
       clearEditorRecovery(actorUserId, recoveryScope);
-      navigateAfterGuard(() => router.replace(workoutTemplateEditorHref({ mode: "exact", templateId: model.identity!.templateId, returnTo })));
+      navigateAfterGuard(() => router.replace(workoutTemplateEditorHref({
+        mode: "exact",
+        templateId: model.identity!.templateId,
+        returnTo: navigationReturnTo,
+        handoffToken: activeHandoffToken,
+      })));
     } catch (error) {
       handleCommandError(error);
     }
@@ -698,9 +748,9 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
     if (receipt || command.phase === "outcome_unknown" || command.phase === "conflict") return null;
     if (command.phase === "running") return <Button disabled className="min-h-11 bg-lime-300 text-black"><Loader2 className="animate-spin" />{runningLabel(command.attempt?.operation)}</Button>;
     if (model.mode === "published") return model.capabilities.canContinueDraft
-      ? <Button onClick={() => router.push(workoutTemplateEditorHref({ mode: "exact", templateId: model.identity!.templateId, returnTo }))} className="min-h-11 bg-lime-300 text-black">Продолжить черновик</Button>
+      ? <Button onClick={() => router.push(workoutTemplateEditorHref({ mode: "exact", templateId: model.identity!.templateId, returnTo: navigationReturnTo, handoffToken: activeHandoffToken }))} className="min-h-11 bg-lime-300 text-black">Продолжить черновик</Button>
       : <Button onClick={() => void createRevision()} className="min-h-11 bg-lime-300 text-black">Создать новую версию</Button>;
-    if (model.mode === "archived") return <Button onClick={() => requestLeave(returnTo ?? "/trainer/templates")} className="min-h-11 bg-lime-300 text-black">К шаблонам</Button>;
+    if (model.mode === "archived") return <Button onClick={() => requestLeave(navigationReturnTo ?? "/trainer/templates")} className="min-h-11 bg-lime-300 text-black">К шаблонам</Button>;
     if (dirty || model.mode === "new") return <Button onClick={() => void save()} className="min-h-11 bg-lime-300 text-black"><Save />Сохранить черновик</Button>;
     if (issues.length) return <Button onClick={() => issues[0] && focusValidationIssue(issues[0])} className="min-h-11 bg-lime-300 text-black"><CircleAlert />Перейти к ошибкам</Button>;
     return <Button onClick={() => void publish()} className="min-h-11 bg-lime-300 text-black"><Send />Опубликовать</Button>;
@@ -711,14 +761,16 @@ export function CanonicalWorkoutTemplateEditor({ actorUserId, initialModel, retu
     <div aria-live="polite" className="sr-only">{announcement}</div>
     <header className="sticky top-0 z-20 -mx-2 border-b border-zinc-800 bg-black/95 px-2 py-3 backdrop-blur supports-[backdrop-filter]:bg-black/80 max-h-[40vh]:static">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3"><Button type="button" variant="ghost" size="icon" aria-label="Назад" onClick={() => requestLeave(returnTo ?? "/trainer/templates")} className="size-11"><ArrowLeft /></Button><div className="min-w-0"><p className="truncate text-lg font-semibold text-zinc-50">{draft.title || (model.mode === "new" ? "Новый шаблон" : "Шаблон")}</p><p className="mt-1 text-xs text-zinc-500">{lifecycle} · {saveLabel(saveState, dirty, command.phase, command.attempt?.operation)}</p>{handoff ? <p className="mt-1 text-xs text-lime-200">Вы создаёте шаблон для последующего назначения</p> : null}</div></div>
+        <div className="flex min-w-0 items-center gap-3"><Button type="button" variant="ghost" size="icon" aria-label="Назад" onClick={() => requestLeave(navigationReturnTo ?? "/trainer/templates")} className="size-11"><ArrowLeft /></Button><div className="min-w-0"><p className="truncate text-lg font-semibold text-zinc-50">{draft.title || (model.mode === "new" ? "Новый шаблон" : "Шаблон")}</p><p className="mt-1 text-xs text-zinc-500">{lifecycle} · {saveLabel(saveState, dirty, command.phase, command.attempt?.operation)}</p>{handoff ? <p className="mt-1 text-xs text-lime-200">Вы создаёте шаблон для последующего назначения</p> : null}</div></div>
         <div className="flex items-center gap-2">{command.phase === "outcome_unknown" ? <Button variant="outline" onClick={() => void reconcile()} className="min-h-11 border-zinc-700"><RotateCcw />{reconcileLabel(command.attempt?.operation)}</Button> : null}{primary()}</div>
       </div>
     </header>
 
+    {handoffState === "unavailable" ? <section ref={handoffStatusRef} tabIndex={-1} role="status" className="mt-5 border-l-2 border-amber-300/70 px-4 py-1 outline-none focus-visible:ring-2 focus-visible:ring-amber-200/60"><h2 className="font-medium text-amber-100">Контекст назначения больше недоступен</h2><p className="mt-1 text-sm text-zinc-400">Шаблон можно сохранить и опубликовать. Возврат выполняется через безопасный профиль спортсмена или список шаблонов.</p></section> : null}
+
     {recovery ? <section role="status" className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] p-4"><p className="font-medium text-amber-100">Найдены несохранённые изменения в этой вкладке</p><p className="mt-1 text-sm text-zinc-400">Серверная версия остаётся основной, пока вы явно не восстановите изменения.</p><div className="mt-3 flex flex-wrap gap-2"><Button variant="outline" onClick={() => { setDraft(recovery.content); setSaveState("dirty"); setRecovery(null); setRecoveryHydration({ key: recoveryHydrationKey, disposition: "active" }); }} className="min-h-11 border-zinc-700">Восстановить изменения</Button><Button variant="ghost" onClick={() => { clearEditorRecovery(actorUserId, recoveryScope); setRecovery(null); setRecoveryHydration({ key: recoveryHydrationKey, disposition: "discarded" }); }}>Открыть сохранённую версию</Button></div></section> : null}
 
-    {receipt ? <PublishReceipt containerRef={receiptRef} model={receipt} handoff={handoff} returnTo={returnTo} onContinue={() => handoff ? router.push(quickAssignHrefFromHandoff(handoff)) : router.push(templateWorkspaceReturnWithAnchor(returnTo, receipt.identity?.templateId) ?? "/trainer/templates")} onView={() => setReceipt(null)} /> : <main className="pt-7">
+    {receipt ? <PublishReceipt containerRef={receiptRef} model={receipt} handoff={handoff} restartHref={quickAssignRestartHref} onContinue={() => handoff ? router.push(quickAssignHrefFromHandoff(handoff)) : quickAssignRestartHref ? router.push(quickAssignRestartHref) : router.push(templateWorkspaceReturnWithAnchor(navigationReturnTo, receipt.identity?.templateId) ?? "/trainer/templates")} onWorkspace={() => router.push(templateWorkspaceReturnWithAnchor(navigationReturnTo, receipt.identity?.templateId) ?? "/trainer/templates")} onView={() => { setReceipt(null); router.replace(workoutTemplateEditorHref({ mode: "exact", templateId: receipt.identity!.templateId, view: "published", returnTo: navigationReturnTo, handoffToken: activeHandoffToken })); }} /> : <main className="pt-7">
       {model.mode === "published" ? <LifecycleContext title="Опубликованная версия" text="Версия неизменяема и доступна для назначения. Чтобы редактировать шаблон, создайте новую версию." /> : model.mode === "archived" ? <LifecycleContext title="Шаблон в архиве" text="Он недоступен для назначения. Содержимое показано в сохранённом виде." /> : null}
       {command.phase === "conflict" ? <div className="mb-6 rounded-lg border border-rose-300/20 bg-rose-300/[0.04] p-4" role="alert"><h2 ref={conflictRef} tabIndex={-1} className="font-semibold text-zinc-100 outline-none">Есть более новая серверная версия</h2><p className="mt-1 text-sm text-zinc-400">Локальные изменения сохранены. Перезапись серверной версии не выполняется.</p><div className="mt-3 flex flex-wrap gap-2"><Button variant="outline" onClick={() => void openSavedVersion()} className="min-h-11 border-zinc-700">Открыть сохранённую версию</Button><Button variant="ghost" onClick={() => void saveAsNewTemplate()}>Сохранить как новый шаблон</Button></div></div> : null}
       {command.phase === "failed" ? <LifecycleContext title={failedCommandLabel(command.attempt?.operation)} text="Изменения остались в редакторе. Проверьте поля и повторите действие." tone="danger" /> : null}
@@ -754,9 +806,10 @@ function BasicPrescriptionFields({ value, prescriptionType, onChange }: { value:
   </div>;
 }
 
-function PublishReceipt({ containerRef, model, handoff, returnTo, onContinue, onView }: { containerRef: RefObject<HTMLElement | null>; model: WorkoutTemplateEditorReadModel; handoff: QuickAssignBuilderHandoff | null; returnTo: string | null; onContinue: () => void; onView: () => void }) {
+function PublishReceipt({ containerRef, model, handoff, restartHref, onContinue, onWorkspace, onView }: { containerRef: RefObject<HTMLElement | null>; model: WorkoutTemplateEditorReadModel; handoff: QuickAssignBuilderHandoff | null; restartHref: string | null; onContinue: () => void; onWorkspace: () => void; onView: () => void }) {
   const sets = model.content.exercises.reduce((sum, exercise) => sum + (exercise.prescription.setCount ?? exercise.sets.length), 0);
-  return <main ref={containerRef} tabIndex={-1} className="mx-auto mt-12 max-w-2xl rounded-lg border border-lime-300/20 bg-lime-300/[0.04] p-6 outline-none"><Check className="size-8 text-lime-300" /><h2 className="mt-5 text-2xl font-semibold text-zinc-50">Шаблон опубликован</h2><p className="mt-2 text-zinc-300">{model.content.title} · версия {model.identity?.selectedRevisionNumber}</p><p className="mt-1 text-sm text-zinc-500">{model.content.exercises.length} упражнений · {sets} подходов · доступен для назначения</p>{handoff ? <p className="mt-5 text-sm text-zinc-300">Шаблон сохранён. Назначение спортсмену подтверждается отдельно.</p> : null}<div className="mt-6 flex flex-wrap gap-2"><Button onClick={onContinue} className="min-h-11 bg-lime-300 text-black">{handoff ? "Перейти к назначению" : "К шаблонам"}</Button><Button variant="outline" onClick={onView} className="min-h-11 border-zinc-700">Посмотреть опубликованную версию</Button>{returnTo ? null : null}</div></main>;
+  const contextual = Boolean(handoff || restartHref);
+  return <main ref={containerRef} tabIndex={-1} className="mx-auto mt-12 max-w-2xl rounded-lg border border-lime-300/20 bg-lime-300/[0.04] p-6 outline-none"><Check className="size-8 text-lime-300" /><h2 className="mt-5 text-2xl font-semibold text-zinc-50">Шаблон опубликован</h2><p className="mt-2 text-zinc-300">{model.content.title} · версия {model.identity?.selectedRevisionNumber}</p><p className="mt-1 text-sm text-zinc-500">{model.content.exercises.length} упражнений · {sets} подходов · доступен для назначения</p>{contextual ? <p className="mt-5 text-sm text-zinc-300">Шаблон сохранён. Назначение спортсмену подтверждается отдельно.</p> : null}<div className="mt-6 flex flex-wrap gap-2"><Button onClick={onContinue} className="min-h-11 bg-lime-300 text-black">{handoff ? "Перейти к назначению" : restartHref ? "Начать назначение заново" : "К шаблонам"}</Button>{contextual ? <Button variant="outline" onClick={onWorkspace} className="min-h-11 border-zinc-700">К шаблонам</Button> : null}<Button variant="ghost" onClick={onView} className="min-h-11">Посмотреть опубликованную версию</Button></div></main>;
 }
 
 function saveLabel(state: EditorSaveState, dirty: boolean, phase: "idle" | "running" | "outcome_unknown" | "failed" | "conflict", operation?: EditorCommandAttempt["operation"]) {

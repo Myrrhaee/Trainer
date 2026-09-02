@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import type { ExerciseSelectionSnapshot } from "../../lib/exercise-library-contract";
 import { quickAssignHref } from "../../lib/quick-assign-navigation";
 import { createTrainerWorkflowContext, encodeTrainerWorkflowContext } from "../../lib/trainer-workflow-transition";
-import { resolveWorkoutTemplateExitDestination, safeWorkoutTemplateEditorReturnPath, workoutTemplateEditorHref } from "../../lib/workout-template-editor-navigation";
+import { resolveLegacyWorkoutTemplateBuilderHref } from "../../lib/workout-template-builder-compatibility";
+import { resolveWorkoutTemplateExitDestination, safeQuickAssignRestartPath, safeWorkoutTemplateEditorReturnPath, workoutTemplateEditorHref } from "../../lib/workout-template-editor-navigation";
+import { readQuickAssignBuilderHandoff } from "../../components/trainer/quick-assign/quick-assign-handoff";
 import {
   createPerSetRows,
   draftsEqual,
@@ -38,6 +41,73 @@ const snapshot: ExerciseSelectionSnapshot = {
 test("new canonical route carries only safe return context", () => {
   assert.equal(workoutTemplateEditorHref({ mode: "new", returnTo: "/trainer/templates?status=drafts" }), "/trainer/builder/new?returnTo=%2Ftrainer%2Ftemplates%3Fstatus%3Ddrafts");
   assert.equal(workoutTemplateEditorHref({ mode: "exact", templateId: TEMPLATE_ID, view: "published" }), `/trainer/builder/${TEMPLATE_ID}?view=published`);
+  assert.equal(workoutTemplateEditorHref({ mode: "exact", templateId: TEMPLATE_ID, view: "published", receipt: "published" }), `/trainer/builder/${TEMPLATE_ID}?view=published&receipt=published`);
+});
+
+test("canonical Editor href preserves only an opaque Quick Assign handoff", () => {
+  const token = "r2d8_quick_assign_handoff_123456789";
+  const returnTo = "/trainer/templates?status=drafts";
+  const href = workoutTemplateEditorHref({ mode: "new", returnTo, handoffToken: token });
+  const url = new URL(href, "http://trainer.local");
+  assert.equal(url.pathname, "/trainer/builder/new");
+  assert.equal(url.searchParams.get("handoff"), token);
+  assert.equal(url.searchParams.get("returnTo"), returnTo);
+  assert.equal(new URL(workoutTemplateEditorHref({ mode: "new", handoffToken: "short" }), "http://trainer.local").searchParams.has("handoff"), false);
+});
+
+test("Quick Assign handoff rejects expiry and athlete substitution while accepting exact presentation state", () => {
+  const athleteUserId = "33333333-3333-4333-8333-333333333333";
+  const foreignAthleteUserId = "44444444-4444-4444-8444-444444444444";
+  const token = "r2d8_quick_assign_handoff_validation_01";
+  const storage = memoryStorage();
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { sessionStorage: storage } });
+  try {
+    const key = `quick-assign-builder-handoff:v1:${token}`;
+    const flow = encodeTrainerWorkflowContext(createTrainerWorkflowContext({ origin: "profile", athleteUserId }));
+    const base = {
+      version: 1,
+      token,
+      athleteUserId,
+      transitionContext: flow,
+      query: "сила",
+      scheduledFor: "2026-09-03",
+      trainerNote: "Спокойный темп",
+      status: "editing",
+    };
+    storage.setItem(key, JSON.stringify({ ...base, createdAt: 1, expiresAt: 1_000 }));
+    assert.equal(readQuickAssignBuilderHandoff(token), null);
+    assert.equal(storage.getItem(key), null);
+
+    const createdAt = Date.now();
+    storage.setItem(key, JSON.stringify({ ...base, createdAt, expiresAt: createdAt + 30 * 60 * 1_000 }));
+    assert.equal(readQuickAssignBuilderHandoff(token, foreignAthleteUserId), null);
+    assert.equal(readQuickAssignBuilderHandoff(token, athleteUserId)?.query, "сила");
+
+    storage.setItem(key, JSON.stringify({ ...base, transitionContext: encodeTrainerWorkflowContext(createTrainerWorkflowContext({ origin: "profile", athleteUserId: foreignAthleteUserId })), createdAt, expiresAt: createdAt + 30 * 60 * 1_000 }));
+    assert.equal(readQuickAssignBuilderHandoff(token), null);
+    assert.equal(storage.getItem(key), null);
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});
+
+test("legacy Builder compatibility resolves exact routes and rejects unsupported contexts", () => {
+  const safeReturn = `/trainer/templates?status=drafts&anchor=${TEMPLATE_ID}`;
+  assert.equal(resolveLegacyWorkoutTemplateBuilderHref({}), "/trainer/templates");
+  assert.equal(resolveLegacyWorkoutTemplateBuilderHref({ create: "1", returnTo: safeReturn }), `/trainer/builder/new?returnTo=${encodeURIComponent(safeReturn)}`);
+  assert.equal(resolveLegacyWorkoutTemplateBuilderHref({ templateId: TEMPLATE_ID, returnTo: safeReturn }), `/trainer/builder/${TEMPLATE_ID}?returnTo=${encodeURIComponent(safeReturn)}`);
+  assert.equal(resolveLegacyWorkoutTemplateBuilderHref({ templateId: TEMPLATE_ID, view: "published" }), `/trainer/builder/${TEMPLATE_ID}?view=published`);
+  for (const unsafe of [
+    { templateId: "missing-template" },
+    { clientId: TEMPLATE_ID },
+    { programId: TEMPLATE_ID, dayId: TEMPLATE_ID },
+    { create: "1", returnTo: "https://foreign.example/path" },
+    { templateId: TEMPLATE_ID, view: "editable" },
+    { templateId: [TEMPLATE_ID, crypto.randomUUID()] },
+    { capability: "admin" },
+  ]) assert.equal(resolveLegacyWorkoutTemplateBuilderHref(unsafe), "/trainer/templates");
 });
 
 test("save-and-exit resolver preserves safe shell destinations and anchors workspace state", () => {
@@ -78,6 +148,24 @@ test("quick-assign return is preserved as navigation context and rejects malform
   const invalidHandoff = new URL(destination, "http://trainer.local");
   invalidHandoff.searchParams.set("handoff", "short");
   assert.equal(safeWorkoutTemplateEditorReturnPath(`${invalidHandoff.pathname}${invalidHandoff.search}`), null);
+
+  const restart = new URL(destination, "http://trainer.local");
+  restart.searchParams.delete("handoff");
+  assert.equal(safeQuickAssignRestartPath(destination), `${restart.pathname}${restart.search}`);
+});
+
+test("production authoring graph excludes legacy Builder, demo catalog, hydrated list and Assignment POST", () => {
+  const compatibilityRoute = readFileSync("app/trainer/builder/page.tsx", "utf8");
+  const editor = readFileSync("components/trainer/template-editor/canonical-workout-template-editor.tsx", "utf8");
+  const editorClient = readFileSync("components/trainer/template-editor/workout-template-editor-client.ts", "utf8");
+  const workspace = readFileSync("components/trainer/templates/canonical-templates-workspace.tsx", "utf8");
+  const quickAssignClient = readFileSync("components/trainer/quick-assign/quick-assign-client.ts", "utf8");
+  assert.doesNotMatch(compatibilityRoute, /WorkoutTemplateBuilderPage|workout-template-builder-page|getDemoLibraryExercises/);
+  assert.match(compatibilityRoute, /resolveLegacyWorkoutTemplateBuilderHref/);
+  assert.doesNotMatch([editor, editorClient, workspace].join("\n"), /getDemoLibraryExercises|demo-data|canonical-builder-client|fetch\("\/api\/workout-assignments"/);
+  assert.doesNotMatch(editorClient, /fetch\("\/api\/trainer\/workout-builder\/templates"\s*\)/);
+  assert.match(quickAssignClient, /fetch\("\/api\/workout-assignments"/);
+  assert.match(readFileSync("components/trainer-os/workout-template-builder/workout-template-builder-page.tsx", "utf8"), /getDemoLibraryExercises/);
 });
 
 test("selected exercise starts honestly incomplete with a fresh semantic identity", () => {
@@ -216,4 +304,16 @@ function draft(exercises: EditorDraftContent["exercises"]): EditorDraftContent {
 
 function identifiedExercise(instanceKey: string, title: string) {
   return { ...newExerciseDraft({ ...snapshot, sourceExerciseKey: instanceKey, title }), instanceKey };
+}
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => { values.delete(key); },
+    setItem: (key, value) => { values.set(key, value); },
+  };
 }

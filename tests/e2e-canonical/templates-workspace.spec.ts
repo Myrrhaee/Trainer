@@ -32,6 +32,10 @@ test("canonical Templates Workspace supports lifecycle, commands and responsive 
     const publishedWithDraft = await publish(page, templates[1]);
     const editableUpdate = await createRevision(page, publishedWithDraft);
     await archive(page, templates[2]);
+    await page.goto(`/trainer/builder/${publishedWithDraft.id}`);
+    await page.getByLabel("Название", { exact: true }).fill("Workspace Draft Update 01");
+    await page.getByRole("button", { name: "Сохранить черновик" }).click();
+    await expect(page.getByRole("button", { name: "Опубликовать" })).toBeVisible();
 
     const publishedOnlyEditor = await page.request.get(
       `/api/trainer/workout-builder/templates/${publishedOnly.id}/editor?view=published`,
@@ -45,19 +49,20 @@ test("canonical Templates Workspace supports lifecycle, commands and responsive 
       `/api/trainer/workout-builder/templates/${publishedWithDraft.id}/editor`,
     );
     expect(updateDefaultEditor.status()).toBe(200);
-    expect((await updateDefaultEditor.json() as { editor: { mode: string; identity: { selectedRevisionId: string } } }).editor)
-      .toMatchObject({ mode: "editable", identity: { selectedRevisionId: editableUpdate.revisionId } });
+    expect((await updateDefaultEditor.json() as { editor: { mode: string; identity: { selectedRevisionId: string }; content: { title: string } } }).editor)
+      .toMatchObject({ mode: "editable", identity: { selectedRevisionId: editableUpdate.revisionId }, content: { title: "Workspace Draft Update 01" } });
 
     const updatePublishedEditor = await page.request.get(
       `/api/trainer/workout-builder/templates/${publishedWithDraft.id}/editor?view=published`,
     );
     expect(updatePublishedEditor.status()).toBe(200);
     expect((await updatePublishedEditor.json() as {
-      editor: { mode: string; identity: { selectedRevisionId: string }; lifecycle: { editableRevisionSummary: unknown } };
+      editor: { mode: string; identity: { selectedRevisionId: string }; lifecycle: { editableRevisionSummary: unknown }; content: { title: string } };
     }).editor).toMatchObject({
       mode: "published",
       identity: { selectedRevisionId: publishedWithDraft.revisionId },
       lifecycle: { editableRevisionSummary: { revisionId: editableUpdate.revisionId } },
+      content: { title: "Workspace Update 01" },
     });
 
     const archivedEditor = await page.request.get(
@@ -174,6 +179,31 @@ test("canonical Templates Workspace supports lifecycle, commands and responsive 
     await page.getByRole("button", { name: "Назад" }).click();
     await expect(page).toHaveURL(/\/trainer\/templates\?status=published/);
     await expect(page.getByText("Найдено 1", { exact: true })).toBeVisible();
+
+    await page.goto("/trainer/templates?status=updates&q=Workspace+Draft+Update+01");
+    const updateRow = collection.getByRole("listitem").filter({ hasText: "Workspace Draft Update 01" });
+    await updateRow.getByRole("link", { name: /Продолжить редактирование/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/trainer/builder/${publishedWithDraft.id}\\?returnTo=`));
+    await expect(page.getByLabel("Название", { exact: true })).toHaveValue("Workspace Draft Update 01");
+    await page.getByRole("button", { name: "Назад" }).click();
+    await expect(page).toHaveURL(/\/trainer\/templates\?status=updates.*anchor=/);
+    const returnedUpdateRow = page.getByRole("list", { name: "Шаблоны тренировок" }).getByRole("listitem").filter({ hasText: "Workspace Draft Update 01" });
+    await returnedUpdateRow.getByRole("button", { name: /Действия с шаблоном/ }).click();
+    await page.getByRole("link", { name: "Посмотреть опубликованную версию", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/trainer/builder/${publishedWithDraft.id}\\?view=published&returnTo=`));
+    await expect(page.getByRole("heading", { name: "Workspace Update 01", exact: true }).last()).toBeVisible();
+    await expect(page.getByLabel("Название", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Продолжить черновик" })).toBeVisible();
+    await page.reload();
+    await expect(page).toHaveURL(/view=published/);
+    await expect(page.getByRole("heading", { name: "Workspace Update 01", exact: true }).last()).toBeVisible();
+    await page.getByRole("button", { name: "Продолжить черновик" }).click();
+    await expect(page).toHaveURL(new RegExp(`/trainer/builder/${publishedWithDraft.id}\\?returnTo=`));
+    await expect(page.getByLabel("Название", { exact: true })).toHaveValue("Workspace Draft Update 01");
+    const exactDraftAfterReturn = await page.request.get(`/api/trainer/workout-builder/templates/${publishedWithDraft.id}/editor?view=editable`);
+    expect((await exactDraftAfterReturn.json() as { editor: { identity: { selectedRevisionId: string } } }).editor.identity.selectedRevisionId).toBe(editableUpdate.revisionId);
+    await page.getByRole("button", { name: "Назад" }).click();
+    await page.goto("/trainer/templates?status=published");
 
     const returnedRow = collection.getByRole("listitem").filter({ hasText: "Workspace Published 00" });
     await returnedRow.getByRole("button", { name: /Действия с шаблоном/ }).click();

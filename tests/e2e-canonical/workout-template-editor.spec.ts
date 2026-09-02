@@ -55,6 +55,47 @@ test("canonical Editor creates no row before Save and publishes an exact Library
   }
 });
 
+test("legacy Builder URLs normalize without rendering or mutating the old Builder", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1024 } });
+  const page = await context.newPage();
+  try {
+    await activateTrainer(page, `template.editor.compat.${Date.now()}@example.test`);
+    const before = await workspaceCount(page);
+
+    await page.goto("/trainer/builder");
+    await expect(page).toHaveURL("/trainer/templates");
+    expect(await workspaceCount(page)).toBe(before);
+
+    const returnTo = "/trainer/templates?status=drafts&q=compat&page=2";
+    await page.goto(`/trainer/builder?create=1&returnTo=${encodeURIComponent(returnTo)}`);
+    await expect(page).toHaveURL(`/trainer/builder/new?returnTo=${encodeURIComponent(returnTo)}`);
+    expect(await workspaceCount(page)).toBe(before);
+
+    const draft = await createDraftFixture(page, "Compatibility exact source");
+    await page.goto(`/trainer/builder?templateId=${draft.id}&returnTo=${encodeURIComponent("/trainer/templates?status=drafts")}`);
+    await expect(page).toHaveURL(new RegExp(`/trainer/builder/${draft.id}\\?returnTo=`));
+    await expect(page.getByLabel("Название", { exact: true })).toHaveValue("Compatibility exact source");
+
+    await publishRevision(page, draft.id, draft.revisionId, draft.editToken);
+    await page.goto(`/trainer/builder?templateId=${draft.id}&view=published`);
+    await expect(page).toHaveURL(`/trainer/builder/${draft.id}?view=published`);
+    await expect(page.getByText("Опубликованная версия", { exact: true }).first()).toBeVisible();
+
+    for (const unsafe of [
+      "/trainer/builder?templateId=missing-template",
+      `/trainer/builder?clientId=${crypto.randomUUID()}`,
+      `/trainer/builder?programId=${crypto.randomUUID()}&dayId=${crypto.randomUUID()}`,
+      "/trainer/builder?create=1&returnTo=https%3A%2F%2Fforeign.example%2Ftrainer%2Ftemplates",
+    ]) {
+      await page.goto(unsafe);
+      await expect(page).toHaveURL("/trainer/templates");
+    }
+    expect(await workspaceCount(page)).toBe((before ?? 0) + 1);
+  } finally {
+    await context.close();
+  }
+});
+
 test("Editor command state reconciles uncertain outcomes, protects stale tabs, and remains usable under stress", async ({ browser }) => {
   const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1024 } });
   const page = await context.newPage();

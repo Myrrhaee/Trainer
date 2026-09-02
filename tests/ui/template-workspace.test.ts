@@ -9,6 +9,7 @@ import {
   mergeTemplateWorkspaceItems,
   shouldSkipInternalPageReplay,
   templateWorkspaceFilterKey,
+  workspaceEditorHref,
   withDialogCommandError,
   type DuplicateAttempt,
 } from "../../components/trainer/templates/canonical-templates-workspace";
@@ -17,7 +18,6 @@ import type { TemplateWorkspaceItem } from "../../lib/template-workspace-contrac
 import {
   parseTemplateWorkspaceUrlState,
   safeTemplateWorkspaceReturnPath,
-  templateWorkspaceBuilderHref,
   templateWorkspaceHref,
   templateWorkspaceReturnWithAnchor,
 } from "../../lib/template-workspace-navigation";
@@ -49,7 +49,7 @@ test("safe return path rejects foreign routes and capability material", () => {
 });
 
 test("Workspace create destination uses the canonical product Editor route", () => {
-  const href = templateWorkspaceBuilderHref({
+  const href = workspaceEditorHref({
     mode: "create",
     returnState: { status: "drafts", q: "сила", category: "", page: 1, anchor: null },
   });
@@ -61,6 +61,23 @@ test("Workspace create destination uses the canonical product Editor route", () 
   assert.equal(
     templateWorkspaceReturnWithAnchor(url.searchParams.get("returnTo"), TEMPLATE_ID),
     `/trainer/templates?status=drafts&q=${encodeURIComponent("сила")}&anchor=${TEMPLATE_ID}`,
+  );
+});
+
+test("Workspace lifecycle rows use exact Editor roles", () => {
+  const returnState = { status: "updates" as const, q: "", category: "", page: 2, anchor: TEMPLATE_ID };
+  const encodedReturn = encodeURIComponent(`/trainer/templates?status=updates&page=2&anchor=${TEMPLATE_ID}`);
+  assert.equal(
+    workspaceEditorHref({ mode: "editable", templateId: TEMPLATE_ID, returnState }),
+    `/trainer/builder/${TEMPLATE_ID}?returnTo=${encodedReturn}`,
+  );
+  assert.equal(
+    workspaceEditorHref({ mode: "published", templateId: TEMPLATE_ID, returnState }),
+    `/trainer/builder/${TEMPLATE_ID}?view=published&returnTo=${encodedReturn}`,
+  );
+  assert.equal(
+    workspaceEditorHref({ mode: "archived", templateId: TEMPLATE_ID, returnState }),
+    `/trainer/builder/${TEMPLATE_ID}?view=archived&returnTo=${encodedReturn}`,
   );
 });
 

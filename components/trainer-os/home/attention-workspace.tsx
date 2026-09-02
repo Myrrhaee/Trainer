@@ -19,6 +19,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { workoutTemplateEditorHref } from "@/lib/workout-template-editor-navigation";
 
 import type { TrainerAttentionKind, TrainerAttentionQueueItem } from "./dashboard-read-model";
 import type { TeamClient } from "./types";
@@ -272,7 +273,7 @@ function AllCalmState() {
           <Link href="/trainer/clients"><UsersRound className="size-4" />Клиенты</Link>
         </Button>
         <Button asChild variant="outline" className="rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
-          <Link href="/trainer/builder"><Dumbbell className="size-4" />Создать шаблон</Link>
+          <Link href={workoutTemplateEditorHref({ mode: "new", returnTo: "/trainer/dashboard" })}><Dumbbell className="size-4" />Создать шаблон</Link>
         </Button>
       </div>
     </div>

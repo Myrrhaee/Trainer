@@ -11,12 +11,12 @@ export default async function NewWorkoutTemplateEditorPage({ searchParams }: { s
   const params = await searchParams;
   const { actor } = await requireCapability("trainer", "/trainer/builder/new");
   const model = await new WorkoutTemplateEditorQueryService().bootstrapNew(actor);
-  const returnTo = safeWorkoutTemplateEditorReturnPath(first(params.returnTo));
-  const handoff = first(params.handoff);
+  const returnTo = safeWorkoutTemplateEditorReturnPath(single(params.returnTo));
+  const handoff = single(params.handoff);
 
   return <TrainerShell eyebrow="Конструктор тренировок" title="Новый шаблон" description="Соберите тренировку и сохраните неполный черновик, когда будете готовы продолжить.">
     <CanonicalWorkoutTemplateEditor actorUserId={actor.userId} initialModel={model} returnTo={returnTo} handoffToken={isQuickAssignHandoffToken(handoff) ? handoff : null} />
   </TrainerShell>;
 }
 
-function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
+function single(value: string | string[] | undefined) { return Array.isArray(value) ? undefined : value; }

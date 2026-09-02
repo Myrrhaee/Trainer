@@ -116,9 +116,6 @@ test.describe("Canonical three-role closed-alpha flow", () => {
       });
 
       await test.step("trainer sees canonical names and assigns a workout", async () => {
-        const template = await createCanonicalTemplate(trainer, workoutTitle);
-        templateId = template.id;
-
         await trainer.goto("/trainer/clients");
         const athleteOneRow = trainer.getByRole("row", { name: new RegExp(athleteOneName) });
         const athleteTwoRow = trainer.getByRole("row", { name: new RegExp(athleteTwoName) });
@@ -132,12 +129,63 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await expect(sheet).toBeVisible();
         athleteOneProfilePath = new URL(trainer.url()).pathname;
         athleteOneId = athleteOneProfilePath.split("/").at(-1) ?? "";
-        await sheet.getByRole("radio", { name: new RegExp(workoutTitle) }).click();
-        await sheet.getByRole("button", { name: "Сегодня" }).click();
-        await sheet.getByLabel("Заметка спортсмену").fill("Остановись с запасом в два повтора.");
-        await sheet.getByRole("button", { name: "Назначить тренировку", exact: true }).click();
-        await expect(sheet.getByRole("status").getByText("Тренировка назначена", { exact: true })).toBeVisible();
-        await sheet.getByRole("link", { name: "К списку спортсменов", exact: true }).click();
+        await expect(sheet.getByText("Нет опубликованных шаблонов", { exact: true })).toBeVisible();
+        await sheet.getByRole("button", { name: "Создать шаблон", exact: true }).click();
+        await expect.poll(() => {
+          const url = new URL(trainer.url());
+          return [url.pathname, Boolean(url.searchParams.get("handoff")), Boolean(url.searchParams.get("returnTo"))];
+        }).toEqual(["/trainer/builder/new", true, true]);
+        await expect(trainer.getByText("Вы создаёте шаблон для последующего назначения", { exact: true })).toBeVisible();
+        await trainer.getByLabel("Название", { exact: true }).fill(workoutTitle);
+        await trainer.getByRole("button", { name: "Добавить упражнение" }).first().click();
+        const library = trainer.getByRole("dialog", { name: "Библиотека упражнений" });
+        const libraryExercise = library.getByRole("list", { name: "Упражнения" }).getByRole("button").first();
+        const exerciseTitle = (await libraryExercise.locator("p").first().textContent())?.trim() ?? "";
+        expect(exerciseTitle).not.toBe("");
+        await libraryExercise.click();
+        const exerciseDetail = trainer.getByRole("dialog", { name: exerciseTitle });
+        await exerciseDetail.getByRole("button", { name: "Добавить упражнение" }).click();
+        const exerciseRow = trainer.getByRole("list", { name: "Упражнения шаблона" }).getByRole("listitem").first();
+        const exerciseDisclosure = exerciseRow.locator('button[aria-expanded]');
+        if (await exerciseDisclosure.getAttribute("aria-expanded") !== "true") await exerciseDisclosure.click();
+        await expect(exerciseDisclosure).toHaveAttribute("aria-expanded", "true");
+        await exerciseRow.getByLabel("Подходы").fill("1");
+        await exerciseRow.getByLabel("Повторения", { exact: true }).fill("8");
+        await exerciseRow.getByLabel("Отдых, сек").fill("90");
+        expect((await athleteOne.request.get("/api/workout-assignments")).status()).toBe(200);
+        expect((await (await athleteOne.request.get("/api/workout-assignments")).json() as { assignments: unknown[] }).assignments).toHaveLength(0);
+        await trainer.getByRole("button", { name: "Сохранить черновик" }).click();
+        await expect(trainer).toHaveURL(/\/trainer\/builder\/[0-9a-f-]{36}\?.*handoff=/);
+        templateId = new URL(trainer.url()).pathname.split("/").at(-1) ?? "";
+        await trainer.reload();
+        await expect(trainer.getByLabel("Название", { exact: true })).toHaveValue(workoutTitle);
+        await expect(trainer.getByText("Вы создаёте шаблон для последующего назначения", { exact: true })).toBeVisible();
+        await trainer.getByRole("button", { name: "Опубликовать" }).click();
+        const publishReceipt = trainer.getByRole("main").filter({ has: trainer.getByRole("heading", { name: "Шаблон опубликован" }) });
+        await expect(publishReceipt.getByText("Назначение спортсмену подтверждается отдельно.", { exact: false })).toBeVisible();
+        expect((await (await athleteOne.request.get("/api/workout-assignments")).json() as { assignments: unknown[] }).assignments).toHaveLength(0);
+        await publishReceipt.getByRole("button", { name: "Перейти к назначению" }).click();
+        await expect(trainer).toHaveURL(new RegExp(`/trainer/clients/${athleteOneId}\\?tab=training&assign=1.*handoff=`));
+        const returnedSheet = trainer.getByRole("dialog", { name: "Назначить тренировку" });
+        await expect(returnedSheet).toBeVisible();
+        const selectedTemplate = returnedSheet.getByRole("radio", { name: new RegExp(workoutTitle) });
+        await expect(selectedTemplate).toHaveAttribute("aria-checked", "true");
+        const publishedRevisionId = await selectedTemplate.getAttribute("data-template-revision-id");
+        expect(publishedRevisionId).toMatch(/^[0-9a-f-]{36}$/);
+        await expect(returnedSheet.getByText(workoutTitle, { exact: true }).last()).toBeVisible();
+        await returnedSheet.getByRole("button", { name: "Сегодня" }).click();
+        await returnedSheet.getByLabel("Заметка спортсмену").fill("Остановись с запасом в два повтора.");
+        const assignmentResponsePromise = trainer.waitForResponse((response) => response.url().endsWith("/api/workout-assignments") && response.request().method() === "POST");
+        await returnedSheet.getByRole("button", { name: "Назначить тренировку", exact: true }).click();
+        const assignmentResponse = await assignmentResponsePromise;
+        expect(assignmentResponse.status()).toBe(201);
+        const assignmentResult = await assignmentResponse.json() as { assignment: { id: string; sourceRevisionId: string } };
+        expect(assignmentResult.assignment.sourceRevisionId).toBe(publishedRevisionId);
+        const athleteAssignments = await (await athleteOne.request.get("/api/workout-assignments")).json() as { assignments: Array<{ id: string; sourceRevisionId: string; title: string }> };
+        expect(athleteAssignments.assignments[0]).toMatchObject({ id: assignmentResult.assignment.id, title: workoutTitle });
+        expect(athleteAssignments.assignments[0].sourceRevisionId).toBe(publishedRevisionId);
+        await expect(returnedSheet.getByRole("status").getByText("Тренировка назначена", { exact: true })).toBeVisible();
+        await returnedSheet.getByRole("link", { name: "К списку спортсменов", exact: true }).click();
         await expect(trainer).toHaveURL(/\/trainer\/clients/);
       });
 
@@ -351,7 +399,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await expect.poll(() => trainer.evaluate(() => document.activeElement?.getAttribute("data-roster-athlete"))).toBe(athleteOneId);
       });
 
-      await test.step("builder returns an exact published revision without creating an assignment", async () => {
+      await test.step("legacy Builder handoff normalizes to the new Editor and returns without assigning", async () => {
         const token = "r2c3_builder_handoff_token_000001";
         const scheduledFor = new Date().toISOString().slice(0, 10);
         const flow = JSON.stringify({
@@ -380,13 +428,19 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         }, { tokenValue: token, athleteUserId: athleteTwoId, transitionContext: flow, date: scheduledFor });
         const before = await athleteTwo.request.get("/api/workout-assignments");
         const beforeBody = await before.json() as { assignments: Array<{ id: string }> };
-        await trainer.goto(`/trainer/builder?athleteId=${athleteTwoId}&handoff=${token}&from=quick-assign`);
-        const templateCard = trainer.locator("article").filter({ hasText: workoutTitle });
-        await templateCard.getByRole("button", { name: "Перейти к назначению", exact: true }).click();
+        const returnTo = `/trainer/clients/${athleteTwoId}?${new URLSearchParams({ tab: "training", assign: "1", flow, handoff: token })}`;
+        await trainer.goto(`/trainer/builder?${new URLSearchParams({ handoff: token, returnTo })}`);
+        await expect.poll(() => {
+          const url = new URL(trainer.url());
+          return [url.pathname, Boolean(url.searchParams.get("handoff")), Boolean(url.searchParams.get("returnTo"))];
+        }).toEqual(["/trainer/builder/new", true, true]);
+        await expect(trainer.getByText("Вы создаёте шаблон для последующего назначения", { exact: true })).toBeVisible();
+        await trainer.getByRole("button", { name: "Назад" }).click();
         await expect(trainer).toHaveURL(new RegExp(`/trainer/clients/${athleteTwoId}\\?[^#]*assign=1[^#]*handoff=`));
         const sheet = trainer.getByRole("dialog", { name: "Назначить тренировку" });
-        await expect(sheet.getByRole("heading", { name: workoutTitle, exact: true })).toBeVisible();
         await expect(sheet.getByLabel("Поиск шаблонов")).toHaveValue("контрольная");
+        await expect(sheet.getByRole("radio", { checked: true })).toHaveCount(0);
+        await sheet.getByRole("radio", { name: new RegExp(workoutTitle) }).click();
         await expect(sheet.getByLabel("Выбрать дату тренировки")).toHaveValue(scheduledFor);
         await expect(sheet.getByLabel("Заметка спортсмену")).toHaveValue("Восстановленная заметка");
         const after = await athleteTwo.request.get("/api/workout-assignments");
@@ -532,68 +586,6 @@ async function signInWithDevelopmentOtp(page: Page, email: string) {
   await page.getByRole("button", { name: "Продолжить" }).click();
   await expect(page.getByRole("heading", { name: "Email подтверждён" })).toBeVisible();
   await page.getByRole("link", { name: "Продолжить" }).click();
-}
-
-async function createCanonicalTemplate(page: Page, title: string) {
-  const templateId = crypto.randomUUID();
-  const revisionId = crypto.randomUUID();
-  const content = {
-    id: templateId,
-    revisionId,
-    title,
-    revision: 1,
-    description: "Контрольная тренировка для canonical E2E.",
-    category: "Сила",
-    estimatedDurationMin: "20",
-    generalInstruction: "Один технический подход без отказа.",
-    items: [{
-      id: "canonical-e2e-row",
-      kind: "exercise",
-      exercise: {
-        instanceId: "canonical-e2e-squat",
-        exerciseId: "canonical-e2e-squat",
-        title: "Приседание с собственным весом",
-        category: "Сила",
-        prescription: {
-          type: "repetitions",
-          sets: "1",
-          repetitionMode: "fixed",
-          repetitionsMin: "8",
-          repetitionsMax: "8",
-          durationSec: "",
-          targetWeightKg: "",
-          restSec: "90",
-        },
-        perSetMode: false,
-        setOverrides: [],
-        trainerNote: "Остановись с запасом в два повтора.",
-      },
-    }],
-  };
-  const draftResponse = await page.request.post("/api/trainer/workout-builder/templates", {
-    headers: { Origin: baseURL },
-    data: {
-      commandId: crypto.randomUUID(), templateId, revisionId,
-      expectedEditToken: null, content,
-    },
-  });
-  expect(draftResponse.status()).toBe(201);
-  const draft = await draftResponse.json() as {
-    template: { id: string; revisionId: string; editToken: string };
-  };
-  const publishResponse = await page.request.post(
-    `/api/trainer/workout-builder/templates/${draft.template.id}/publish`,
-    {
-      headers: { Origin: baseURL },
-      data: {
-        commandId: crypto.randomUUID(),
-        revisionId: draft.template.revisionId,
-        expectedEditToken: draft.template.editToken,
-      },
-    },
-  );
-  expect(publishResponse.status()).toBe(200);
-  return (await publishResponse.json() as { template: { id: string; revisionId: string } }).template;
 }
 
 async function saveDisplayName(page: Page, displayName: string) {

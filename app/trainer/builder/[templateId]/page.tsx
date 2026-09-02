@@ -14,7 +14,10 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 export default async function ExactWorkoutTemplateEditorPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const [{ templateId }, query] = await Promise.all([params, searchParams]);
   const { actor } = await requireCapability("trainer", `/trainer/builder/${templateId}`);
-  const parsedView = parseWorkoutTemplateEditorView(first(query.view));
+  const parsedView = parseWorkoutTemplateEditorView(single(query.view));
+  if (parsedView.invalid || Array.isArray(query.view)) notFound();
+  const receipt = single(query.receipt);
+  if (receipt !== undefined && receipt !== "published") notFound();
   const service = new WorkoutTemplateEditorQueryService();
   let model;
   try {
@@ -23,11 +26,11 @@ export default async function ExactWorkoutTemplateEditorPage({ params, searchPar
     if (error instanceof WorkoutTemplateEditorNotFoundError || error instanceof WorkoutTemplateEditorValidationError || error instanceof WorkoutTemplateEditorViewUnavailableError) notFound();
     throw error;
   }
-  const returnTo = safeWorkoutTemplateEditorReturnPath(first(query.returnTo));
-  const handoff = first(query.handoff);
+  const returnTo = safeWorkoutTemplateEditorReturnPath(single(query.returnTo));
+  const handoff = single(query.handoff);
   return <TrainerShell eyebrow="Конструктор тренировок" title={model.content.title || "Шаблон тренировки"} description={model.mode === "published" ? "Опубликованная версия" : model.mode === "archived" ? "Сохранённая версия из архива" : "Редактирование черновика"}>
-    <CanonicalWorkoutTemplateEditor actorUserId={actor.userId} initialModel={model} returnTo={returnTo} handoffToken={isQuickAssignHandoffToken(handoff) ? handoff : null} />
+    <CanonicalWorkoutTemplateEditor key={`${model.mode}:${model.identity?.selectedRevisionId ?? templateId}`} actorUserId={actor.userId} initialModel={model} returnTo={returnTo} handoffToken={isQuickAssignHandoffToken(handoff) ? handoff : null} showPublishReceipt={receipt === "published" && model.mode === "published"} />
   </TrainerShell>;
 }
 
-function first(value: string | string[] | undefined) { return Array.isArray(value) ? value[0] : value; }
+function single(value: string | string[] | undefined) { return Array.isArray(value) ? undefined : value; }

@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/sheet";
 import { clearDemoSession, isDemoModeEnabled } from "@/lib/demo-mode";
 import { cn } from "@/lib/utils";
-import { templateWorkspaceBuilderHref } from "@/lib/template-workspace-navigation";
+import { workoutTemplateEditorHref } from "@/lib/workout-template-editor-navigation";
 
 type SearchItem = {
   title: string;
@@ -189,10 +189,7 @@ const commandGroups: Array<{ title: string; items: SearchItem[] }> = [
       {
         title: "Создать шаблон",
         helper: "Открыть рабочую область шаблонов тренировок",
-        href: templateWorkspaceBuilderHref({
-          mode: "create",
-          returnState: { status: "all", q: "", category: "", page: 1, anchor: null },
-        }),
+        href: workoutTemplateEditorHref({ mode: "new", returnTo: "/trainer/templates" }),
         icon: Hammer,
         keywords: ["создать", "шаблон", "тренировка", "новая"],
       },

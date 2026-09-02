@@ -53,11 +53,11 @@ import type {
 } from "@/lib/template-workspace-contract";
 import {
   parseTemplateWorkspaceUrlState,
-  templateWorkspaceBuilderHref,
   templateWorkspaceHref,
   type TemplateWorkspaceUrlState,
 } from "@/lib/template-workspace-navigation";
 import { cn } from "@/lib/utils";
+import { workoutTemplateEditorHref } from "@/lib/workout-template-editor-navigation";
 
 import {
   archiveTemplate,
@@ -333,7 +333,7 @@ export function CanonicalTemplatesWorkspace() {
         title: attempt.title.trim(),
       });
       setDuplicateAttempt(null);
-      router.push(templateWorkspaceBuilderHref({
+      router.push(workspaceEditorHref({
         mode: "editable",
         templateId: result.template.id,
         returnState: { ...urlState, anchor: result.template.id },
@@ -400,7 +400,7 @@ export function CanonicalTemplatesWorkspace() {
         expectedTemplateToken: attempt.item.actionPreconditions.lifecycleActionToken,
       });
       setRevisionAttempt(null);
-      router.push(templateWorkspaceBuilderHref({
+      router.push(workspaceEditorHref({
         mode: "editable",
         templateId: result.template.id,
         returnState: { ...urlState, anchor: result.template.id },
@@ -440,7 +440,7 @@ export function CanonicalTemplatesWorkspace() {
     setRefreshVersion((value) => value + 1);
   }
 
-  const createHref = templateWorkspaceBuilderHref({ mode: "create", returnState });
+  const createHref = workspaceEditorHref({ mode: "create", returnState });
   const count = workspace?.resultCount.value;
   const hasFilters = urlState.status !== "all" || Boolean(urlState.q) || Boolean(urlState.category);
 
@@ -694,7 +694,7 @@ function TemplateRow({
           {menuOpen ? (
             <div id={popoverId} role="group" aria-label={`Действия с шаблоном «${title}»`} className="absolute right-0 top-12 z-30 w-64 rounded-lg border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
               {item.lifecycle === "published_with_draft" && item.capabilities.canOpen ? (
-                <Link data-overflow-action href={templateWorkspaceBuilderHref({ mode: "published", templateId: item.templateId, returnState: { ...returnState, anchor: item.templateId } })} onClick={() => setMenuOpen(false)} className="flex min-h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-zinc-200 outline-none hover:bg-zinc-900 focus:bg-zinc-900"><Eye className="size-4 shrink-0" />Посмотреть опубликованную версию</Link>
+                <Link data-overflow-action href={workspaceEditorHref({ mode: "published", templateId: item.templateId, returnState: { ...returnState, anchor: item.templateId } })} onClick={() => setMenuOpen(false)} className="flex min-h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-zinc-200 outline-none hover:bg-zinc-900 focus:bg-zinc-900"><Eye className="size-4 shrink-0" />Посмотреть опубликованную версию</Link>
               ) : null}
               {item.capabilities.canCreateRevision ? (
                 <MenuButton icon={revisionBusy ? Loader2 : FilePlus2} label={revisionBusy ? "Создаём версию…" : "Создать новую версию"} disabled={revisionBusy} onClick={() => openAction(() => onCreateRevision(item))} />
@@ -816,7 +816,23 @@ function primaryBuilderHref(item: TemplateWorkspaceItem, returnState: TemplateWo
     : mode === "archived" ? item.capabilities.canOpenArchived
       : item.capabilities.canOpen;
   if (!allowed) return null;
-  return templateWorkspaceBuilderHref({ mode, templateId: item.templateId, returnState: { ...returnState, anchor: item.templateId } });
+  return workspaceEditorHref({ mode, templateId: item.templateId, returnState: { ...returnState, anchor: item.templateId } });
+}
+
+export function workspaceEditorHref(input: {
+  mode: "create" | "editable" | "published" | "archived";
+  templateId?: string;
+  returnState: TemplateWorkspaceUrlState;
+}) {
+  const returnTo = templateWorkspaceHref(input.returnState);
+  if (input.mode === "create") return workoutTemplateEditorHref({ mode: "new", returnTo });
+  if (!input.templateId) throw new Error("invalid_template_workspace_editor_target");
+  return workoutTemplateEditorHref({
+    mode: "exact",
+    templateId: input.templateId,
+    view: input.mode === "published" ? "published" : input.mode === "archived" ? "archived" : undefined,
+    returnTo,
+  });
 }
 
 function primaryActionLabel(item: TemplateWorkspaceItem) {

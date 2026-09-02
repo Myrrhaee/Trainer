@@ -3,8 +3,8 @@
 import { isQuickAssignHandoffToken, quickAssignHref } from "@/lib/quick-assign-navigation";
 import {
   decodeTrainerWorkflowContext,
-  type TrainerWorkflowContext,
 } from "@/lib/trainer-workflow-transition";
+import { workoutTemplateEditorHref } from "@/lib/workout-template-editor-navigation";
 
 const STORAGE_PREFIX = "quick-assign-builder-handoff:v1:";
 const TTL_MS = 30 * 60 * 1_000;
@@ -88,8 +88,10 @@ export function publishQuickAssignBuilderHandoff(input: {
 }
 
 export function quickAssignHrefFromHandoff(handoff: QuickAssignBuilderHandoff) {
-  const context = decodeTrainerWorkflowContext(handoff.transitionContext)
-    ?? directContext(handoff.athleteUserId);
+  const context = decodeTrainerWorkflowContext(handoff.transitionContext);
+  if (!context || (context.athleteUserId && context.athleteUserId !== handoff.athleteUserId)) {
+    throw new Error("invalid_quick_assign_handoff_context");
+  }
   return quickAssignHref({
     athleteUserId: handoff.athleteUserId,
     context,
@@ -98,30 +100,33 @@ export function quickAssignHrefFromHandoff(handoff: QuickAssignBuilderHandoff) {
 }
 
 export function builderHrefForQuickAssign(handoff: QuickAssignBuilderHandoff) {
-  const params = new URLSearchParams({
-    handoff: handoff.token,
+  return workoutTemplateEditorHref({
+    mode: "new",
+    handoffToken: handoff.token,
     returnTo: quickAssignHrefFromHandoff(handoff),
   });
-  return `/trainer/builder/new?${params}`;
 }
 
 function validHandoff(value: Partial<QuickAssignBuilderHandoff>, token: string) {
+  const context = typeof value.transitionContext === "string"
+    ? decodeTrainerWorkflowContext(value.transitionContext)
+    : null;
+  const validStatus = value.status === "editing"
+    ? value.publishedRevisionId === undefined
+    : value.status === "published" && isUuid(value.publishedRevisionId);
   return value.version === 1
     && value.token === token
     && typeof value.createdAt === "number"
     && typeof value.expiresAt === "number"
+    && value.expiresAt > value.createdAt
+    && value.expiresAt - value.createdAt <= TTL_MS
     && isUuid(value.athleteUserId)
-    && typeof value.transitionContext === "string"
-    && Boolean(decodeTrainerWorkflowContext(value.transitionContext))
-    && typeof value.query === "string"
-    && typeof value.scheduledFor === "string"
-    && typeof value.trainerNote === "string"
-    && (value.status === "editing" || value.status === "published")
-    && (value.publishedRevisionId === undefined || isUuid(value.publishedRevisionId));
-}
-
-function directContext(athleteUserId: string): TrainerWorkflowContext {
-  return { version: 1, origin: "direct", athleteUserId, tab: "training" };
+    && Boolean(context)
+    && (!context?.athleteUserId || context.athleteUserId === value.athleteUserId)
+    && typeof value.query === "string" && value.query.length <= 120
+    && typeof value.scheduledFor === "string" && (value.scheduledFor === "" || /^\d{4}-\d{2}-\d{2}$/.test(value.scheduledFor))
+    && typeof value.trainerNote === "string" && value.trainerNote.length <= 2_000
+    && validStatus;
 }
 
 function storageKey(token: string) {
