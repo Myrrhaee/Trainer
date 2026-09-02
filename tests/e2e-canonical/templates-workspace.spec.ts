@@ -30,8 +30,56 @@ test("canonical Templates Workspace supports lifecycle, commands and responsive 
     }
     const publishedOnly = await publish(page, templates[0]);
     const publishedWithDraft = await publish(page, templates[1]);
-    await createRevision(page, publishedWithDraft);
+    const editableUpdate = await createRevision(page, publishedWithDraft);
     await archive(page, templates[2]);
+
+    const publishedOnlyEditor = await page.request.get(
+      `/api/trainer/workout-builder/templates/${publishedOnly.id}/editor?view=published`,
+    );
+    expect(publishedOnlyEditor.status()).toBe(200);
+    expect(publishedOnlyEditor.headers()["cache-control"]).toBe("no-store");
+    expect((await publishedOnlyEditor.json() as { editor: { mode: string; identity: { selectedRevisionId: string } } }).editor)
+      .toMatchObject({ mode: "published", identity: { selectedRevisionId: publishedOnly.revisionId } });
+
+    const updateDefaultEditor = await page.request.get(
+      `/api/trainer/workout-builder/templates/${publishedWithDraft.id}/editor`,
+    );
+    expect(updateDefaultEditor.status()).toBe(200);
+    expect((await updateDefaultEditor.json() as { editor: { mode: string; identity: { selectedRevisionId: string } } }).editor)
+      .toMatchObject({ mode: "editable", identity: { selectedRevisionId: editableUpdate.revisionId } });
+
+    const updatePublishedEditor = await page.request.get(
+      `/api/trainer/workout-builder/templates/${publishedWithDraft.id}/editor?view=published`,
+    );
+    expect(updatePublishedEditor.status()).toBe(200);
+    expect((await updatePublishedEditor.json() as {
+      editor: { mode: string; identity: { selectedRevisionId: string }; lifecycle: { editableRevisionSummary: unknown } };
+    }).editor).toMatchObject({
+      mode: "published",
+      identity: { selectedRevisionId: publishedWithDraft.revisionId },
+      lifecycle: { editableRevisionSummary: { revisionId: editableUpdate.revisionId } },
+    });
+
+    const archivedEditor = await page.request.get(
+      `/api/trainer/workout-builder/templates/${templates[2].id}/editor?view=archived`,
+    );
+    expect(archivedEditor.status()).toBe(200);
+    expect((await archivedEditor.json() as { editor: { mode: string } }).editor.mode).toBe("archived");
+    expect((await page.request.get(
+      `/api/trainer/workout-builder/templates/${publishedOnly.id}/editor?view=editable`,
+    )).status()).toBe(409);
+    expect((await page.request.get(
+      `/api/trainer/workout-builder/templates/${publishedOnly.id}/editor?view=history`,
+    )).status()).toBe(400);
+
+    const guest = await browser.newContext({ baseURL });
+    try {
+      expect((await guest.request.get(
+        `/api/trainer/workout-builder/templates/${publishedOnly.id}/editor`,
+      )).status()).toBe(401);
+    } finally {
+      await guest.close();
+    }
 
     await page.goto("/trainer/dashboard");
     await page.getByRole("link", { name: "Шаблоны", exact: true }).click();
@@ -254,6 +302,9 @@ async function createRevision(page: Page, template: { id: string; templateToken:
     data: { commandId: crypto.randomUUID(), expectedTemplateToken: template.templateToken },
   });
   expect(response.status()).toBe(201);
+  return (await response.json() as {
+    template: { id: string; revisionId: string; editToken: string; templateToken: string };
+  }).template;
 }
 
 async function archive(page: Page, template: { id: string; templateToken: string }) {
