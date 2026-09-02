@@ -166,12 +166,12 @@ test("canonical Templates Workspace supports lifecycle, commands and responsive 
     await expect(duplicateDialog.getByLabel("Название копии")).toHaveValue("Копия для возврата");
     await expect(duplicateError).toBeFocused();
     await duplicateDialog.getByRole("button", { name: "Повторить дублирование" }).click();
-    await expect(page).toHaveURL(/\/trainer\/builder\?.*templateId=/);
+    await expect(page).toHaveURL(/\/trainer\/builder\/[0-9a-f-]{36}/);
     expect(duplicatePayloads).toHaveLength(2);
     expect(duplicatePayloads[1]).toEqual(duplicatePayloads[0]);
     await page.unroute("**/api/trainer/workout-builder/templates/duplicate");
-    await expect(page.getByLabel("Название шаблона")).toHaveValue("Копия для возврата");
-    await page.getByRole("button", { name: "Вернуться к шаблонам" }).click();
+    await expect(page.getByLabel("Название")).toHaveValue("Копия для возврата");
+    await page.getByRole("button", { name: "Назад" }).click();
     await expect(page).toHaveURL(/\/trainer\/templates\?status=published/);
     await expect(page.getByText("Найдено 1", { exact: true })).toBeVisible();
 

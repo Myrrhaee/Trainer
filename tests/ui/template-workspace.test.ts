@@ -48,15 +48,15 @@ test("safe return path rejects foreign routes and capability material", () => {
   assert.equal(safeTemplateWorkspaceReturnPath("https://example.test/trainer/templates"), null);
 });
 
-test("all compatibility Builder destinations use one navigation helper", () => {
+test("Workspace create destination uses the canonical product Editor route", () => {
   const href = templateWorkspaceBuilderHref({
     mode: "create",
     returnState: { status: "drafts", q: "сила", category: "", page: 1, anchor: null },
   });
   const url = new URL(href, "http://trainer.local");
-  assert.equal(url.pathname, "/trainer/builder");
-  assert.equal(url.searchParams.get("create"), "1");
-  assert.equal(url.searchParams.get("from"), "templates");
+  assert.equal(url.pathname, "/trainer/builder/new");
+  assert.equal(url.searchParams.get("create"), null);
+  assert.equal(url.searchParams.get("from"), null);
   assert.equal(url.searchParams.get("returnTo"), "/trainer/templates?status=drafts&q=%D1%81%D0%B8%D0%BB%D0%B0");
   assert.equal(
     templateWorkspaceReturnWithAnchor(url.searchParams.get("returnTo"), TEMPLATE_ID),

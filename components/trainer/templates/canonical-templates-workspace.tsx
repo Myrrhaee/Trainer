@@ -6,6 +6,7 @@ import {
   Archive,
   ChevronDown,
   Copy,
+  Eye,
   FileClock,
   FilePlus2,
   Filter,
@@ -692,6 +693,9 @@ function TemplateRow({
           ><MoreHorizontal className="size-4" /></Button>
           {menuOpen ? (
             <div id={popoverId} role="group" aria-label={`Действия с шаблоном «${title}»`} className="absolute right-0 top-12 z-30 w-64 rounded-lg border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
+              {item.lifecycle === "published_with_draft" && item.capabilities.canOpen ? (
+                <Link data-overflow-action href={templateWorkspaceBuilderHref({ mode: "published", templateId: item.templateId, returnState: { ...returnState, anchor: item.templateId } })} onClick={() => setMenuOpen(false)} className="flex min-h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-zinc-200 outline-none hover:bg-zinc-900 focus:bg-zinc-900"><Eye className="size-4 shrink-0" />Посмотреть опубликованную версию</Link>
+              ) : null}
               {item.capabilities.canCreateRevision ? (
                 <MenuButton icon={revisionBusy ? Loader2 : FilePlus2} label={revisionBusy ? "Создаём версию…" : "Создать новую версию"} disabled={revisionBusy} onClick={() => openAction(() => onCreateRevision(item))} />
               ) : null}

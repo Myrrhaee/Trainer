@@ -90,13 +90,12 @@ export function templateWorkspaceBuilderHref(input: {
   templateId?: string;
   returnState: TemplateWorkspaceUrlState;
 }) {
-  const params = new URLSearchParams({
-    from: "templates",
-    returnTo: templateWorkspaceHref(input.returnState),
-  });
-  if (input.mode === "create") params.set("create", "1");
-  else if (input.templateId && uuidPattern.test(input.templateId)) params.set("templateId", input.templateId);
-  return `/trainer/builder?${params.toString()}`;
+  const params = new URLSearchParams({ returnTo: templateWorkspaceHref(input.returnState) });
+  if (input.mode === "create") return `/trainer/builder/new?${params.toString()}`;
+  if (!input.templateId || !uuidPattern.test(input.templateId)) throw new Error("invalid_template_workspace_builder_target");
+  if (input.mode === "published") params.set("view", "published");
+  if (input.mode === "archived") params.set("view", "archived");
+  return `/trainer/builder/${input.templateId}?${params.toString()}`;
 }
 
 function normalizeBounded(value: string | null | undefined, max: number) {

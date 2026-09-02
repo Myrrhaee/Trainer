@@ -99,11 +99,10 @@ export function quickAssignHrefFromHandoff(handoff: QuickAssignBuilderHandoff) {
 
 export function builderHrefForQuickAssign(handoff: QuickAssignBuilderHandoff) {
   const params = new URLSearchParams({
-    athleteId: handoff.athleteUserId,
     handoff: handoff.token,
-    from: "quick-assign",
+    returnTo: quickAssignHrefFromHandoff(handoff),
   });
-  return `/trainer/builder?${params}`;
+  return `/trainer/builder/new?${params}`;
 }
 
 function validHandoff(value: Partial<QuickAssignBuilderHandoff>, token: string) {

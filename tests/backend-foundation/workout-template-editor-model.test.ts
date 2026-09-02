@@ -45,7 +45,7 @@ test("view input is strict and future routes contain no revision, token or capab
   assert.deepEqual(parseWorkoutTemplateEditorView("history"), { view: "default", invalid: true });
   assert.equal(workoutTemplateEditorHref({ mode: "new", returnTo: "/trainer/templates?status=drafts" }), "/trainer/builder/new?returnTo=%2Ftrainer%2Ftemplates%3Fstatus%3Ddrafts");
   assert.equal(workoutTemplateEditorHref({ mode: "exact", templateId, view: "published" }), `/trainer/builder/${templateId}?view=published`);
-  assert.equal(safeWorkoutTemplateEditorReturnPath("/trainer/dashboard"), null);
+  assert.equal(safeWorkoutTemplateEditorReturnPath("/trainer/dashboard"), "/trainer/dashboard");
   assert.equal(safeWorkoutTemplateEditorReturnPath("/trainer/templates?editToken=secret"), null);
 });
 

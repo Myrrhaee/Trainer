@@ -161,6 +161,13 @@ test("partial Draft persists null facts and only a complete persisted Draft can 
     const replay = await repository.publish(owner, published.input);
     assert.equal(replay.replay, true);
     assert.equal(replay.template.revisionId, published.result.template.revisionId);
+    const publicationAudits = await admin.query<{ count: string }>(`SELECT count(*)::text AS count
+      FROM app.audit_events WHERE event_type = 'workout.template.published'
+        AND metadata->>'template_id' = $1`, [published.result.template.id]);
+    assert.equal(publicationAudits.rows[0].count, "1");
+    const publicationReceipts = await admin.query<{ count: string }>(`SELECT count(*)::text AS count
+      FROM app.workout_template_command_receipts WHERE command_id = $1`, [published.input.commandId]);
+    assert.equal(publicationReceipts.rows[0].count, "1");
 
     const invalid = await createDraft(repository, owner, content({ title: "Invalid direct publish", items: [] }));
     const client = await admin.connect();

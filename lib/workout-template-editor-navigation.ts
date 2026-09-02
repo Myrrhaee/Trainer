@@ -1,5 +1,5 @@
 import { isQuickAssignHandoffToken } from "@/lib/quick-assign-navigation";
-import { safeTemplateWorkspaceReturnPath } from "@/lib/template-workspace-navigation";
+import { safeTemplateWorkspaceReturnPath, templateWorkspaceReturnWithAnchor } from "@/lib/template-workspace-navigation";
 import { decodeTrainerWorkflowContext, isUuid } from "@/lib/trainer-workflow-transition";
 import type { WorkoutTemplateEditorViewIntent } from "@/lib/workout-template-editor-contract";
 
@@ -41,6 +41,8 @@ export function safeWorkoutTemplateEditorReturnPath(value: string | null | undef
     return null;
   }
   if (url.origin !== "http://trainer.local") return null;
+  const shell = safeTrainerShellDestination(url);
+  if (shell) return shell;
   const match = url.pathname.match(/^\/trainer\/clients\/([0-9a-f-]{36})$/i);
   if (!match || !isUuid(match[1])) return null;
   const allowed = new Set(["tab", "assign", "flow", "handoff"]);
@@ -54,6 +56,21 @@ export function safeWorkoutTemplateEditorReturnPath(value: string | null | undef
   const handoff = url.searchParams.get("handoff");
   if (handoff && !isQuickAssignHandoffToken(handoff)) return null;
   return `${url.pathname}?${url.searchParams.toString()}`;
+}
+
+export function resolveWorkoutTemplateExitDestination(
+  value: string | null | undefined,
+  templateId: string | null | undefined,
+) {
+  const workspace = safeTemplateWorkspaceReturnPath(value);
+  if (workspace) return templateWorkspaceReturnWithAnchor(workspace, templateId) ?? "/trainer/templates";
+  return safeWorkoutTemplateEditorReturnPath(value) ?? "/trainer/templates";
+}
+
+function safeTrainerShellDestination(url: URL) {
+  const allowed = new Set(["/trainer/dashboard", "/trainer/clients", "/trainer/library", "/trainer/settings"]);
+  if (!allowed.has(url.pathname) || url.search || url.hash) return null;
+  return url.pathname;
 }
 
 function failInvalidTemplate(): never {
