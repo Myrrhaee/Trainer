@@ -3,6 +3,7 @@ export type WorkoutLogStatus = "pending" | "completed" | "skipped" | "incomplete
 
 export type WorkoutSetLog = {
   id: string;
+  sourceAssignmentSetId: string | null;
   setKey: string;
   position: number;
   kind: "warmup" | "working";
@@ -16,6 +17,7 @@ export type WorkoutSetLog = {
   actualWeightKg: number | null;
   rpe: number | null;
   athleteComment: string;
+  updatedAt: string;
 };
 
 export type WorkoutExerciseLog = {
@@ -26,6 +28,7 @@ export type WorkoutExerciseLog = {
   status: WorkoutLogStatus;
   athleteNote: string;
   sets: WorkoutSetLog[];
+  updatedAt: string;
 };
 
 export type WorkoutSession = {
@@ -41,6 +44,7 @@ export type WorkoutSession = {
   completedAt: string | null;
   exercises: WorkoutExerciseLog[];
   attentionItemId: string | null;
+  updatedAt: string;
 };
 
 export type ProgressSetInput = {

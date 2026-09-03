@@ -57,6 +57,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
     let athleteOneProfilePath = "";
     let templateId = "";
     let assignmentId = "";
+    let durationExerciseTitle = "";
     [trainer, athleteOne, athleteTwo].forEach((page) => observeRuntimeErrors(page, observed));
 
     try {
@@ -153,6 +154,21 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await exerciseRow.getByLabel("Подходы").fill("1");
         await exerciseRow.getByLabel("Повторения", { exact: true }).fill("8");
         await exerciseRow.getByLabel("Отдых, сек").fill("90");
+        await trainer.getByRole("button", { name: "Добавить упражнение" }).first().click();
+        const secondLibrary = trainer.getByRole("dialog", { name: "Библиотека упражнений" });
+        const durationLibraryExercise = secondLibrary.getByRole("list", { name: "Упражнения" }).getByRole("button").nth(1);
+        durationExerciseTitle = (await durationLibraryExercise.locator("p").first().textContent())?.trim() ?? "";
+        expect(durationExerciseTitle).not.toBe("");
+        await durationLibraryExercise.click();
+        const durationExerciseDetail = trainer.getByRole("dialog", { name: durationExerciseTitle });
+        await durationExerciseDetail.getByRole("button", { name: "Добавить упражнение" }).click();
+        const durationExerciseRow = trainer.getByRole("list", { name: "Упражнения шаблона" }).getByRole("listitem").nth(1);
+        const durationDisclosure = durationExerciseRow.locator('button[aria-expanded]');
+        if (await durationDisclosure.getAttribute("aria-expanded") !== "true") await durationDisclosure.click();
+        await durationExerciseRow.getByLabel("Формат").selectOption("duration");
+        await durationExerciseRow.getByLabel("Подходы").fill("1");
+        await durationExerciseRow.getByLabel("Длительность, сек").fill("30");
+        await durationExerciseRow.getByLabel("Отдых, сек").fill("60");
         expect((await athleteOne.request.get("/api/workout-assignments")).status()).toBe(200);
         expect((await (await athleteOne.request.get("/api/workout-assignments")).json() as { assignments: unknown[] }).assignments).toHaveLength(0);
         await trainer.getByRole("button", { name: "Сохранить черновик" }).click();
@@ -273,15 +289,95 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await athleteOne.getByLabel("Повторы", { exact: true }).fill("8");
         await athleteOne.getByLabel("RPE", { exact: true }).fill("7");
         await athleteOne.getByLabel("Комментарий", { exact: true }).fill("B14: подход выполнен через мобильный сценарий.");
+        const progressPattern = "**/api/workout-sessions/*/progress";
+        const progressCommandIds: string[] = [];
+        let progressRequests = 0;
+        await athleteOne.route(progressPattern, async (route) => {
+          progressRequests += 1;
+          progressCommandIds.push((route.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey);
+          if (progressRequests === 1) {
+            await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "temporarily_unavailable" }) });
+            return;
+          }
+          await route.continue();
+        });
+        await athleteOne.getByRole("button", { name: "Сохранить", exact: true }).click();
+        await expect(athleteOne.getByText("Не удалось подтвердить, сохранился ли подход.", { exact: true })).toBeVisible();
+        await expect(athleteOne.getByLabel("Повторы", { exact: true })).toHaveValue("8");
+        await athleteOne.getByRole("button", { name: "Проверить", exact: true }).click();
+        await expect.poll(() => progressRequests).toBe(2);
+        expect(new Set(progressCommandIds).size).toBe(1);
+        await expect(athleteOne.getByText("Подход сохранён", { exact: true })).toBeVisible();
+        await athleteOne.unroute(progressPattern);
+        removeObserved(observed, (item) => item === "http:503:/api/workout-sessions/" + startedSessionId + "/progress");
+        removeObserved(observed, (item) => item.startsWith("console:/client/workouts:Failed to load resource") && item.includes("503"));
+        await athleteOne.reload();
+        await expect(athleteOne.getByLabel("Повторы", { exact: true })).toHaveValue("8");
+
+        await athleteOne.getByLabel("Повторы", { exact: true }).fill("9");
+        let knownFailureCommand = "";
+        await athleteOne.route(progressPattern, async (route) => {
+          knownFailureCommand = (route.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey;
+          await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "invalid_number" }) });
+        });
+        await athleteOne.getByRole("button", { name: "Сохранить", exact: true }).click();
+        await expect(athleteOne.getByText("Не удалось сохранить подход. Введённые значения сохранены на экране.", { exact: true })).toBeVisible();
+        await expect(athleteOne.getByLabel("Повторы", { exact: true })).toHaveValue("9");
+        await athleteOne.unroute(progressPattern);
+        const retryRequest = athleteOne.waitForRequest((request) => request.url().includes("/progress") && request.method() === "POST");
+        await athleteOne.getByRole("button", { name: "Повторить", exact: true }).click();
+        expect(((await retryRequest).postDataJSON() as { idempotencyKey: string }).idempotencyKey).toBe(knownFailureCommand);
+        await expect(athleteOne.getByText("Подход сохранён", { exact: true })).toBeVisible();
+
+        await athleteOne.getByLabel("Повторы", { exact: true }).fill("10");
+        let persistedUnknownPosts = 0;
+        await athleteOne.route(progressPattern, async (route) => {
+          persistedUnknownPosts += 1;
+          const persisted = await route.fetch();
+          await route.fulfill({ response: persisted, status: 503, contentType: "application/json", body: JSON.stringify({ error: "temporarily_unavailable" }) });
+        });
+        await athleteOne.getByRole("button", { name: "Сохранить", exact: true }).click();
+        await expect(athleteOne.getByText("Не удалось подтвердить, сохранился ли подход.", { exact: true })).toBeVisible();
+        await athleteOne.unroute(progressPattern);
+        await athleteOne.getByRole("button", { name: "Проверить", exact: true }).click();
+        await expect(athleteOne.getByText("Подход сохранён", { exact: true })).toBeVisible();
+        expect(persistedUnknownPosts).toBe(1);
+        removeObserved(observed, (item) => item === "http:503:/api/workout-sessions/" + startedSessionId + "/progress");
+        removeObserved(observed, (item) => item.startsWith("console:/client/workouts:Failed to load resource") && (item.includes("503") || item.includes("400")));
+        const persistedSecondTab = await athleteOneContext.newPage();
+        observeRuntimeErrors(persistedSecondTab, observed);
+        await persistedSecondTab.goto(sessionPath);
+        await expect(persistedSecondTab.getByLabel("Повторы", { exact: true })).toHaveValue("10");
+        await persistedSecondTab.close();
+
+        await athleteOne.getByRole("tab", { name: new RegExp(durationExerciseTitle) }).click();
+        await athleteOne.getByLabel("Секунды", { exact: true }).fill("32");
+        await athleteOne.getByLabel("RPE", { exact: true }).fill("6.5");
         await athleteOne.getByRole("button", { name: "Сохранить", exact: true }).click();
         await expect(athleteOne.getByText("Подход сохранён", { exact: true })).toBeVisible();
+        await athleteOne.reload();
+        await athleteOne.getByRole("tab", { name: new RegExp(durationExerciseTitle) }).click();
+        await expect(athleteOne.getByLabel("Секунды", { exact: true })).toHaveValue("32");
+        await athleteOne.getByRole("button", { name: "Пропустить подход 1" }).click();
+        await expect(athleteOne.getByText("Подход отмечен как пропущенный", { exact: true })).toBeVisible();
+        await athleteOne.reload();
+        await athleteOne.getByRole("tab", { name: new RegExp(durationExerciseTitle) }).click();
+        await expect(athleteOne.getByText("Пропущен", { exact: true })).toBeVisible();
+        await expect(athleteOne.getByLabel("Секунды", { exact: true })).toHaveValue("");
+        await athleteOne.getByLabel("Секунды", { exact: true }).fill("32");
+        await athleteOne.getByRole("button", { name: "Сохранить", exact: true }).click();
+        await expect(athleteOne.getByText("Подход сохранён", { exact: true })).toBeVisible();
+        await athleteOne.setViewportSize({ width: 390, height: 500 });
+        await athleteOne.getByLabel("Секунды", { exact: true }).focus();
+        await expectNoHorizontalOverflow(athleteOne);
+        await athleteOne.setViewportSize({ width: 390, height: 844 });
         await expectNoHorizontalOverflow(athleteOne);
 
         const completeButton = athleteOne.getByRole("button", { name: "Завершить", exact: true });
         await completeButton.scrollIntoViewIfNeeded();
         await completeButton.click();
         const dialog = athleteOne.getByRole("dialog", { name: "Завершить тренировку?" });
-        await expect(dialog).toContainText("Выполнено 1 из 1 подходов");
+        await expect(dialog).toContainText("Выполнено 2 из 2 подходов");
         await dialog.getByRole("button", { name: "Завершить", exact: true }).click();
         await expect(athleteOne.getByRole("heading", { name: "Результат сохранён" })).toBeVisible();
         await expectNoHorizontalOverflow(athleteOne);
@@ -530,7 +626,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         await templateRow.click();
         await expect(sheet.getByRole("heading", { name: workoutTitle, exact: true })).toBeVisible();
         await expect(sheet.getByRole("button", { name: "К выбору шаблона" })).toBeVisible();
-        await expect(sheet.getByText(/Версия 1 · 1 упражнение · 1 подход/)).toBeVisible();
+        await expect(sheet.getByText(/Версия 1 · 2 упражнения · 2 подхода/)).toBeVisible();
         await expect(sheet.getByText(/ОПУБЛИКОВАННАЯ ВЕРСИЯ/)).toHaveCount(0);
         await expectNoHorizontalOverflow(trainer);
         await trainer.screenshot({ path: "test-results/canonical/r2c2p-quick-assign-mobile-selected.png" });

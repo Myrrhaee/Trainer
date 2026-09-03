@@ -11,7 +11,13 @@ const assignmentId = "11111111-1111-4111-8111-111111111111";
 
 function execution(input: { session?: boolean; canStart?: boolean; assignmentId?: string } = {}): ClientWorkoutExecutionReadModel {
   const id = input.assignmentId ?? assignmentId;
+  const sessionId = input.session ? "55555555-5555-4555-8555-555555555555" : null;
   return {
+    identity: {
+      assignmentId: id,
+      sessionId,
+      athleteUserId: "22222222-2222-4222-8222-222222222222",
+    },
     assignment: {
       assignmentId: id,
       athleteUserId: "22222222-2222-4222-8222-222222222222",
@@ -41,7 +47,14 @@ function execution(input: { session?: boolean; canStart?: boolean; assignmentId?
       completedAt: null,
       exercises: [],
       attentionItemId: null,
+      updatedAt: "2026-09-03T10:00:00.000Z",
     } : null,
+    capabilities: {
+      canEdit: Boolean(input.session),
+      canSkip: Boolean(input.session),
+      canResume: Boolean(input.session),
+      canEnterCompletionFlow: Boolean(input.session),
+    },
   };
 }
 

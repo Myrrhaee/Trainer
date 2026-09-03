@@ -82,8 +82,19 @@ export type ClientWorkoutCollectionReadModel = {
 };
 
 export type ClientWorkoutExecutionReadModel = {
+  identity: {
+    assignmentId: string;
+    sessionId: string | null;
+    athleteUserId: string;
+  };
   assignment: ClientWorkoutAssignmentReadModel;
   session: WorkoutSession | null;
+  capabilities: {
+    canEdit: boolean;
+    canSkip: boolean;
+    canResume: boolean;
+    canEnterCompletionFlow: boolean;
+  };
 };
 
 export type StartOrResumeSessionResult = {

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, Loader2, MessageSquare, Play, Save, SkipForward } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle2, List, Loader2, MessageSquare, Play, Save, SkipForward } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  createClientWorkoutSetAttempt,
+  isSameClientWorkoutSetIntent,
+  reconcileClientWorkoutSetAttempt,
+  type ClientWorkoutSetCommandAttempt,
+  type ClientWorkoutSetOperation,
+} from "@/lib/client-workout-progress-command";
+import {
   createClientWorkoutStartAttempt,
   reconcileClientWorkoutStart,
   type ClientWorkoutStartAttempt,
@@ -25,12 +32,14 @@ import type {
   ClientWorkoutAssignmentReadModel,
   ClientWorkoutExecutionReadModel,
   ClientWorkoutExercisePrescription,
+  ClientWorkoutSetPrescription,
   StartOrResumeSessionResult,
 } from "@/lib/server/client-workouts/client-workout-types";
 import type { ReviewFeedback } from "@/lib/server/reviews/review-types";
 import type { WorkoutSession, WorkoutSetLog } from "@/lib/server/workout-sessions/workout-session-types";
 
 type Values = { repetitions: string; duration: string; weight: string; rpe: string; comment: string };
+type SetCommandState = "editing" | "saving" | "saved" | "skipped" | "save_failed" | "outcome_unknown" | "conflict";
 
 function initialValues(set: WorkoutSetLog): Values {
   return {
@@ -47,7 +56,7 @@ function numberOrNull(value: string) {
   return normalized === "" ? null : Number(normalized);
 }
 
-function plannedResult(set: WorkoutSetLog) {
+function plannedResult(set: WorkoutSetLog, prescription?: ClientWorkoutSetPrescription) {
   const parts: string[] = [];
   if (set.plannedRepetitionsMin !== null) {
     parts.push(set.plannedRepetitionsMin === set.plannedRepetitionsMax
@@ -56,6 +65,7 @@ function plannedResult(set: WorkoutSetLog) {
   }
   if (set.plannedDurationSeconds !== null) parts.push(`${set.plannedDurationSeconds} сек.`);
   if (set.plannedWeightKg !== null) parts.push(`${set.plannedWeightKg} кг`);
+  if (prescription?.restSeconds !== undefined) parts.push(`отдых ${prescription.restSeconds} сек.`);
   return parts.join(" · ") || "Свободный подход";
 }
 
@@ -125,6 +135,11 @@ export function CanonicalWorkoutExecution({
   const [unavailable, setUnavailable] = useState(false);
   const [startState, setStartState] = useState<StartState>("idle");
   const startAttempt = useRef<ClientWorkoutStartAttempt | null>(null);
+  const setAttempts = useRef<Record<string, ClientWorkoutSetCommandAttempt>>({});
+  const dirtySets = useRef(new Set<string>());
+  const [setCommandStates, setSetCommandStates] = useState<Record<string, SetCommandState>>({});
+  const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
+  const [executionCapabilities, setExecutionCapabilities] = useState<ClientWorkoutExecutionReadModel["capabilities"] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +153,7 @@ export function CanonicalWorkoutExecution({
         }
         setAssignment(body.execution.assignment);
         setSession(body.execution.session);
+        setExecutionCapabilities(body.execution.capabilities);
         if (!sessionId && body.execution.session) {
           router.replace(clientSessionRoute(body.execution.session.id, returnTo));
         }
@@ -156,12 +172,25 @@ export function CanonicalWorkoutExecution({
 
   useEffect(() => {
     if (!session) return;
-    const next: Record<string, Values> = {};
-    for (const exercise of session.exercises) {
-      for (const set of exercise.sets) next[set.id] = initialValues(set);
-    }
-    setValues(next);
+    setValues((current) => {
+      const next: Record<string, Values> = {};
+      for (const exercise of session.exercises) {
+        for (const set of exercise.sets) {
+          next[set.id] = dirtySets.current.has(set.id) && current[set.id]
+            ? current[set.id]
+            : initialValues(set);
+        }
+      }
+      return next;
+    });
   }, [session]);
+
+  useEffect(() => {
+    if (!session?.exercises.length) return;
+    if (!activeExerciseId || !session.exercises.some((exercise) => exercise.id === activeExerciseId)) {
+      setActiveExerciseId(session.exercises[0].id);
+    }
+  }, [activeExerciseId, session]);
 
   useEffect(() => {
     if (!session || session.status === "active") {
@@ -185,8 +214,13 @@ export function CanonicalWorkoutExecution({
 
   const completedCount = session?.exercises.flatMap((item) => item.sets)
     .filter((item) => item.status === "completed").length ?? 0;
+  const persistedCount = session?.exercises.flatMap((item) => item.sets)
+    .filter((item) => item.status !== "pending").length ?? 0;
   const totalCount = session?.exercises.reduce((sum, item) => sum + item.sets.length, 0) ?? 0;
   const isTerminal = session ? session.status !== "active" : false;
+  const activeExerciseIndex = session?.exercises.findIndex((exercise) => exercise.id === activeExerciseId) ?? -1;
+  const activeExercise = activeExerciseIndex >= 0 ? session?.exercises[activeExerciseIndex] : session?.exercises[0];
+  const activePrescription = assignment?.exercises.find((exercise) => exercise.assignmentExerciseId === activeExercise?.assignmentExerciseId);
 
   async function submitStart(attempt: ClientWorkoutStartAttempt) {
     setBusyKey("start");
@@ -199,6 +233,7 @@ export function CanonicalWorkoutExecution({
         body: JSON.stringify({ assignmentId: attempt.assignmentId, clientTimezone: attempt.clientTimezone, idempotencyKey: attempt.commandId }),
       });
       setSession(body.session);
+      setExecutionCapabilities({ canEdit: true, canSkip: true, canResume: true, canEnterCompletionFlow: true });
       setStartState("success");
       startAttempt.current = null;
       router.replace(clientSessionRoute(body.session.id, returnTo));
@@ -236,6 +271,7 @@ export function CanonicalWorkoutExecution({
         `/api/client/workouts?assignmentId=${encodeURIComponent(attempt.assignmentId)}`,
       );
       setAssignment(body.execution.assignment);
+      setExecutionCapabilities(body.execution.capabilities);
       const decision = reconcileClientWorkoutStart(attempt, body.execution);
       if (decision === "accept" && body.execution.session) {
         setSession(body.execution.session);
@@ -261,37 +297,109 @@ export function CanonicalWorkoutExecution({
     await submitStart(attempt);
   }
 
-  async function saveSet(set: WorkoutSetLog, status: "completed" | "skipped") {
-    if (!session || busyKey) return;
+  function candidateSetAttempt(exerciseLogId: string, set: WorkoutSetLog, operation: ClientWorkoutSetOperation) {
+    if (!session || !assignment) return null;
     const current = values[set.id] ?? initialValues(set);
-    setBusyKey(set.id);
-    setError(null);
-    setMessage(null);
+    return createClientWorkoutSetAttempt({
+      operation,
+      assignmentId: assignment.assignmentId,
+      sessionId: session.id,
+      exerciseLogId,
+      set,
+      expectedVersion: session.version,
+      actual: {
+        actualRepetitions: numberOrNull(current.repetitions),
+        actualDurationSeconds: numberOrNull(current.duration),
+        actualWeightKg: numberOrNull(current.weight),
+        rpe: numberOrNull(current.rpe),
+        athleteComment: current.comment,
+      },
+    });
+  }
+
+  function saveSet(exerciseLogId: string, set: WorkoutSetLog, operation: ClientWorkoutSetOperation) {
+    if (!session || busyKey) return;
+    const candidate = candidateSetAttempt(exerciseLogId, set, operation);
+    if (!candidate) return;
+    const previous = setAttempts.current[set.id];
+    const attempt = previous && isSameClientWorkoutSetIntent(previous, candidate) ? previous : candidate;
+    setAttempts.current[set.id] = attempt;
+    void submitSetAttempt(attempt);
+  }
+
+  async function submitSetAttempt(attempt: ClientWorkoutSetCommandAttempt) {
+    setBusyKey(attempt.setLogId);
+    setSetCommandStates((current) => ({ ...current, [attempt.setLogId]: "saving" }));
     try {
-      const body = await jsonRequest<{ session: WorkoutSession }>(`/api/workout-sessions/${session.id}/progress`, {
+      const body = await jsonRequest<{ session: WorkoutSession }>(`/api/workout-sessions/${attempt.sessionId}/progress`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expectedVersion: session.version,
-          idempotencyKey: crypto.randomUUID(),
-          sets: [{
-            setLogId: set.id,
-            status,
-            actualRepetitions: status === "skipped" ? null : numberOrNull(current.repetitions),
-            actualDurationSeconds: status === "skipped" ? null : numberOrNull(current.duration),
-            actualWeightKg: status === "skipped" ? null : numberOrNull(current.weight),
-            rpe: status === "skipped" ? null : numberOrNull(current.rpe),
-            athleteComment: current.comment,
-          }],
-        }),
+        body: JSON.stringify(attempt.frozenPayload),
       });
+      dirtySets.current.delete(attempt.setLogId);
+      delete setAttempts.current[attempt.setLogId];
       setSession(body.session);
-      setMessage(status === "completed" ? "Подход сохранён" : "Подход пропущен");
+      setSetCommandStates((current) => ({
+        ...current,
+        [attempt.setLogId]: attempt.operation === "skip" ? "skipped" : "saved",
+      }));
     } catch (caught) {
-      setError(errorText(caught instanceof Error ? caught.message : "request_failed"));
+      const unknown = !(caught instanceof RequestError) || caught.status >= 500;
+      const conflict = caught instanceof RequestError && (caught.status === 409 || caught.status === 404);
+      setSetCommandStates((current) => ({
+        ...current,
+        [attempt.setLogId]: unknown ? "outcome_unknown" : conflict ? "conflict" : "save_failed",
+      }));
+      focusSet(attempt.setLogId);
     } finally {
       setBusyKey(null);
     }
+  }
+
+  async function reconcileSet(attempt: ClientWorkoutSetCommandAttempt) {
+    if (busyKey) return;
+    setBusyKey(attempt.setLogId);
+    setSetCommandStates((current) => ({ ...current, [attempt.setLogId]: "saving" }));
+    try {
+      const body = await jsonRequest<{ execution: ClientWorkoutExecutionReadModel }>(
+        exactExecutionReadUrl(undefined, attempt.sessionId),
+      );
+      const decision = reconcileClientWorkoutSetAttempt(attempt, body.execution);
+      if (decision === "accept") {
+        dirtySets.current.delete(attempt.setLogId);
+        delete setAttempts.current[attempt.setLogId];
+        setSession(body.execution.session);
+        setExecutionCapabilities(body.execution.capabilities);
+        setSetCommandStates((current) => ({
+          ...current,
+          [attempt.setLogId]: attempt.operation === "skip" ? "skipped" : "saved",
+        }));
+        return;
+      }
+      setSession(body.execution.session);
+      setExecutionCapabilities(body.execution.capabilities);
+      if (decision === "conflict") {
+        setSetCommandStates((current) => ({ ...current, [attempt.setLogId]: "conflict" }));
+        focusSet(attempt.setLogId);
+        return;
+      }
+    } catch {
+      setSetCommandStates((current) => ({ ...current, [attempt.setLogId]: "outcome_unknown" }));
+      focusSet(attempt.setLogId);
+      return;
+    } finally {
+      setBusyKey(null);
+    }
+    await submitSetAttempt(attempt);
+  }
+
+  function changeSetValue(setId: string, next: Values) {
+    dirtySets.current.add(setId);
+    const state = setCommandStates[setId];
+    if (state && state !== "outcome_unknown" && state !== "saving") {
+      setSetCommandStates((current) => ({ ...current, [setId]: "editing" }));
+    }
+    setValues((current) => ({ ...current, [setId]: next }));
   }
 
   async function complete() {
@@ -310,6 +418,7 @@ export function CanonicalWorkoutExecution({
         }),
       });
       setSession(body.session);
+      setExecutionCapabilities({ canEdit: false, canSkip: false, canResume: false, canEnterCompletionFlow: false });
       setCompleteOpen(false);
       setMessage("Тренировка завершена и отправлена тренеру");
     } catch (caught) {
@@ -354,8 +463,8 @@ export function CanonicalWorkoutExecution({
           </div>
           {session ? (
             <div className="shrink-0 text-left sm:text-right">
-              <p className="text-2xl font-semibold tracking-normal">{completedCount} / {totalCount}</p>
-              <p className="text-xs text-zinc-500">подходов выполнено</p>
+              <p className="text-2xl font-semibold tracking-normal">{persistedCount} / {totalCount}</p>
+              <p className="text-xs text-zinc-500">подходов сохранено</p>
             </div>
           ) : null}
         </header>
@@ -389,33 +498,102 @@ export function CanonicalWorkoutExecution({
           </section>
         ) : null}
 
-        {session ? (
-          <div className="divide-y divide-zinc-800">
-            {session.exercises.map((exercise, exerciseIndex) => (
-              <section key={exercise.id} className="py-8" aria-labelledby={`exercise-${exercise.id}`}>
-                <div className="flex items-baseline gap-3">
-                  <span className="text-sm text-zinc-600">{exerciseIndex + 1}</span>
-                  <h2 id={`exercise-${exercise.id}`} className="text-xl font-semibold tracking-normal">{exercise.title}</h2>
+        {session && activeExercise ? (
+          <div className="py-7">
+            {session.exercises.length > 1 ? (
+              <nav aria-label="Упражнения тренировки" className="border-b border-zinc-800 pb-5">
+                <div className="mb-3 flex items-center gap-2 text-xs uppercase text-zinc-500">
+                  <List className="size-4" aria-hidden /> Упражнения
                 </div>
+                <div role="tablist" aria-label="Выбор упражнения" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {session.exercises.map((exercise, index) => (
+                    <button
+                      key={exercise.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={exercise.id === activeExercise.id}
+                      aria-controls={`exercise-panel-${exercise.id}`}
+                      onClick={() => setActiveExerciseId(exercise.id)}
+                      className={`min-h-11 rounded-md border px-3 py-2 text-left text-sm transition-colors ${exercise.id === activeExercise.id ? "border-lime-300/50 bg-lime-300/10 text-zinc-100" : "border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"}`}
+                    >
+                      <span className="mr-2 text-zinc-600">{index + 1}</span>{exercise.title}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+            ) : null}
+            <section
+              id={`exercise-panel-${activeExercise.id}`}
+              role="tabpanel"
+              className="py-7"
+              aria-labelledby={`exercise-${activeExercise.id}`}
+            >
+                <div className="flex items-baseline gap-3">
+                  <span className="text-sm text-zinc-600">{activeExerciseIndex + 1}</span>
+                  <h2 id={`exercise-${activeExercise.id}`} className="text-xl font-semibold tracking-normal">{activeExercise.title}</h2>
+                </div>
+                {activePrescription?.superset ? (
+                  <p className="mt-2 text-xs text-lime-200">{activePrescription.superset.label}{activePrescription.superset.instruction ? ` · ${activePrescription.superset.instruction}` : ""}</p>
+                ) : null}
+                {activePrescription?.trainerNote ? (
+                  <p className="mt-4 border-l-2 border-lime-300/40 pl-3 text-sm text-zinc-300">{activePrescription.trainerNote}</p>
+                ) : null}
+                {activeExercise.athleteNote ? <p className="mt-3 text-sm text-zinc-500">Заметка спортсмена: {activeExercise.athleteNote}</p> : null}
                 <div className="mt-5 divide-y divide-zinc-800 border-y border-zinc-800">
-                  {exercise.sets.map((set) => (
+                  {activeExercise.sets.map((set) => (
                     <SetEditor
                       key={set.id}
                       set={set}
+                      prescription={activePrescription?.sets.find((item) => (
+                        set.sourceAssignmentSetId
+                          ? item.assignmentSetId === set.sourceAssignmentSetId
+                          : item.setKey === set.setKey
+                      ))}
                       value={values[set.id] ?? initialValues(set)}
-                      disabled={isTerminal || busyKey !== null}
+                      disabled={!executionCapabilities?.canEdit || busyKey !== null}
                       busy={busyKey === set.id}
-                      onChange={(next) => setValues((current) => ({ ...current, [set.id]: next }))}
-                      onSave={(status) => void saveSet(set, status)}
+                      commandState={setCommandStates[set.id]}
+                      onChange={(next) => changeSetValue(set.id, next)}
+                      onSave={(operation) => saveSet(activeExercise.id, set, operation)}
+                      onReconcile={() => {
+                        const attempt = setAttempts.current[set.id];
+                        if (attempt) void reconcileSet(attempt);
+                      }}
+                      onRetry={() => {
+                        const attempt = setAttempts.current[set.id];
+                        if (attempt) void submitSetAttempt(attempt);
+                      }}
+                      onContinueAfterConflict={() => {
+                        delete setAttempts.current[set.id];
+                        setSetCommandStates((current) => ({ ...current, [set.id]: "editing" }));
+                      }}
                     />
                   ))}
                 </div>
+                {session.exercises.length > 1 ? (
+                  <div className="mt-6 flex items-center justify-between gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={activeExerciseIndex <= 0}
+                      onClick={() => setActiveExerciseId(session.exercises[activeExerciseIndex - 1].id)}
+                      className="min-h-11 gap-2 rounded-lg border-zinc-800"
+                    ><ArrowLeft className="size-4" /> Предыдущее</Button>
+                    <span className="text-xs text-zinc-500">{activeExerciseIndex + 1} из {session.exercises.length}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={activeExerciseIndex >= session.exercises.length - 1}
+                      onClick={() => setActiveExerciseId(session.exercises[activeExerciseIndex + 1].id)}
+                      className="min-h-11 gap-2 rounded-lg border-zinc-800"
+                    >Следующее <ArrowRight className="size-4" /></Button>
+                  </div>
+                ) : null}
               </section>
-            ))}
           </div>
         ) : null}
 
-        {session?.status === "active" ? (
+        {session?.status === "active" && executionCapabilities?.canEnterCompletionFlow ? (
           <footer className="sticky bottom-0 -mx-4 flex items-center justify-between gap-4 border-t border-zinc-800 bg-black/95 px-4 py-4 backdrop-blur sm:mx-0 sm:px-0">
             <p className="text-sm text-zinc-500">Можно завершить с невыполненными подходами</p>
             <Button onClick={() => setCompleteOpen(true)} disabled={busyKey !== null} className="shrink-0 gap-2 rounded-lg bg-zinc-100 text-black hover:bg-white">
@@ -527,25 +705,39 @@ function ClientFeedbackHistory({ feedback, loading }: { feedback: ReviewFeedback
 
 function SetEditor({
   set,
+  prescription,
   value,
   disabled,
   busy,
+  commandState,
   onChange,
   onSave,
+  onReconcile,
+  onRetry,
+  onContinueAfterConflict,
 }: {
   set: WorkoutSetLog;
+  prescription?: ClientWorkoutSetPrescription;
   value: Values;
   disabled: boolean;
   busy: boolean;
+  commandState?: SetCommandState;
   onChange: (value: Values) => void;
-  onSave: (status: "completed" | "skipped") => void;
+  onSave: (operation: ClientWorkoutSetOperation) => void;
+  onReconcile: () => void;
+  onRetry: () => void;
+  onContinueAfterConflict: () => void;
 }) {
   const saved = set.status !== "pending";
+  const unresolved = commandState === "outcome_unknown" || commandState === "conflict";
+  const frozenUnknown = commandState === "outcome_unknown";
+  const showPrimaryCommands = commandState !== "save_failed" && !unresolved;
+  const stateText = commandState ? setCommandText(commandState) : null;
   return (
-    <div className="grid gap-4 py-5 lg:grid-cols-[8rem_minmax(0,1fr)_auto] lg:items-end">
+    <div id={`workout-set-${set.id}`} tabIndex={-1} className="grid scroll-mt-24 gap-4 py-5 outline-none focus-visible:ring-2 focus-visible:ring-lime-300 lg:grid-cols-[8rem_minmax(0,1fr)_auto] lg:items-end">
       <div>
         <p className="text-sm font-medium">Подход {set.position}</p>
-        <p className="mt-1 text-xs text-zinc-500">{plannedResult(set)}</p>
+        <p className="mt-1 text-xs text-zinc-500">План: {plannedResult(set, prescription)}</p>
         {saved ? (
           <p className={`mt-2 text-xs ${set.status === "completed" ? "text-lime-300" : "text-amber-300"}`}>
             {set.status === "completed" ? "Выполнен" : set.status === "skipped" ? "Пропущен" : "Не выполнен"}
@@ -554,27 +746,39 @@ function SetEditor({
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {set.plannedDurationSeconds === null ? (
-          <Field label="Повторы" value={value.repetitions} disabled={disabled} max="500" onChange={(repetitions) => onChange({ ...value, repetitions })} />
+          <Field label="Повторы" value={value.repetitions} disabled={disabled || frozenUnknown} max="500" onChange={(repetitions) => onChange({ ...value, repetitions })} />
         ) : (
-          <Field label="Секунды" value={value.duration} disabled={disabled} max="86400" onChange={(duration) => onChange({ ...value, duration })} />
+          <Field label="Секунды" value={value.duration} disabled={disabled || frozenUnknown} max="86400" onChange={(duration) => onChange({ ...value, duration })} />
         )}
-        <Field label="Вес, кг" value={value.weight} disabled={disabled} max="2000" step="0.5" onChange={(weight) => onChange({ ...value, weight })} />
-        <Field label="RPE" value={value.rpe} disabled={disabled} min="1" max="10" step="0.5" onChange={(rpe) => onChange({ ...value, rpe })} />
+        <Field label="Вес, кг" value={value.weight} disabled={disabled || frozenUnknown} max="2000" step="0.5" onChange={(weight) => onChange({ ...value, weight })} />
+        <Field label="RPE" value={value.rpe} disabled={disabled || frozenUnknown} min="1" max="10" step="0.5" onChange={(rpe) => onChange({ ...value, rpe })} />
         <label className="col-span-2 text-xs text-zinc-500 sm:col-span-1">
           Комментарий
-          <Input value={value.comment} disabled={disabled} maxLength={1000} onChange={(event) => onChange({ ...value, comment: event.target.value })} className="mt-1 rounded-lg border-zinc-800 bg-zinc-900/60" />
+          <Input value={value.comment} disabled={disabled || frozenUnknown} maxLength={1000} onChange={(event) => onChange({ ...value, comment: event.target.value })} className="mt-1 h-11 rounded-lg border-zinc-800 bg-zinc-900/60" />
         </label>
       </div>
-      {!disabled || busy ? (
-        <div className="flex gap-2">
-          <Button size="icon" variant="outline" onClick={() => onSave("skipped")} disabled={disabled} aria-label={`Пропустить подход ${set.position}`} title="Пропустить" className="rounded-lg border-zinc-800">
+      <div className="flex flex-wrap items-center gap-2">
+        {(!disabled || busy) && showPrimaryCommands ? (
+          <>
+          <Button size="icon" variant="outline" onClick={() => onSave("skip")} disabled={disabled || unresolved} aria-label={`Пропустить подход ${set.position}`} title="Пропустить" className="min-h-11 min-w-11 rounded-lg border-zinc-800">
             <SkipForward className="size-4" />
           </Button>
-          <Button onClick={() => onSave("completed")} disabled={disabled} className="gap-2 rounded-lg bg-lime-300 text-black hover:bg-lime-200">
+          <Button onClick={() => onSave("save")} disabled={disabled || unresolved} className="min-h-11 gap-2 rounded-lg bg-lime-300 text-black hover:bg-lime-200">
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Сохранить
           </Button>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+        {commandState === "outcome_unknown" ? (
+          <Button type="button" variant="outline" onClick={onReconcile} disabled={busy} className="min-h-11 rounded-lg border-zinc-700">Проверить</Button>
+        ) : null}
+        {commandState === "save_failed" ? (
+          <Button type="button" variant="outline" onClick={onRetry} disabled={busy} className="min-h-11 rounded-lg border-zinc-700">Повторить</Button>
+        ) : null}
+        {commandState === "conflict" ? (
+          <Button type="button" variant="outline" onClick={onContinueAfterConflict} disabled={busy} className="min-h-11 rounded-lg border-zinc-700">Продолжить редактирование</Button>
+        ) : null}
+      </div>
+      {stateText ? <p role={commandState === "save_failed" || unresolved ? "alert" : "status"} aria-live="polite" className={`text-sm lg:col-start-2 ${commandState === "saved" ? "text-lime-300" : commandState === "skipped" ? "text-amber-300" : commandState === "editing" ? "text-zinc-500" : "text-red-200"}`}>{stateText}</p> : null}
     </div>
   );
 }
@@ -585,7 +789,7 @@ function Field({ label, value, disabled, min = "0", max, step = "1", onChange }:
   return (
     <label className="text-xs text-zinc-500">
       {label}
-      <Input type="number" min={min} max={max} step={step} inputMode="decimal" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="mt-1 rounded-lg border-zinc-800 bg-zinc-900/60" />
+      <Input type="number" min={min} max={max} step={step} inputMode="decimal" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="mt-1 h-11 rounded-lg border-zinc-800 bg-zinc-900/60" />
     </label>
   );
 }
@@ -597,6 +801,20 @@ function Notice({ tone, text }: { tone: "error" | "success"; text: string }) {
       {text}
     </div>
   );
+}
+
+function setCommandText(state: SetCommandState) {
+  if (state === "editing") return "Есть несохранённые изменения.";
+  if (state === "saving") return "Сохраняем подход…";
+  if (state === "saved") return "Подход сохранён";
+  if (state === "skipped") return "Подход отмечен как пропущенный";
+  if (state === "save_failed") return "Не удалось сохранить подход. Введённые значения сохранены на экране.";
+  if (state === "outcome_unknown") return "Не удалось подтвердить, сохранился ли подход.";
+  return "Подход изменился в другой вкладке. Введённые значения оставлены на экране.";
+}
+
+function focusSet(setId: string) {
+  requestAnimationFrame(() => document.getElementById(`workout-set-${setId}`)?.focus());
 }
 
 function DumbbellMark() {

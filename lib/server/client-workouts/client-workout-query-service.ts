@@ -41,6 +41,21 @@ export class ClientWorkoutQueryService {
     const exactSession = session ?? (assignment.session
       ? await this.sessions.find(actor, assignment.session.sessionId)
       : null);
-    return { assignment, session: exactSession };
+    const active = exactSession?.status === "active";
+    return {
+      identity: {
+        assignmentId: assignment.assignmentId,
+        sessionId: exactSession?.id ?? null,
+        athleteUserId: assignment.athleteUserId,
+      },
+      assignment,
+      session: exactSession,
+      capabilities: {
+        canEdit: active,
+        canSkip: active,
+        canResume: active,
+        canEnterCompletionFlow: active,
+      },
+    };
   }
 }

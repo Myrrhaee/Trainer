@@ -18,24 +18,25 @@ export class ZeroResultConfirmationRequiredError extends Error {}
 type SessionRow = {
   id: string; assignment_id: string; trainer_user_id: string; athlete_user_id: string;
   title_snapshot: string; status: WorkoutSession["status"]; version: number; client_timezone: string;
-  started_at: Date; completed_at: Date | null; attention_item_id: string | null;
+  started_at: Date; completed_at: Date | null; attention_item_id: string | null; updated_at: Date;
 };
 type ExerciseRow = {
   id: string; assignment_exercise_id: string; title_snapshot: string; position: number;
-  status: WorkoutExerciseLog["status"]; athlete_note: string;
+  status: WorkoutExerciseLog["status"]; athlete_note: string; updated_at: Date;
 };
 type SetRow = {
-  id: string; exercise_log_id: string; set_key: string; position: number; kind: "warmup" | "working";
+  id: string; exercise_log_id: string; source_assignment_set_id: string | null;
+  set_key: string; position: number; kind: "warmup" | "working";
   planned_repetitions_min: number | null; planned_repetitions_max: number | null;
   planned_duration_seconds: number | null; planned_weight_kg: string | null;
   status: WorkoutSetLog["status"]; actual_repetitions: number | null;
   actual_duration_seconds: number | null; actual_weight_kg: string | null;
-  rpe: string | null; athlete_comment: string;
+  rpe: string | null; athlete_comment: string; updated_at: Date;
 };
 
 const sessionSelect = `SELECT session.id, session.assignment_id, session.trainer_user_id,
   session.athlete_user_id, assignment.title_snapshot, session.status::text, session.version,
-  session.client_timezone, session.started_at, session.completed_at,
+  session.client_timezone, session.started_at, session.completed_at, session.updated_at,
   (SELECT attention.id FROM app.attention_items attention
    WHERE attention.source_session_id = session.id AND attention.item_type = 'workout_review') AS attention_item_id
 FROM app.workout_sessions session
@@ -47,14 +48,15 @@ function numberValue(value: string | number | null) {
 
 function mapSet(row: SetRow): WorkoutSetLog {
   return {
-    id: row.id, setKey: row.set_key, position: row.position, kind: row.kind,
+    id: row.id, sourceAssignmentSetId: row.source_assignment_set_id,
+    setKey: row.set_key, position: row.position, kind: row.kind,
     plannedRepetitionsMin: row.planned_repetitions_min,
     plannedRepetitionsMax: row.planned_repetitions_max,
     plannedDurationSeconds: row.planned_duration_seconds,
     plannedWeightKg: numberValue(row.planned_weight_kg), status: row.status,
     actualRepetitions: row.actual_repetitions, actualDurationSeconds: row.actual_duration_seconds,
     actualWeightKg: numberValue(row.actual_weight_kg), rpe: numberValue(row.rpe),
-    athleteComment: row.athlete_comment,
+    athleteComment: row.athlete_comment, updatedAt: row.updated_at.toISOString(),
   };
 }
 
@@ -288,7 +290,7 @@ export class WorkoutSessionRepository {
 
   private async hydrate(client: PoolClient, row: SessionRow): Promise<WorkoutSession> {
     const exercises = await client.query<ExerciseRow>(`SELECT exercise.id, exercise.assignment_exercise_id,
-      source.title_snapshot, exercise.position, exercise.status::text, exercise.athlete_note
+      source.title_snapshot, exercise.position, exercise.status::text, exercise.athlete_note, exercise.updated_at
       FROM app.workout_exercise_logs exercise
       JOIN app.workout_assignment_exercises source ON source.id = exercise.assignment_exercise_id
       WHERE exercise.session_id = $1 ORDER BY exercise.position`, [row.id]);
@@ -306,7 +308,9 @@ export class WorkoutSessionRepository {
         id: exercise.id, assignmentExerciseId: exercise.assignment_exercise_id,
         title: exercise.title_snapshot, position: exercise.position, status: exercise.status,
         athleteNote: exercise.athlete_note, sets: byExercise.get(exercise.id) ?? [],
+        updatedAt: exercise.updated_at.toISOString(),
       })),
+      updatedAt: row.updated_at.toISOString(),
     };
   }
 }
