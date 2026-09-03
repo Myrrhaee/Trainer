@@ -56,6 +56,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
     let athleteOneRelationId = "";
     let athleteOneProfilePath = "";
     let templateId = "";
+    let assignmentId = "";
     [trainer, athleteOne, athleteTwo].forEach((page) => observeRuntimeErrors(page, observed));
 
     try {
@@ -180,6 +181,7 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         const assignmentResponse = await assignmentResponsePromise;
         expect(assignmentResponse.status()).toBe(201);
         const assignmentResult = await assignmentResponse.json() as { assignment: { id: string; sourceRevisionId: string } };
+        assignmentId = assignmentResult.assignment.id;
         expect(assignmentResult.assignment.sourceRevisionId).toBe(publishedRevisionId);
         const athleteAssignments = await (await athleteOne.request.get("/api/workout-assignments")).json() as { assignments: Array<{ id: string; sourceRevisionId: string; title: string }> };
         expect(athleteAssignments.assignments[0]).toMatchObject({ id: assignmentResult.assignment.id, title: workoutTitle });
@@ -209,18 +211,65 @@ test.describe("Canonical three-role closed-alpha flow", () => {
 
       let sessionPath = "";
       await test.step("assigned athlete completes the workout on mobile", async () => {
+        await athleteOne.goto("/client/workouts?assignment=99999999-9999-4999-8999-999999999999");
+        await expect(athleteOne.getByRole("heading", { name: "Тренировка недоступна" })).toBeVisible();
+        await expect(athleteOne.getByText(workoutTitle, { exact: true })).toHaveCount(0);
+        await athleteTwo.goto(`/client/workouts?assignment=${assignmentId}`);
+        await expect(athleteTwo.getByRole("heading", { name: "Тренировка недоступна" })).toBeVisible();
+        await expect(athleteTwo.getByText(workoutTitle, { exact: true })).toHaveCount(0);
+        const expectedUnavailableConsole = (error: string) => error === "console:/client/workouts:Failed to load resource: the server responded with a status of 404 (Not Found)";
+        await expect.poll(() => observed.filter(expectedUnavailableConsole).length).toBe(2);
+        removeObserved(observed, expectedUnavailableConsole);
         await athleteOne.goto("/client/me");
         await expect(athleteOne.getByText(workoutTitle, { exact: true })).toBeVisible();
         await athleteOne.getByRole("link", { name: "Начать тренировку" }).click();
-        const startResponsePromise = athleteOne.waitForResponse((response) => (
-          response.url().endsWith("/api/workout-sessions")
-          && response.request().method() === "POST"
-        ));
+        const startCommandIds: string[] = [];
+        let startRequestCount = 0;
+        await athleteOne.route("**/api/workout-sessions", async (route) => {
+          if (route.request().method() !== "POST") return route.continue();
+          startRequestCount += 1;
+          startCommandIds.push((route.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey);
+          if (startRequestCount === 1) {
+            await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "temporarily_unavailable" }) });
+            return;
+          }
+          const persisted = await route.fetch();
+          await route.fulfill({ response: persisted, status: 503, contentType: "application/json", body: JSON.stringify({ error: "temporarily_unavailable" }) });
+        });
         await athleteOne.getByRole("button", { name: "Начать тренировку" }).click();
-        const startResponse = await startResponsePromise;
-        expect(startResponse.status()).toBe(201);
-        const startBody = await startResponse.json() as { session: { id: string } };
-        sessionPath = `/client/workouts?session=${startBody.session.id}`;
+        await expect(athleteOne.getByText("Не удалось подтвердить, началась ли тренировка.", { exact: true })).toBeVisible();
+        await athleteOne.getByRole("button", { name: "Проверить" }).click();
+        await expect.poll(() => startRequestCount).toBe(2);
+        expect(new Set(startCommandIds).size).toBe(1);
+        await expect(athleteOne.getByText("Не удалось подтвердить, началась ли тренировка.", { exact: true })).toBeVisible();
+        await athleteOne.unroute("**/api/workout-sessions");
+        await athleteOne.getByRole("button", { name: "Проверить" }).click();
+        await expect(athleteOne).toHaveURL(/\/client\/workouts\?session=[0-9a-f-]{36}&returnTo=%2Fclient%2Fme/);
+        const startedSessionId = new URL(athleteOne.url()).searchParams.get("session");
+        expect(startedSessionId).toMatch(/^[0-9a-f-]{36}$/);
+        sessionPath = `/client/workouts?session=${startedSessionId}`;
+        await athleteOne.reload();
+        await expect(athleteOne.getByText("Тренировка идёт", { exact: true })).toBeVisible();
+        await athleteOne.getByRole("link", { name: "Мои тренировки" }).click();
+        await expect(athleteOne).toHaveURL(/\/client\/me$/);
+        await athleteOne.getByRole("link", { name: "Продолжить тренировку" }).click();
+        await expect(athleteOne).toHaveURL(new RegExp(`session=${startedSessionId}`));
+        await athleteOne.goBack();
+        await expect(athleteOne).toHaveURL(/\/client\/me$/);
+        await athleteOne.goForward();
+        await expect(athleteOne).toHaveURL(new RegExp(`session=${startedSessionId}`));
+        const secondTab = await athleteOneContext.newPage();
+        observeRuntimeErrors(secondTab, observed);
+        await secondTab.goto("/client/me");
+        await secondTab.getByRole("link", { name: "Продолжить тренировку" }).click();
+        await expect(secondTab).toHaveURL(new RegExp(`session=${startedSessionId}`));
+        await secondTab.close();
+        const expectedStartFailure = (error: string) => error === "http:503:/api/workout-sessions";
+        expect(observed.filter(expectedStartFailure)).toHaveLength(2);
+        removeObserved(observed, expectedStartFailure);
+        const expectedStartConsole = (error: string) => error === "console:/client/workouts:Failed to load resource: the server responded with a status of 503 (Service Unavailable)";
+        expect(observed.filter(expectedStartConsole)).toHaveLength(2);
+        removeObserved(observed, expectedStartConsole);
         await athleteOne.getByLabel("Повторы", { exact: true }).fill("8");
         await athleteOne.getByLabel("RPE", { exact: true }).fill("7");
         await athleteOne.getByLabel("Комментарий", { exact: true }).fill("B14: подход выполнен через мобильный сценарий.");
@@ -240,8 +289,11 @@ test.describe("Canonical three-role closed-alpha flow", () => {
 
       await test.step("unassigned athlete cannot open another athlete session", async () => {
         await athleteTwo.goto(sessionPath);
-        await expect(athleteTwo.getByRole("heading", { name: "Нет доступной тренировки" })).toBeVisible();
+        await expect(athleteTwo.getByRole("heading", { name: "Тренировка недоступна" })).toBeVisible();
         await expect(athleteTwo.getByText(workoutTitle, { exact: true })).toHaveCount(0);
+        const expectedUnavailableConsole = (error: string) => error === "console:/client/workouts:Failed to load resource: the server responded with a status of 404 (Not Found)";
+        await expect.poll(() => observed.filter(expectedUnavailableConsole).length).toBe(1);
+        removeObserved(observed, expectedUnavailableConsole);
       });
 
       await test.step("trainer reviews exact facts and athlete receives feedback", async () => {
@@ -619,7 +671,7 @@ async function registerAthlete(page: Page, invitationPath: string, email: string
   await saveDisplayName(page, displayName);
   await page.getByRole("button", { name: "Принять приглашение" }).click();
   await expect(page).toHaveURL(/\/client\/me$/);
-  await expect(page.getByRole("heading", { name: "Мои тренировки" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Что делаем сейчас" })).toBeVisible();
 }
 
 async function runOperator(args: string[]) {
@@ -806,6 +858,12 @@ function observeRuntimeErrors(page: Page, errors: string[] = []) {
     }
   });
   return errors;
+}
+
+function removeObserved(errors: string[], predicate: (error: string) => boolean) {
+  for (let index = errors.length - 1; index >= 0; index -= 1) {
+    if (predicate(errors[index])) errors.splice(index, 1);
+  }
 }
 
 async function expectNoHorizontalOverflow(page: Page) {

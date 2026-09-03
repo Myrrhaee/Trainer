@@ -37,9 +37,9 @@ export async function POST(request: Request) {
   try {
     const actor = await athleteActor();
     if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    const session = await new WorkoutSessionService().start(actor, body);
-    return session
-      ? NextResponse.json({ session }, { status: 201 })
+    const result = await new WorkoutSessionService().start(actor, body);
+    return result
+      ? NextResponse.json(result, { status: result.outcome === "created" ? 201 : 200 })
       : NextResponse.json({ error: "assignment_not_found" }, { status: 404 });
   } catch (error) {
     if (error instanceof WorkoutSessionValidationError) {

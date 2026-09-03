@@ -100,7 +100,7 @@ export class WorkoutSessionService {
 
   start(actor: Actor, value: unknown) {
     const input = object(value);
-    return this.repository.start(actor, {
+    return this.repository.startOrResume(actor, {
       assignmentId: uuid(input.assignmentId),
       clientTimezone: timezone(input.clientTimezone),
       idempotencyKeyHash: idempotencyKey(input.idempotencyKey),

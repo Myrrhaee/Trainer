@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, CheckCircle2, Loader2, MessageSquare, Play, Save, SkipForward } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,19 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  createClientWorkoutStartAttempt,
+  reconcileClientWorkoutStart,
+  type ClientWorkoutStartAttempt,
+} from "@/lib/client-workout-start-command";
+import type {
+  ClientWorkoutAssignmentReadModel,
+  ClientWorkoutExecutionReadModel,
+  ClientWorkoutExercisePrescription,
+  StartOrResumeSessionResult,
+} from "@/lib/server/client-workouts/client-workout-types";
 import type { ReviewFeedback } from "@/lib/server/reviews/review-types";
 import type { WorkoutSession, WorkoutSetLog } from "@/lib/server/workout-sessions/workout-session-types";
-import type { WorkoutAssignment } from "@/lib/server/workouts/workout-types";
 
 type Values = { repetitions: string; duration: string; weight: string; rpe: string; comment: string };
 
@@ -48,6 +59,16 @@ function plannedResult(set: WorkoutSetLog) {
   return parts.join(" · ") || "Свободный подход";
 }
 
+function assignmentPrescription(exercise: ClientWorkoutExercisePrescription) {
+  if (exercise.perSetMode) return `${exercise.setCount} подх. · индивидуально`;
+  const value = exercise.prescriptionType === "duration"
+    ? `${exercise.durationSeconds} сек.`
+    : exercise.repetitionMode === "range"
+      ? `${exercise.repetitionsMin}-${exercise.repetitionsMax} повт.`
+      : `${exercise.repetitionsMin} повт.`;
+  return `${exercise.setCount} × ${value}${exercise.targetWeightKg !== null ? ` · ${exercise.targetWeightKg} кг` : ""}`;
+}
+
 function errorText(code: string) {
   if (code === "version_conflict") return "Тренировка изменилась в другой вкладке. Обновите страницу.";
   if (code === "result_required") return "Укажите повторы или длительность подхода.";
@@ -58,18 +79,38 @@ function errorText(code: string) {
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
   const body = await response.json().catch(() => ({})) as { error?: string } & T;
-  if (!response.ok) throw new Error(body.error || "request_failed");
+  if (!response.ok) throw new RequestError(body.error || "request_failed", response.status);
   return body;
+}
+
+class RequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+type StartState = "idle" | "running" | "outcome_unknown" | "failed" | "conflict" | "success";
+
+function exactExecutionReadUrl(assignmentId?: string, sessionId?: string) {
+  const query = new URLSearchParams();
+  if (assignmentId) query.set("assignmentId", assignmentId);
+  if (sessionId) query.set("sessionId", sessionId);
+  return `/api/client/workouts?${query.toString()}`;
+}
+
+function clientSessionRoute(sessionId: string, returnTo: "/client/me" | "/client/workouts") {
+  return `/client/workouts?session=${encodeURIComponent(sessionId)}&returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function CanonicalWorkoutExecution({
   assignmentId,
   sessionId,
+  returnTo,
 }: {
   assignmentId?: string;
   sessionId?: string;
+  returnTo: "/client/me" | "/client/workouts";
 }) {
-  const [assignments, setAssignments] = useState<WorkoutAssignment[]>([]);
+  const router = useRouter();
+  const [assignment, setAssignment] = useState<ClientWorkoutAssignmentReadModel | null>(null);
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [feedback, setFeedback] = useState<ReviewFeedback[]>([]);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
@@ -81,32 +122,37 @@ export function CanonicalWorkoutExecution({
   const [completeOpen, setCompleteOpen] = useState(false);
   const [zeroConfirmed, setZeroConfirmed] = useState(false);
   const [zeroReason, setZeroReason] = useState("");
+  const [unavailable, setUnavailable] = useState(false);
+  const [startState, setStartState] = useState<StartState>("idle");
+  const startAttempt = useRef<ClientWorkoutStartAttempt | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const [assignmentBody, sessionBody] = await Promise.all([
-          jsonRequest<{ assignments: WorkoutAssignment[] }>("/api/workout-assignments"),
-          jsonRequest<{ sessions: WorkoutSession[] }>("/api/workout-sessions"),
-        ]);
+        const body = await jsonRequest<{ execution: ClientWorkoutExecutionReadModel }>(exactExecutionReadUrl(assignmentId, sessionId));
         if (cancelled) return;
-        setAssignments(assignmentBody.assignments);
-        const selected = sessionId
-          ? sessionBody.sessions.find((item) => item.id === sessionId)
-          : assignmentId
-            ? sessionBody.sessions.find((item) => item.assignmentId === assignmentId)
-            : sessionBody.sessions.find((item) => item.status === "active");
-        setSession(selected ?? null);
+        if (body.execution.assignment.status === "cancelled" && !body.execution.session) {
+          setUnavailable(true);
+          return;
+        }
+        setAssignment(body.execution.assignment);
+        setSession(body.execution.session);
+        if (!sessionId && body.execution.session) {
+          router.replace(clientSessionRoute(body.execution.session.id, returnTo));
+        }
       } catch (caught) {
-        if (!cancelled) setError(errorText(caught instanceof Error ? caught.message : "request_failed"));
+        if (!cancelled) {
+          if (caught instanceof RequestError && caught.status === 404) setUnavailable(true);
+          else setError(errorText(caught instanceof Error ? caught.message : "request_failed"));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
     void load();
     return () => { cancelled = true; };
-  }, [assignmentId, sessionId]);
+  }, [assignmentId, sessionId, returnTo, router]);
 
   useEffect(() => {
     if (!session) return;
@@ -137,36 +183,82 @@ export function CanonicalWorkoutExecution({
     return () => { cancelled = true; };
   }, [session]);
 
-  const assignment = useMemo(() => {
-    const id = session?.assignmentId ?? assignmentId;
-    return assignments.find((item) => item.id === id) ?? assignments[0] ?? null;
-  }, [assignmentId, assignments, session]);
-
   const completedCount = session?.exercises.flatMap((item) => item.sets)
     .filter((item) => item.status === "completed").length ?? 0;
   const totalCount = session?.exercises.reduce((sum, item) => sum + item.sets.length, 0) ?? 0;
   const isTerminal = session ? session.status !== "active" : false;
 
-  async function start() {
-    if (!assignment || busyKey) return;
+  async function submitStart(attempt: ClientWorkoutStartAttempt) {
     setBusyKey("start");
+    setStartState("running");
     setError(null);
     try {
-      const body = await jsonRequest<{ session: WorkoutSession }>("/api/workout-sessions", {
+      const body = await jsonRequest<StartOrResumeSessionResult>("/api/workout-sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          assignmentId: assignment.id,
-          clientTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-          idempotencyKey: crypto.randomUUID(),
-        }),
+        body: JSON.stringify({ assignmentId: attempt.assignmentId, clientTimezone: attempt.clientTimezone, idempotencyKey: attempt.commandId }),
       });
       setSession(body.session);
+      setStartState("success");
+      startAttempt.current = null;
+      router.replace(clientSessionRoute(body.session.id, returnTo));
     } catch (caught) {
-      setError(errorText(caught instanceof Error ? caught.message : "request_failed"));
+      if (!(caught instanceof RequestError) || caught.status >= 500) {
+        setStartState("outcome_unknown");
+        setError("Не удалось подтвердить, началась ли тренировка.");
+      } else {
+        setStartState(caught.status === 409 ? "conflict" : "failed");
+        setError(errorText(caught.message));
+      }
     } finally {
       setBusyKey(null);
     }
+  }
+
+  function start() {
+    if (!assignment || busyKey || !assignment.capabilities.canStart) return;
+    const attempt = startAttempt.current ?? createClientWorkoutStartAttempt({
+      assignmentId: assignment.assignmentId,
+      clientTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    });
+    startAttempt.current = attempt;
+    void submitStart(attempt);
+  }
+
+  async function reconcileStart() {
+    const attempt = startAttempt.current;
+    if (!attempt || busyKey) return;
+    setBusyKey("start");
+    setStartState("running");
+    setError(null);
+    try {
+      const body = await jsonRequest<{ execution: ClientWorkoutExecutionReadModel }>(
+        `/api/client/workouts?assignmentId=${encodeURIComponent(attempt.assignmentId)}`,
+      );
+      setAssignment(body.execution.assignment);
+      const decision = reconcileClientWorkoutStart(attempt, body.execution);
+      if (decision === "accept" && body.execution.session) {
+        setSession(body.execution.session);
+        setStartState("success");
+        startAttempt.current = null;
+        router.replace(clientSessionRoute(body.execution.session.id, returnTo));
+        return;
+      }
+      if (decision === "conflict") {
+        setStartState("conflict");
+        setError("Состояние назначения изменилось. Обновите список тренировок.");
+        return;
+      }
+    } catch (caught) {
+      setStartState(caught instanceof RequestError && caught.status < 500 ? "conflict" : "outcome_unknown");
+      setError(caught instanceof RequestError && caught.status < 500
+        ? "Тренировка больше недоступна."
+        : "Не удалось проверить статус тренировки.");
+      return;
+    } finally {
+      setBusyKey(null);
+    }
+    await submitStart(attempt);
   }
 
   async function saveSet(set: WorkoutSetLog, status: "completed" | "skipped") {
@@ -231,13 +323,14 @@ export function CanonicalWorkoutExecution({
     return <main className="grid min-h-dvh place-items-center bg-black text-zinc-100"><Loader2 className="size-6 animate-spin text-zinc-500" /></main>;
   }
 
-  if (!assignment && !session) {
+  if (unavailable || (!assignment && !session)) {
     return (
       <main className="grid min-h-dvh place-items-center bg-black px-4 text-zinc-100">
         <div className="text-center">
           <DumbbellMark />
-          <h1 className="mt-5 text-xl font-semibold tracking-normal">Нет доступной тренировки</h1>
-          <Button asChild variant="outline" className="mt-6 rounded-lg"><Link href="/client/me">Вернуться в кабинет</Link></Button>
+          <h1 className="mt-5 text-xl font-semibold tracking-normal">Тренировка недоступна</h1>
+          <p className="mt-2 text-sm text-zinc-500">Возможно, ссылка устарела или назначение изменилось.</p>
+          <Button asChild variant="outline" className="mt-6 rounded-lg"><Link href={returnTo}>Вернуться к тренировкам</Link></Button>
         </div>
       </main>
     );
@@ -246,7 +339,7 @@ export function CanonicalWorkoutExecution({
   return (
     <main className="min-h-dvh bg-black px-4 py-6 text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-5xl">
-        <Link href="/client/me" className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200">
+        <Link href={returnTo} className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-200">
           <ArrowLeft className="size-4" /> Мои тренировки
         </Link>
 
@@ -257,6 +350,7 @@ export function CanonicalWorkoutExecution({
             </p>
             <h1 className="mt-2 text-2xl font-semibold tracking-normal sm:text-3xl">{session?.title ?? assignment?.title}</h1>
             {assignment?.generalInstruction ? <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">{assignment.generalInstruction}</p> : null}
+            {assignment ? <p className="mt-3 text-xs text-zinc-500">Назначил: {assignment.trainer.displayName} · {new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date(`${assignment.scheduledFor}T12:00:00`))}</p> : null}
           </div>
           {session ? (
             <div className="shrink-0 text-left sm:text-right">
@@ -267,6 +361,12 @@ export function CanonicalWorkoutExecution({
         </header>
 
         {error ? <Notice tone="error" text={error} /> : null}
+        {startState === "outcome_unknown" ? (
+          <Button type="button" variant="outline" onClick={() => void reconcileStart()} disabled={busyKey !== null} className="mt-4 min-h-11 rounded-lg border-zinc-700">
+            {busyKey === "start" ? <Loader2 className="size-4 animate-spin" /> : null}
+            Проверить
+          </Button>
+        ) : null}
         {message ? <Notice tone="success" text={message} /> : null}
 
         {!session && assignment ? (
@@ -277,14 +377,15 @@ export function CanonicalWorkoutExecution({
                 <li key={exercise.instanceKey} className="grid gap-2 py-4 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center">
                   <span className="text-sm text-zinc-600">{index + 1}</span>
                   <span className="font-medium">{exercise.title}</span>
-                  <span className="text-sm text-zinc-500">{exercise.sets} x {exercise.repetitions}{exercise.targetWeightKg !== null ? ` · ${exercise.targetWeightKg} кг` : ""}</span>
+                  <span className="text-sm text-zinc-500">{assignmentPrescription(exercise)}</span>
                 </li>
               ))}
             </ol>
-            <Button onClick={() => void start()} disabled={busyKey !== null} className="mt-7 gap-2 rounded-lg bg-lime-300 text-black hover:bg-lime-200">
+            <Button onClick={start} disabled={busyKey !== null || !assignment.capabilities.canStart || startState === "outcome_unknown"} className="mt-7 min-h-11 gap-2 rounded-lg bg-lime-300 text-black hover:bg-lime-200">
               {busyKey === "start" ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-              Начать тренировку
+              {busyKey === "start" ? "Начинаем тренировку…" : "Начать тренировку"}
             </Button>
+            {!assignment.capabilities.canStart && assignment.relationStatus !== "active" ? <p className="mt-4 text-sm text-zinc-500">Начало тренировки сейчас недоступно.</p> : null}
           </section>
         ) : null}
 

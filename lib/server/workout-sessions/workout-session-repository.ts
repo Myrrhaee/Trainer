@@ -9,6 +9,7 @@ import { getDatabasePool } from "@/lib/server/database/pool";
 import { withDatabaseTransaction } from "@/lib/server/database/transaction";
 import { enqueueNotification } from "@/lib/server/notifications/notification-outbox";
 import type { ProgressSetInput, WorkoutExerciseLog, WorkoutSession, WorkoutSetLog } from "./workout-session-types";
+import type { StartOrResumeSessionResult } from "@/lib/server/client-workouts/client-workout-types";
 
 export class SessionVersionConflictError extends Error {}
 export class SessionIdempotencyConflictError extends Error {}
@@ -75,6 +76,12 @@ export class WorkoutSessionRepository {
   start(actor: Actor, input: {
     assignmentId: string; clientTimezone: string; idempotencyKeyHash: string;
   }): Promise<WorkoutSession | null> {
+    return this.startOrResume(actor, input).then((result) => result?.session ?? null);
+  }
+
+  startOrResume(actor: Actor, input: {
+    assignmentId: string; clientTimezone: string; idempotencyKeyHash: string;
+  }): Promise<StartOrResumeSessionResult | null> {
     return withDatabaseTransaction(this.pool, async (client) => {
       await setTransactionActor(client, actor);
       const source = await client.query<{
@@ -132,7 +139,11 @@ export class WorkoutSessionRepository {
       }
       const existing = await client.query<SessionRow>(`${sessionSelect}
         WHERE session.assignment_id = $1 AND session.athlete_user_id = $2`, [input.assignmentId, actor.userId]);
-      return existing.rowCount ? this.hydrate(client, existing.rows[0]) : null;
+      if (!existing.rowCount) return null;
+      return {
+        session: await this.hydrate(client, existing.rows[0]),
+        outcome: inserted.rowCount ? "created" : "resumed",
+      };
     });
   }
 
