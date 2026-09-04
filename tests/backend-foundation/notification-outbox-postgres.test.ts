@@ -100,6 +100,7 @@ test("canonical workout loop enqueues exactly-once generic events and worker del
       expectedVersion: 2,
       idempotencyKeyHash: hash("b11-complete"),
       requestHash: hash("b11-complete-payload"),
+      discomfortReported: false,
       zeroResultConfirmed: false,
       zeroResultReason: "",
     });
@@ -128,6 +129,7 @@ test("canonical workout loop enqueues exactly-once generic events and worker del
       expectedVersion: 2,
       idempotencyKeyHash: hash("b11-complete"),
       requestHash: hash("b11-complete-payload"),
+      discomfortReported: false,
       zeroResultConfirmed: false,
       zeroResultReason: "",
     }))?.id, started.id);

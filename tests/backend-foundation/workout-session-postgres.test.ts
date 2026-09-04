@@ -162,6 +162,7 @@ test("partial completion is stable and creates exactly one trainer attention ite
       expectedVersion: 2,
       idempotencyKeyHash: hash("complete-b7-partial"),
       requestHash: hash("partial-complete-payload"),
+      discomfortReported: false,
       zeroResultConfirmed: false,
       zeroResultReason: "",
     };
@@ -214,6 +215,7 @@ test("zero-result completion needs confirmation and participant access follows r
       expectedVersion: 1,
       idempotencyKeyHash: hash("complete-b7-zero-unconfirmed"),
       requestHash: hash("zero-unconfirmed-payload"),
+      discomfortReported: false,
       zeroResultConfirmed: false,
       zeroResultReason: "",
     }), ZeroResultConfirmationRequiredError);
@@ -223,6 +225,7 @@ test("zero-result completion needs confirmation and participant access follows r
       expectedVersion: 1,
       idempotencyKeyHash: hash("complete-b7-zero-confirmed"),
       requestHash: hash("zero-confirmed-payload"),
+      discomfortReported: false,
       zeroResultConfirmed: true,
       zeroResultReason: "Stopped before the first set",
     });
@@ -230,7 +233,7 @@ test("zero-result completion needs confirmation and participant access follows r
 
     await admin.query(`UPDATE app.trainer_athlete_relations
       SET status = 'ended', ended_at = clock_timestamp() WHERE id = $1`, [data.relationId]);
-    assert.equal(await repository.find(data.trainer, session.id), null);
+    assert.equal((await repository.find(data.trainer, session.id))?.id, session.id);
     assert.equal((await repository.find(data.athlete, session.id))?.status, "completed_with_omissions");
   } finally {
     await Promise.all([admin.end(), app.end()]);

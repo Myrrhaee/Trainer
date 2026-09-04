@@ -78,7 +78,7 @@ export function mapClientAssignmentRow(row: ClientAssignmentProjectionRow): Clie
     session,
     capabilities: {
       canStart: available && session === null,
-      canResume: available && session?.status === "active",
+      canResume: session?.status === "active",
       canViewResult: session !== null && session.status !== "active",
     },
     createdAt: row.created_at.toISOString(),
@@ -131,7 +131,7 @@ const assignmentSelect = `
          coalesce(composition.exercises, '[]'::jsonb) AS exercises
   FROM app.workout_assignments assignment
   JOIN app.trainer_athlete_relations relation ON relation.id = assignment.relation_id
-  JOIN app.users trainer ON trainer.id = assignment.trainer_user_id
+  LEFT JOIN app.users trainer ON trainer.id = assignment.trainer_user_id
   LEFT JOIN app.workout_sessions session ON session.assignment_id = assignment.id
   LEFT JOIN LATERAL (
     SELECT jsonb_agg(jsonb_build_object(

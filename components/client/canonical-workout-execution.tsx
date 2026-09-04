@@ -1,21 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle2, List, Loader2, MessageSquare, Play, Save, SkipForward } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { CanonicalWorkoutCompletion, WorkoutCompletionReceipt } from "./canonical-workout-completion";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   createClientWorkoutSetAttempt,
   isSameClientWorkoutSetIntent,
@@ -127,11 +119,9 @@ export function CanonicalWorkoutExecution({
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, Values>>({});
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [completeOpen, setCompleteOpen] = useState(false);
-  const [zeroConfirmed, setZeroConfirmed] = useState(false);
-  const [zeroReason, setZeroReason] = useState("");
+  const completionTrigger = useRef<HTMLButtonElement>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [startState, setStartState] = useState<StartState>("idle");
   const startAttempt = useRef<ClientWorkoutStartAttempt | null>(null);
@@ -140,6 +130,7 @@ export function CanonicalWorkoutExecution({
   const [setCommandStates, setSetCommandStates] = useState<Record<string, SetCommandState>>({});
   const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
   const [executionCapabilities, setExecutionCapabilities] = useState<ClientWorkoutExecutionReadModel["capabilities"] | null>(null);
+  const completionUnavailable = useCallback(() => { setSession(null); setAssignment(null); setUnavailable(true); setCompleteOpen(false); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,8 +203,6 @@ export function CanonicalWorkoutExecution({
     return () => { cancelled = true; };
   }, [session]);
 
-  const completedCount = session?.exercises.flatMap((item) => item.sets)
-    .filter((item) => item.status === "completed").length ?? 0;
   const persistedCount = session?.exercises.flatMap((item) => item.sets)
     .filter((item) => item.status !== "pending").length ?? 0;
   const totalCount = session?.exercises.reduce((sum, item) => sum + item.sets.length, 0) ?? 0;
@@ -402,30 +391,14 @@ export function CanonicalWorkoutExecution({
     setValues((current) => ({ ...current, [setId]: next }));
   }
 
-  async function complete() {
-    if (!session || busyKey) return;
-    setBusyKey("complete");
-    setError(null);
-    try {
-      const body = await jsonRequest<{ session: WorkoutSession }>(`/api/workout-sessions/${session.id}/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expectedVersion: session.version,
-          idempotencyKey: crypto.randomUUID(),
-          zeroResultConfirmed: zeroConfirmed,
-          zeroResultReason: zeroReason,
-        }),
-      });
-      setSession(body.session);
-      setExecutionCapabilities({ canEdit: false, canSkip: false, canResume: false, canEnterCompletionFlow: false });
-      setCompleteOpen(false);
-      setMessage("Тренировка завершена и отправлена тренеру");
-    } catch (caught) {
-      setError(errorText(caught instanceof Error ? caught.message : "request_failed"));
-    } finally {
-      setBusyKey(null);
-    }
+  const unresolvedSetId = session?.exercises.flatMap((exercise) => exercise.sets).find((set) =>
+    dirtySets.current.has(set.id) || ["saving", "save_failed", "outcome_unknown", "conflict", "editing"].includes(setCommandStates[set.id] ?? ""))?.id;
+
+  function returnToUnresolvedSet() {
+    if (!unresolvedSetId || !session) return;
+    const exercise = session.exercises.find((item) => item.sets.some((set) => set.id === unresolvedSetId));
+    if (exercise) setActiveExerciseId(exercise.id);
+    window.setTimeout(() => focusSet(unresolvedSetId), 0);
   }
 
   if (loading) {
@@ -476,7 +449,7 @@ export function CanonicalWorkoutExecution({
             Проверить
           </Button>
         ) : null}
-        {message ? <Notice tone="success" text={message} /> : null}
+        {session?.completedAt ? <WorkoutCompletionReceipt session={session} /> : null}
 
         {!session && assignment ? (
           <section className="py-8">
@@ -550,7 +523,7 @@ export function CanonicalWorkoutExecution({
                           : item.setKey === set.setKey
                       ))}
                       value={values[set.id] ?? initialValues(set)}
-                      disabled={!executionCapabilities?.canEdit || busyKey !== null}
+                      disabled={!executionCapabilities?.canEdit || busyKey !== null || completeOpen}
                       busy={busyKey === set.id}
                       commandState={setCommandStates[set.id]}
                       onChange={(next) => changeSetValue(set.id, next)}
@@ -595,8 +568,9 @@ export function CanonicalWorkoutExecution({
 
         {session?.status === "active" && executionCapabilities?.canEnterCompletionFlow ? (
           <footer className="sticky bottom-0 -mx-4 flex items-center justify-between gap-4 border-t border-zinc-800 bg-black/95 px-4 py-4 backdrop-blur sm:mx-0 sm:px-0">
-            <p className="text-sm text-zinc-500">Можно завершить с невыполненными подходами</p>
-            <Button onClick={() => setCompleteOpen(true)} disabled={busyKey !== null} className="shrink-0 gap-2 rounded-lg bg-zinc-100 text-black hover:bg-white">
+            {unresolvedSetId ? <button type="button" onClick={returnToUnresolvedSet} className="min-h-11 text-left text-sm text-amber-200">Есть несохранённые результаты. К подходу</button>
+              : <p className="text-sm text-zinc-500">Можно завершить с невыполненными подходами</p>}
+            <Button ref={completionTrigger} onClick={() => setCompleteOpen(true)} disabled={busyKey !== null || Boolean(unresolvedSetId)} className="shrink-0 gap-2 rounded-lg bg-zinc-100 text-black hover:bg-white">
               <Check className="size-4" /> Завершить
             </Button>
           </footer>
@@ -604,57 +578,19 @@ export function CanonicalWorkoutExecution({
 
         {isTerminal ? (
           <div className="border-t border-zinc-800 py-8">
-            <section className="text-center">
-              <CheckCircle2 className="mx-auto size-9 text-lime-300" />
-              <h2 className="mt-4 text-xl font-semibold tracking-normal">Результат сохранён</h2>
-              <p className="mt-2 text-sm text-zinc-500">Тренер увидит тренировку в очереди разбора.</p>
-            </section>
             <ClientFeedbackHistory feedback={feedback} loading={feedbackLoading} />
           </div>
         ) : null}
       </div>
 
-      <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
-        <DialogContent className="max-w-md rounded-lg">
-          <DialogHeader>
-            <DialogTitle>Завершить тренировку?</DialogTitle>
-            <DialogDescription>
-              Выполнено {completedCount} из {totalCount} подходов. Остальные будут отмечены как невыполненные.
-            </DialogDescription>
-          </DialogHeader>
-          {completedCount === 0 ? (
-            <div className="mt-5 space-y-4">
-              <label className="flex items-start gap-3 text-sm text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={zeroConfirmed}
-                  onChange={(event) => setZeroConfirmed(event.target.checked)}
-                  className="mt-0.5 size-4 accent-lime-300"
-                />
-                Подтверждаю завершение без выполненных подходов
-              </label>
-              <Textarea
-                value={zeroReason}
-                onChange={(event) => setZeroReason(event.target.value)}
-                maxLength={1000}
-                placeholder="Причина, если хотите сообщить тренеру"
-                className="rounded-lg border-zinc-800 bg-zinc-900/60"
-              />
-            </div>
-          ) : null}
-          <DialogFooter className="mt-3">
-            <Button variant="ghost" onClick={() => setCompleteOpen(false)} disabled={busyKey !== null}>Отмена</Button>
-            <Button
-              onClick={() => void complete()}
-              disabled={busyKey !== null || (completedCount === 0 && !zeroConfirmed)}
-              className="rounded-lg bg-zinc-100 text-black hover:bg-white"
-            >
-              {busyKey === "complete" ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-              Завершить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {session ? <CanonicalWorkoutCompletion session={session} open={completeOpen} onOpenChange={setCompleteOpen} onRead={setSession}
+        onReturnFocus={() => completionTrigger.current?.focus()}
+        onUnavailable={completionUnavailable}
+        onCompleted={(persisted) => {
+          setSession(persisted);
+          setExecutionCapabilities({ canEdit: false, canSkip: false, canResume: false, canEnterCompletionFlow: false });
+          setError(null);
+        }} /> : null}
     </main>
   );
 }

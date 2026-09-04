@@ -51,8 +51,8 @@ test.describe("R2B.2 long canonical Workout Review", () => {
         expect(longSetComment.length).toBeGreaterThanOrEqual(800);
         expect(legacyActual).toBeDefined();
         expect(open.attention.status).toBe("open");
-        expect(open.sessionContext.discomfort.status).toBe("unsupported");
-        expect(open.sessionContext.overallComment.status).toBe("unsupported");
+        expect(open.sessionContext.discomfort.status).toBe("known_empty");
+        expect(open.sessionContext.overallComment.status).toBe("known_empty");
         expect(open.sessionContext.subjectiveMetrics.status).toBe("unsupported");
         expect(resolved.attention.status).toBe("resolved");
         expect(resolved.existingFeedback).toHaveLength(3);

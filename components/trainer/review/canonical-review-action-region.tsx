@@ -485,11 +485,11 @@ export function CanonicalReviewCompletionReceipt({
         ) : transition.allCalm ? (
           <Link href="/trainer/clients" className="inline-flex min-h-11 items-center rounded-[8px] border border-lime-300/25 px-3 text-lime-100 hover:border-lime-300/40">В очереди всё спокойно · к спортсменам</Link>
         ) : null}
-        <Link href={assignHref} className="inline-flex min-h-11 items-center gap-2 rounded-[8px] border border-zinc-700 px-3 text-zinc-200 hover:border-zinc-600 hover:text-white">
+        {review.capabilities.canAssignNext ? <Link href={assignHref} className="inline-flex min-h-11 items-center gap-2 rounded-[8px] border border-zinc-700 px-3 text-zinc-200 hover:border-zinc-600 hover:text-white">
           <Dumbbell className="size-4" />Назначить следующую тренировку
-        </Link>
+        </Link> : null}
         <div className="flex flex-wrap gap-x-4 gap-y-2">
-          <Link href={transition.profileHref} className="inline-flex min-h-11 items-center text-zinc-300 hover:text-white">К профилю</Link>
+          {review.capabilities.canOpenAthleteProfile ? <Link href={transition.profileHref} className="inline-flex min-h-11 items-center text-zinc-300 hover:text-white">К профилю</Link> : null}
           <Link href={transition.queueHref} className="inline-flex min-h-11 items-center text-zinc-300 hover:text-white">К очереди</Link>
         </div>
       </div>

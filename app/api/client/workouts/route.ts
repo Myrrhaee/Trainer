@@ -21,7 +21,9 @@ export async function GET(request: Request) {
     const sessionId = query.get("sessionId") ?? undefined;
     const service = new ClientWorkoutQueryService();
     if (assignmentId || sessionId) {
-      const execution = await service.execution(actor, { assignmentId, sessionId });
+      const execution = await service.execution(actor, { assignmentId, sessionId,
+        completionCommandId: query.get("completionCommandId") ?? undefined,
+        completionFingerprint: query.get("completionFingerprint") ?? undefined });
       return execution
         ? NextResponse.json({ execution }, { headers: { "Cache-Control": "no-store" } })
         : NextResponse.json({ error: "workout_unavailable" }, { status: 404 });

@@ -33,6 +33,7 @@ export function CanonicalTrainerDashboard() {
   const [snapshot, setSnapshot] = useState<TrainerDashboardSnapshot | null>(null);
   const [failed, setFailed] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [selectedAttentionId, setSelectedAttentionId] = useState<string | null>(null);
   const [previewClientId, setPreviewClientId] = useState<string | null>(null);
   const [activeActivityClientId, setActiveActivityClientId] = useState<string | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
@@ -74,7 +75,8 @@ export function CanonicalTrainerDashboard() {
   const restoredAttention = dashboard?.attentionItems.length && Number.isInteger(requestedPosition) && requestedPosition >= 0
     ? dashboard.attentionItems[Math.min(requestedPosition, dashboard.attentionItems.length - 1)]
     : null;
-  const currentAttention = dashboard?.attentionItems.find((item) => item.clientId === selectedClientId)
+  const currentAttention = dashboard?.attentionItems.find((item) => item.id === selectedAttentionId)
+    ?? dashboard?.attentionItems.find((item) => item.clientId === selectedClientId)
     ?? restoredAttention
     ?? dashboard?.attentionItems[0]
     ?? null;
@@ -103,6 +105,7 @@ export function CanonicalTrainerDashboard() {
   }, [dashboard?.attentionItems, queueFocusRequested, requestedPosition]);
 
   function selectActivity(item: TeamActivityItem) {
+    setSelectedAttentionId(null);
     setSelectedActivityId(item.id);
     setSelectedClientId(item.clientId);
     setActiveActivityClientId(item.clientId);
@@ -113,11 +116,13 @@ export function CanonicalTrainerDashboard() {
     if (!dashboard || !currentAttention || dashboard.attentionItems.length < 2) return;
     const index = dashboard.attentionItems.findIndex((item) => item.id === currentAttention.id);
     const next = dashboard.attentionItems[(index + offset + dashboard.attentionItems.length) % dashboard.attentionItems.length];
+    setSelectedAttentionId(next.id);
     setSelectedClientId(next.clientId);
   }
 
   function openReview(client: TeamClient) {
-    const review = dashboard?.attentionItems.find((item) => item.clientId === client.id && item.reviewHref);
+    const review = currentAttention?.clientId === client.id && currentAttention.reviewHref ? currentAttention
+      : dashboard?.attentionItems.find((item) => item.clientId === client.id && item.reviewHref);
     if (review?.reviewHref) {
       const sessionId = review.reviewHref.split("/trainer/review/")[1]?.split("?")[0];
       if (!sessionId) return;
@@ -168,7 +173,7 @@ export function CanonicalTrainerDashboard() {
                 <p className="mt-2 text-sm text-zinc-500">Обновите страницу и повторите попытку.</p>
               </div>
             </section>
-          ) : dashboard?.clients.length === 0 ? (
+          ) : dashboard?.clients.length === 0 && dashboard.attentionItems.length === 0 ? (
             <EmptyTeamState />
           ) : dashboard ? (
             <>
@@ -191,7 +196,7 @@ export function CanonicalTrainerDashboard() {
                   currentItemId={currentAttention?.id ?? null}
                   resolutionReceipt={null}
                   sectionRef={attentionSectionRef}
-                  onSelectItem={(item) => setSelectedClientId(item.clientId)}
+                  onSelectItem={(item) => { setSelectedAttentionId(item.id); setSelectedClientId(item.clientId); }}
                   onPreviewClient={setPreviewClientId}
                   onMove={moveAttention}
                   onResolve={() => undefined}
@@ -204,9 +209,10 @@ export function CanonicalTrainerDashboard() {
                   activityItems={unreadActivities}
                   activeActivityClientId={highlightedActivityClientId}
                   selectedClientId={mapSelectedClientId}
-                  onSelectClient={(client) => setSelectedClientId(client.id)}
+                  onSelectClient={(client) => { setSelectedAttentionId(null); setSelectedClientId(client.id); }}
                   onClearSelection={() => {
                     setSelectedClientId(null);
+                    setSelectedAttentionId(null);
                     setPreviewClientId(null);
                   }}
                 />

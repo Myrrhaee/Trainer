@@ -376,10 +376,11 @@ test.describe("Canonical three-role closed-alpha flow", () => {
         const completeButton = athleteOne.getByRole("button", { name: "Завершить", exact: true });
         await completeButton.scrollIntoViewIfNeeded();
         await completeButton.click();
-        const dialog = athleteOne.getByRole("dialog", { name: "Завершить тренировку?" });
-        await expect(dialog).toContainText("Выполнено 2 из 2 подходов");
-        await dialog.getByRole("button", { name: "Завершить", exact: true }).click();
-        await expect(athleteOne.getByRole("heading", { name: "Результат сохранён" })).toBeVisible();
+        const dialog = athleteOne.getByRole("dialog", { name: "Завершить тренировку", exact: true });
+        await expect(dialog).toContainText("2 из 2 подходов");
+        await dialog.getByRole("radio", { name: "Нет", exact: true }).check();
+        await dialog.getByRole("button", { name: "Завершить тренировку", exact: true }).click();
+        await expect(athleteOne.getByRole("heading", { name: "Тренировка завершена" })).toBeVisible();
         await expectNoHorizontalOverflow(athleteOne);
       });
 
@@ -832,16 +833,21 @@ async function seedTerminalHistory(athleteUserId: string, count: number) {
       )
       SELECT fixture.session_id, fixture.assignment_id,
              source.session_relation_id, source.session_trainer_user_id, source.session_athlete_user_id,
-             'completed', 1, 'Europe/Moscow',
+             'active', 1, 'Europe/Moscow',
              md5(fixture.assignment_id::text) || md5(fixture.session_id::text),
              clock_timestamp() - fixture.sequence * interval '1 day' - interval '1 hour',
-             clock_timestamp() - fixture.sequence * interval '1 day',
+             NULL,
              clock_timestamp() - fixture.sequence * interval '1 day' - interval '1 hour',
              clock_timestamp() - fixture.sequence * interval '1 day'
       FROM source CROSS JOIN fixture
       WHERE EXISTS (SELECT 1 FROM inserted_assignments)
+      RETURNING id
     `, [athleteUserId, count]);
     expect(result.rowCount).toBe(count);
+    // Pagination-only fixture follows the new active -> terminal context constraint.
+    await pool.query(`UPDATE app.workout_sessions SET status='completed', version=version+1,
+      completed_at=started_at + interval '1 hour', discomfort_reported=false
+      WHERE id=ANY($1::uuid[])`, [result.rows.map((row: { id: string }) => row.id)]);
   } finally {
     await pool.end();
   }
@@ -918,6 +924,7 @@ async function createCompletedReviewFixture(
     data: {
       expectedVersion: progressBody.session.version,
       idempotencyKey: `review-${suffix}-complete-${session.id}`,
+      discomfortReported: false,
       zeroResultConfirmed: false,
       zeroResultReason: "",
     },

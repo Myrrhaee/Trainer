@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { CompletionValidationError } from "@/lib/client-workout-completion-command";
+import { revalidateTrainerWorkflow } from "@/lib/server/trainer-workflow/revalidation";
 
 import { AccessService } from "@/lib/server/access/access-service";
 import { resolveRequestActor } from "@/lib/server/auth/actor";
@@ -28,10 +30,10 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     const { sessionId } = await context.params;
     const session = await new WorkoutSessionService().complete(actor, sessionId, body);
     return session
-      ? NextResponse.json({ session })
+      ? NextResponse.json({ session, refreshWarning: revalidateTrainerWorkflow(session.athleteUserId) ?? undefined })
       : NextResponse.json({ error: "active_session_not_found" }, { status: 404 });
   } catch (error) {
-    if (error instanceof WorkoutSessionValidationError) {
+    if (error instanceof WorkoutSessionValidationError || error instanceof CompletionValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof SessionVersionConflictError || error instanceof SessionIdempotencyConflictError) {

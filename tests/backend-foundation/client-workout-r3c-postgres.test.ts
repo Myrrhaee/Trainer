@@ -252,7 +252,7 @@ test("R3C persists exact actual facts with receipts, source identity and optimis
     assert.equal(exact?.session?.version, 5);
     assert.equal(exact?.session?.exercises[0].sets[0].athleteComment, "R3C actual set");
     assert.equal(exact?.capabilities.canEdit, true);
-    assert.equal(exactCounter.count(), 10);
+    assert.equal(exactCounter.count(), 11);
     const receiptCount = await admin.query<{ count: string }>("SELECT count(*)::text FROM app.workout_session_command_receipts WHERE session_id = $1 AND kind = 'progress'", [started.session.id]);
     assert.equal(receiptCount.rows[0].count, "4");
 
@@ -261,6 +261,7 @@ test("R3C persists exact actual facts with receipts, source identity and optimis
       expectedVersion: 5,
       idempotencyKeyHash: hash("r3c-complete-boundary"),
       requestHash: hash("r3c-complete-boundary-payload"),
+      discomfortReported: false,
       zeroResultConfirmed: false,
       zeroResultReason: "",
     });

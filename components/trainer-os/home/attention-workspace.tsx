@@ -241,9 +241,9 @@ function AttentionDecisionCard({
             </Link>
           </Button>
         ) : null}
-        <Button asChild variant="outline" className="h-11 rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
+        {item.canOpenProfile !== false ? <Button asChild variant="outline" className="h-11 rounded-full border-zinc-700 bg-black/20 text-zinc-200 hover:bg-zinc-900">
           <Link href={profileHref}>Контекст клиента</Link>
-        </Button>
+        </Button> : null}
         {allowManualResolve ? (
           <Button
             type="button"

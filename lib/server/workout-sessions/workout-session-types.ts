@@ -45,6 +45,13 @@ export type WorkoutSession = {
   exercises: WorkoutExerciseLog[];
   attentionItemId: string | null;
   updatedAt: string;
+  completion?: {
+    overallComment: string | null;
+    discomfortReported: boolean | null;
+    discomfortComment: string | null;
+    reviewQueued: boolean;
+    correlation?: "own" | "equivalent" | "different" | "none";
+  };
 };
 
 export type ProgressSetInput = {

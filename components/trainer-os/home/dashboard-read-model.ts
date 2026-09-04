@@ -5,6 +5,7 @@ export type TrainerDashboardDemoMode = "team" | "calm" | "empty" | "large";
 export type TrainerAttentionKind = "discomfort" | "review" | "assignment" | "missed_workout";
 
 export type TrainerAttentionQueueItem = {
+  canOpenProfile?: boolean;
   id: string;
   clientId: string;
   client: TeamClient;

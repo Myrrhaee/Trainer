@@ -75,6 +75,10 @@ type CanonicalReviewSourceRow = {
   manual_resolution_reason: string | null;
   session_id: string;
   session_assignment_id: string;
+  relation_status: "active" | "suspended" | "ended";
+  overall_comment: string | null;
+  discomfort_reported: boolean | null;
+  discomfort_comment: string | null;
   session_relation_id: string;
   session_trainer_user_id: string;
   session_athlete_user_id: string;
@@ -279,11 +283,12 @@ export class ReviewRepository {
           session.completed_at, attention.created_at, attention.priority_reasons,
           count(set_log.id) FILTER (WHERE set_log.status = 'completed')::text AS completed_sets,
           count(set_log.id)::text AS total_sets,
-          coalesce(bool_or(btrim(set_log.athlete_comment) <> ''), false) AS has_client_comments
+          (session.overall_comment IS NOT NULL OR session.discomfort_comment IS NOT NULL
+            OR coalesce(bool_or(btrim(set_log.athlete_comment) <> ''), false)) AS has_client_comments
         FROM app.attention_items attention
         JOIN app.workout_sessions session ON session.id = attention.source_session_id
         JOIN app.workout_assignments assignment ON assignment.id = session.assignment_id
-        JOIN app.users account ON account.id = attention.athlete_user_id
+        LEFT JOIN app.users account ON account.id = attention.athlete_user_id
         LEFT JOIN app.workout_exercise_logs exercise ON exercise.session_id = session.id
         LEFT JOIN app.workout_set_logs set_log ON set_log.exercise_log_id = exercise.id
         WHERE attention.trainer_user_id = $1 AND attention.status = 'open'
@@ -336,6 +341,8 @@ export class ReviewRepository {
           session.started_at AS session_started_at,
           session.completed_at AS session_completed_at,
           session.zero_result_reason,
+          session.overall_comment, session.discomfort_reported, session.discomfort_comment,
+          relation.status::text AS relation_status,
           session.created_at AS session_created_at,
           session.updated_at AS session_updated_at,
           assignment.id AS assignment_id,
@@ -356,10 +363,10 @@ export class ReviewRepository {
         JOIN app.workout_assignments assignment ON assignment.id = session.assignment_id
         JOIN app.attention_items attention
           ON attention.source_session_id = session.id AND attention.item_type = 'workout_review'
-        JOIN app.users account ON account.id = session.athlete_user_id
+        LEFT JOIN app.users account ON account.id = session.athlete_user_id
         LEFT JOIN app.attention_manual_resolutions resolution ON resolution.attention_item_id = attention.id
         WHERE session.id = $1 AND session.trainer_user_id = $2
-          AND attention.trainer_user_id = $2 AND relation.status = 'active'
+          AND attention.trainer_user_id = $2
           AND session.status IN ('completed', 'completed_with_omissions')`, [sessionId, actor.userId]);
       const source = sourceResult.rows[0];
       if (!source) return null;
@@ -583,10 +590,10 @@ export class ReviewRepository {
     setLogRows: CanonicalSetLogRow[],
     feedbackRows: FeedbackRow[],
   ): ReviewReadModel {
-    const anomalies: ReviewAnomaly[] = [{
+    const anomalies: ReviewAnomaly[] = source.discomfort_reported === null ? [{
       type: "unsupported_session_context",
-      detail: "Overall comment, discomfort and session-level subjective metrics are not canonically collected.",
-    }];
+      detail: "Legacy Session context was not collected.",
+    }] : [];
     const sourceIdentityValid = source.attention_source_session_id === source.session_id
       && source.attention_athlete_user_id === source.session_athlete_user_id
       && source.attention_relation_id === source.session_relation_id
@@ -714,8 +721,21 @@ export class ReviewRepository {
       logsAvailability = { status: "ready", value: { exerciseCount: actualExerciseCount, setCount: logCount } };
     }
 
-    const overallComment = unsupported<string>("overall_session_comment_not_collected");
-    const discomfort = unsupported<readonly never[]>("structured_discomfort_not_collected");
+    const legacyContext = source.discomfort_reported === null
+      && source.overall_comment === null && source.discomfort_comment === null;
+    const validContext = (source.overall_comment === null || Array.from(source.overall_comment).length <= 2000)
+      && (source.discomfort_reported === false ? source.discomfort_comment === null
+        : source.discomfort_reported === true && Boolean(source.discomfort_comment?.trim())
+          && Array.from(source.discomfort_comment ?? "").length <= 1000);
+    const overallComment: ReviewReadModel["sessionContext"]["overallComment"] = legacyContext
+      ? unsupported("overall_session_comment_not_collected") : !validContext
+        ? { status: "unavailable", reason: "invalid_session_context" } : source.overall_comment
+          ? { status: "ready", value: source.overall_comment } : { status: "known_empty", value: null };
+    const discomfort: ReviewReadModel["sessionContext"]["discomfort"] = legacyContext
+      ? unsupported("structured_discomfort_not_collected") : !validContext
+        ? { status: "unavailable", reason: "invalid_discomfort_context" } : source.discomfort_reported === false
+          ? { status: "known_empty", value: null }
+          : { status: "ready", value: { reported: true, comment: source.discomfort_comment! } };
     const subjectiveMetrics = unsupported<Record<string, never>>("session_subjective_metrics_not_collected");
     const capabilities = reviewCapabilities({
       attentionStatus: source.attention_status,
@@ -778,7 +798,8 @@ export class ReviewRepository {
       exercises,
       sessionContext: { overallComment, discomfort, subjectiveMetrics },
       existingFeedback: feedback,
-      capabilities,
+      capabilities: { ...capabilities, canOpenAthleteProfile: source.relation_status === "active",
+        canAssignNext: source.relation_status === "active" },
       anomalies,
       dataAvailability: {
         sourceSession: sourceAvailability,
@@ -787,7 +808,7 @@ export class ReviewRepository {
         feedback: feedbackAvailability,
         sessionContext: { overallComment, discomfort, subjectiveMetrics },
         canAssertNoDeviations: logsAvailability.status === "ready"
-          && discomfort.status !== "unsupported"
+          && discomfort.status === "known_empty"
           && anomalies.length === 0,
       },
     };

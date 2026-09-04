@@ -307,6 +307,7 @@ async function complete(
     expectedVersion: session.version,
     idempotencyKeyHash: hash(`${key}-complete`),
     requestHash: hash(`${key}-complete-request`),
+    discomfortReported: false,
     zeroResultConfirmed: !withComment,
     zeroResultReason: withComment ? "" : "Тестовый цикл без результатов",
   });

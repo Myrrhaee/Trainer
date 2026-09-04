@@ -156,6 +156,7 @@ test("R3B projects independent rich assignments and exact reads fail closed", { 
       expectedVersion: 1,
       idempotencyKeyHash: hash("r3b-complete"),
       requestHash: hash("r3b-complete-payload"),
+      discomfortReported: false,
       zeroResultConfirmed: true,
       zeroResultReason: "R3B terminal state test",
     });

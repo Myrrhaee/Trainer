@@ -116,6 +116,7 @@ async function completedFixture(
     expectedVersion: 2,
     idempotencyKeyHash: hash(`${label}-complete`),
     requestHash: hash(`${label}-complete-payload`),
+    discomfortReported: false,
     zeroResultConfirmed: false,
     zeroResultReason: "",
   });
@@ -173,22 +174,24 @@ test("trainer review read model uses canonical session facts and isolates unrela
       "Last repetition was slow",
       "Stopped before the second result",
     ]);
-    assert.equal(review?.sessionContext.discomfort.status, "unsupported");
-    assert.equal(review?.sessionContext.overallComment.status, "unsupported");
+    assert.equal(review?.sessionContext.discomfort.status, "known_empty");
+    assert.equal(review?.sessionContext.overallComment.status, "known_empty");
     assert.equal(review?.sessionContext.subjectiveMetrics.status, "unsupported");
-    assert.equal(review?.dataAvailability.canAssertNoDeviations, false);
+    assert.equal(review?.dataAvailability.canAssertNoDeviations, true);
     assert.deepEqual(review?.capabilities, {
       canRead: true,
       canSendInitialFeedback: true,
       canSendAcknowledgement: true,
       canSendFollowUp: false,
       canResolveManually: true,
+      canOpenAthleteProfile: true,
+      canAssignNext: true,
     });
     assert.equal(await service.findReview(stranger, data.sessionId), null);
 
     await admin.query(`UPDATE app.trainer_athlete_relations SET status = 'suspended'
       WHERE id = $1`, [data.relationId]);
-    assert.equal(await service.findReview(data.trainer, data.sessionId), null);
+    assert.equal((await service.findReview(data.trainer, data.sessionId))?.capabilities.canAssignNext, false);
   } finally {
     await Promise.all([admin.end(), app.end()]);
   }
@@ -367,7 +370,7 @@ test("feedback resolves once, retries safely and remains visible and immutable f
 
     await admin.query(`UPDATE app.trainer_athlete_relations SET status = 'ended',
       ended_at = clock_timestamp() WHERE id = $1`, [data.relationId]);
-    assert.equal((await repository.listSessionFeedback(data.trainer, data.sessionId)).length, 0);
+    assert.equal((await repository.listSessionFeedback(data.trainer, data.sessionId)).length, 2);
     assert.equal((await repository.listAthleteFeedback(data.athlete, data.sessionId)).length, 2);
   } finally {
     await Promise.all([admin.end(), app.end()]);

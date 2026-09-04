@@ -170,6 +170,8 @@ export type ReviewCapabilities = {
   canSendAcknowledgement: boolean;
   canSendFollowUp: boolean;
   canResolveManually: boolean;
+  canOpenAthleteProfile?: boolean;
+  canAssignNext?: boolean;
 };
 
 export type ReviewReadModel = {
@@ -217,7 +219,7 @@ export type ReviewReadModel = {
   exercises: ReviewExerciseReadModel[];
   sessionContext: {
     overallComment: ReviewAvailability<string>;
-    discomfort: ReviewAvailability<readonly never[]>;
+    discomfort: ReviewAvailability<{ reported: true; comment: string }>;
     subjectiveMetrics: ReviewAvailability<Record<string, never>>;
   };
   existingFeedback: ReviewReadFeedback[];
@@ -230,7 +232,7 @@ export type ReviewReadModel = {
     feedback: ReviewAvailability<{ count: number }>;
     sessionContext: {
       overallComment: ReviewAvailability<string>;
-      discomfort: ReviewAvailability<readonly never[]>;
+      discomfort: ReviewAvailability<{ reported: true; comment: string }>;
       subjectiveMetrics: ReviewAvailability<Record<string, never>>;
     };
     canAssertNoDeviations: boolean;

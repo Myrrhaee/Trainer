@@ -24,12 +24,15 @@ export class ClientWorkoutQueryService {
     return this.workouts.listCurrent(actor);
   }
 
-  async execution(actor: Actor, input: { assignmentId?: unknown; sessionId?: unknown }): Promise<ClientWorkoutExecutionReadModel | null> {
+  async execution(actor: Actor, input: { assignmentId?: unknown; sessionId?: unknown; completionCommandId?: string; completionFingerprint?: string }): Promise<ClientWorkoutExecutionReadModel | null> {
     const requestedAssignmentId = input.assignmentId === undefined ? null : clientWorkoutId(input.assignmentId);
     const requestedSessionId = input.sessionId === undefined ? null : clientWorkoutId(input.sessionId);
     if (!requestedAssignmentId && !requestedSessionId) throw new ClientWorkoutInputError("workout_unavailable");
 
-    const session = requestedSessionId ? await this.sessions.find(actor, requestedSessionId) : null;
+    const correlation = input.completionCommandId !== undefined || input.completionFingerprint !== undefined
+      ? { commandId: clientWorkoutId(input.completionCommandId), fingerprint: input.completionFingerprint ?? "" } : undefined;
+    if (correlation && (!requestedSessionId || !/^[a-f0-9]{64}$/.test(correlation.fingerprint))) throw new ClientWorkoutInputError("workout_unavailable");
+    const session = requestedSessionId ? await this.sessions.find(actor, requestedSessionId, correlation) : null;
     if (requestedSessionId && !session) return null;
     const assignmentId = requestedAssignmentId ?? session?.assignmentId ?? null;
     if (!assignmentId || (session && requestedAssignmentId && session.assignmentId !== requestedAssignmentId)) return null;

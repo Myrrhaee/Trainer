@@ -1,6 +1,7 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { CompletionValidationError, completionLogicalRequest, normalizeCompletion } from "@/lib/client-workout-completion-command";
 import type { Pool, PoolClient } from "pg";
 
 import type { Actor } from "@/lib/server/database/actor-context";
@@ -19,6 +20,8 @@ type SessionRow = {
   id: string; assignment_id: string; trainer_user_id: string; athlete_user_id: string;
   title_snapshot: string; status: WorkoutSession["status"]; version: number; client_timezone: string;
   started_at: Date; completed_at: Date | null; attention_item_id: string | null; updated_at: Date;
+  overall_comment: string | null; discomfort_reported: boolean | null; discomfort_comment: string | null;
+  review_queued: boolean;
 };
 type ExerciseRow = {
   id: string; assignment_exercise_id: string; title_snapshot: string; position: number;
@@ -37,6 +40,10 @@ type SetRow = {
 const sessionSelect = `SELECT session.id, session.assignment_id, session.trainer_user_id,
   session.athlete_user_id, assignment.title_snapshot, session.status::text, session.version,
   session.client_timezone, session.started_at, session.completed_at, session.updated_at,
+  session.overall_comment, session.discomfort_reported, session.discomfort_comment,
+  EXISTS (SELECT 1 FROM app.workout_session_command_receipts receipt
+    WHERE receipt.session_id = session.id AND receipt.kind = 'complete'
+      AND receipt.result_version = session.version) AS review_queued,
   (SELECT attention.id FROM app.attention_items attention
    WHERE attention.source_session_id = session.id AND attention.item_type = 'workout_review') AS attention_item_id
 FROM app.workout_sessions session
@@ -71,8 +78,25 @@ export class WorkoutSessionRepository {
     }, this.pool);
   }
 
-  find(actor: Actor, sessionId: string): Promise<WorkoutSession | null> {
-    return withActorTransaction(actor, (client) => this.findInTransaction(client, sessionId), this.pool);
+  find(actor: Actor, sessionId: string, correlation?: { commandId: string; fingerprint: string }): Promise<WorkoutSession | null> {
+    return withDatabaseTransaction(this.pool, async (client) => {
+      await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await setTransactionActor(client, actor);
+      const session = await this.findInTransaction(client, sessionId);
+      if (session && correlation) {
+        const receipts = await client.query<{ same_key: boolean; request_hash: string; result_version: number }>(
+          `SELECT idempotency_key_hash = $3 AS same_key, request_hash, result_version
+           FROM app.workout_session_command_receipts
+           WHERE session_id = $1 AND actor_user_id = $2 AND kind = 'complete'`,
+          [sessionId, actor.userId, createHash("sha256").update(correlation.commandId).digest("hex")]);
+        const own = receipts.rows.find((row) => row.same_key);
+        const equal = receipts.rows.find((row) => row.request_hash === correlation.fingerprint && row.result_version === session.version);
+        session.completion = { ...session.completion!, correlation: own
+          ? own === equal ? "own" : "different"
+          : equal ? "equivalent" : receipts.rowCount ? "different" : "none" };
+      }
+      return session;
+    });
   }
 
   start(actor: Actor, input: {
@@ -93,7 +117,8 @@ export class WorkoutSessionRepository {
           FROM app.workout_assignments assignment
           JOIN app.trainer_athlete_relations relation ON relation.id = assignment.relation_id
           WHERE assignment.id = $1 AND assignment.athlete_user_id = $2
-            AND assignment.status = 'available' AND relation.status = 'active'`,
+            AND assignment.status = 'available' AND relation.status = 'active'
+          FOR SHARE OF relation`,
         [input.assignmentId, actor.userId]);
       if (!source.rowCount) return null;
       const row = source.rows[0];
@@ -188,24 +213,41 @@ export class WorkoutSessionRepository {
   complete(actor: Actor, input: {
     sessionId: string; expectedVersion: number; idempotencyKeyHash: string; requestHash: string;
     zeroResultConfirmed: boolean; zeroResultReason: string;
+    overallComment?: string | null; discomfortReported?: boolean; discomfortComment?: string | null;
   }): Promise<WorkoutSession | null> {
     return withDatabaseTransaction(this.pool, async (client) => {
       await setTransactionActor(client, actor);
       const session = await client.query<{
         version: number; status: WorkoutSession["status"];
-        trainer_user_id: string; athlete_user_id: string; relation_id: string;
-      }>(`SELECT version, status::text, trainer_user_id, athlete_user_id, relation_id
-          FROM app.workout_sessions WHERE id = $1 AND athlete_user_id = $2 FOR UPDATE`,
+        trainer_user_id: string; athlete_user_id: string; relation_id: string; assignment_id: string;
+      }>(`SELECT version, status::text, trainer_user_id, athlete_user_id, relation_id, assignment_id
+          FROM app.workout_sessions WHERE id = $1 AND athlete_user_id = $2`,
         [input.sessionId, actor.userId]);
-      if (!session.rowCount) {
-        const retried = await this.receipt(client, actor.userId, input.sessionId,
-          "complete", input.idempotencyKeyHash, input.requestHash);
-        return retried ? this.findInTransaction(client, input.sessionId) : null;
-      }
+      if (!session.rowCount) return null;
+      // The active-row UPDATE policy cannot lock terminal rows. Lock active, then reread
+      // after waiting so a concurrent completion is reconciled rather than overwritten.
+      await client.query(`SELECT id FROM app.workout_sessions
+        WHERE id = $1 AND athlete_user_id = $2 AND status = 'active' FOR UPDATE`, [input.sessionId, actor.userId]);
+      const current = await client.query<{ version: number; status: WorkoutSession["status"] }>(
+        `SELECT version, status::text FROM app.workout_sessions WHERE id = $1`, [input.sessionId]);
+      if (!current.rowCount) return null;
+      Object.assign(session.rows[0], current.rows[0]);
+      const legacy = input.discomfortReported === undefined;
+      const content = legacy ? null : normalizeCompletion(input);
+      const requestHash = content ? createHash("sha256").update(JSON.stringify(
+        completionLogicalRequest(input.sessionId, session.rows[0].assignment_id, content))).digest("hex") : input.requestHash;
       const duplicate = await this.receipt(client, actor.userId, input.sessionId,
-        "complete", input.idempotencyKeyHash, input.requestHash);
+        "complete", input.idempotencyKeyHash, requestHash);
       if (duplicate) return this.findInTransaction(client, input.sessionId);
-      if (session.rows[0].status !== "active") return null;
+      if (!content) throw new CompletionValidationError("discomfortReported");
+      if (session.rows[0].status !== "active") {
+        const equivalent = await client.query(`SELECT 1 FROM app.workout_session_command_receipts
+          WHERE session_id = $1 AND actor_user_id = $2 AND kind = 'complete'
+            AND request_hash = $3 AND result_version = $4`,
+          [input.sessionId, actor.userId, requestHash, session.rows[0].version]);
+        if (equivalent.rowCount) return this.findInTransaction(client, input.sessionId);
+        throw new SessionIdempotencyConflictError("completed_elsewhere");
+      }
       if (session.rows[0].version !== input.expectedVersion) throw new SessionVersionConflictError("version_conflict");
       const results = await client.query<{ completed: string }>(`SELECT count(*) FILTER (WHERE set_log.status = 'completed')::text AS completed
         FROM app.workout_set_logs set_log JOIN app.workout_exercise_logs exercise ON exercise.id = set_log.exercise_log_id
@@ -222,17 +264,20 @@ export class WorkoutSessionRepository {
         WHERE exercise.session_id = $1 AND set_log.status <> 'completed'`, [input.sessionId]);
       const status = Number(omissions.rows[0].count) > 0 ? "completed_with_omissions" : "completed";
       await client.query(`UPDATE app.workout_sessions SET status = $2, version = version + 1,
-        completed_at = clock_timestamp(), zero_result_reason = NULLIF($3, '') WHERE id = $1`,
-        [input.sessionId, status, input.zeroResultReason]);
+        completed_at = clock_timestamp(), zero_result_reason = NULLIF($3, ''),
+        overall_comment = $4, discomfort_reported = $5, discomfort_comment = $6 WHERE id = $1`,
+        [input.sessionId, status, content.zeroResultReason, content.overallComment,
+          content.discomfortReported, content.discomfortComment]);
       const source = session.rows[0];
       const attentionItemId = randomUUID();
       await client.query(`INSERT INTO app.attention_items
         (id, trainer_user_id, athlete_user_id, relation_id, source_session_id, priority_reasons)
         VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
         [attentionItemId, source.trainer_user_id, source.athlete_user_id, source.relation_id, input.sessionId,
-          JSON.stringify(status === "completed_with_omissions" ? ["partial_completion"] : [])]);
+          JSON.stringify([...(content.discomfortReported ? ["discomfort"] : []),
+            ...(status === "completed_with_omissions" ? ["partial_completion"] : [])])]);
       await this.saveReceipt(client, actor.userId, input.sessionId, "complete",
-        input.idempotencyKeyHash, input.requestHash, input.expectedVersion + 1);
+        input.idempotencyKeyHash, requestHash, input.expectedVersion + 1);
       await client.query(`INSERT INTO app.audit_events (actor_user_id, subject_user_id, event_type, metadata)
         VALUES ($1,$1,'workout.session.completed',jsonb_build_object(
           'session_id',$2::text,'attention_item_id',$3::text,'outcome',$4::text))`,
@@ -304,6 +349,8 @@ export class WorkoutSessionRepository {
       athleteUserId: row.athlete_user_id, title: row.title_snapshot, status: row.status,
       version: row.version, clientTimezone: row.client_timezone, startedAt: row.started_at.toISOString(),
       completedAt: row.completed_at?.toISOString() ?? null, attentionItemId: row.attention_item_id,
+      completion: { overallComment: row.overall_comment, discomfortReported: row.discomfort_reported,
+        discomfortComment: row.discomfort_comment, reviewQueued: row.review_queued },
       exercises: exercises.rows.map((exercise) => ({
         id: exercise.id, assignmentExerciseId: exercise.assignment_exercise_id,
         title: exercise.title_snapshot, position: exercise.position, status: exercise.status,

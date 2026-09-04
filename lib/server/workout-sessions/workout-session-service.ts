@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { normalizeCompletion } from "@/lib/client-workout-completion-command";
 
 import type { Actor } from "@/lib/server/database/actor-context";
 import { WorkoutSessionRepository } from "./workout-session-repository";
@@ -126,7 +127,8 @@ export class WorkoutSessionService {
 
   complete(actor: Actor, sessionId: unknown, value: unknown) {
     const input = object(value);
-    const request = {
+    const request = ["overallComment", "discomfortReported", "discomfortComment"].some((key) => key in input)
+      ? normalizeCompletion(input) : {
       expectedVersion: integer(input.expectedVersion, 1, 1_000_000),
       zeroResultConfirmed: input.zeroResultConfirmed === true,
       zeroResultReason: text(input.zeroResultReason ?? "", 1000),

@@ -243,6 +243,7 @@ async function createCompletedSession(
     data: {
       expectedVersion: version,
       idempotencyKey: `long-review-${suffix}-complete`,
+      discomfortReported: false,
       zeroResultConfirmed: false,
       zeroResultReason: "",
     },

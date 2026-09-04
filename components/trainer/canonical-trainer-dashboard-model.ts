@@ -17,7 +17,7 @@ export function buildCanonicalTrainerDashboardView(
   snapshot: TrainerDashboardSnapshot,
   now = new Date(),
 ): CanonicalTrainerDashboardView {
-  const reviewByAthlete = new Map(snapshot.reviews.map((review) => [review.athleteUserId, review]));
+  const reviewByAthlete = new Map(snapshot.reviews.toReversed().map((review) => [review.athleteUserId, review]));
   const clients = snapshot.athletes.map<TeamClient>((athlete) => {
     const review = reviewByAthlete.get(athlete.athleteUserId);
     if (review) {
@@ -72,10 +72,14 @@ export function buildCanonicalTrainerDashboardView(
   });
 
   const clientById = new Map(clients.map((client) => [client.id, client]));
-  const attentionItems = clients.flatMap<TrainerAttentionQueueItem>((client) => {
-    const review = reviewByAthlete.get(client.id);
-    if (review) {
-      return [{
+  const reviewItems = snapshot.reviews.map<TrainerAttentionQueueItem>((review) => {
+      const client: TeamClient = clientById.get(review.athleteUserId) ?? {
+        id: review.athleteUserId, name: review.athleteDisplayName, initials: review.athleteInitials,
+        goal: "Разбор завершённой тренировки", state: "waiting_review", stateLabel: "Ждёт разбора",
+        progressTrend: "flat", isOnline: false, priority: "high",
+        lastActivity: relativeTime(review.completedAt, now), primaryAction: "review",
+      };
+      return {
         id: review.id,
         clientId: client.id,
         client,
@@ -90,9 +94,11 @@ export function buildCanonicalTrainerDashboardView(
         ],
         primaryAction: "review",
         reviewHref: `/trainer/review/${review.sessionId}`,
+        canOpenProfile: clientById.has(review.athleteUserId),
         ageHours: ageHours(review.completedAt, now),
-      }];
-    }
+      };
+  });
+  const attentionItems = [...reviewItems, ...clients.flatMap<TrainerAttentionQueueItem>((client) => {
     if (client.state === "no_next_workout") {
       return [{
         id: `assignment-${client.id}`,
@@ -109,7 +115,7 @@ export function buildCanonicalTrainerDashboardView(
       }];
     }
     return [];
-  });
+  })];
 
   const activities = snapshot.activities
     .filter((activity) => clientById.has(activity.athleteUserId))
@@ -182,6 +188,6 @@ function ageHours(value: string, now: Date) {
 function priorityLabel(value: string) {
   if (value === "discomfort") return "Спортсмен отметил дискомфорт";
   if (value === "client_comment") return "Есть комментарий к подходу";
-  if (value === "omissions") return "Тренировка завершена с пропусками";
+  if (value === "omissions" || value === "partial_completion") return "Тренировка завершена с пропусками";
   return value.replaceAll("_", " ");
 }

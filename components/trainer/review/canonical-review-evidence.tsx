@@ -45,7 +45,7 @@ export function CanonicalReviewContextHeader({
   transition: TrainerWorkflowTransition;
 }) {
   const origin = originLabel(transition.context.origin);
-  const backLabel = transition.context.origin === "profile" ? "К профилю" : "К очереди";
+  const backLabel = transition.context.origin === "profile" && review.capabilities.canOpenAthleteProfile !== false ? "К профилю" : "К очереди";
   return (
     <section aria-label="Контекст разбора" className="border-b border-zinc-800 pb-5">
       <Link
@@ -110,7 +110,9 @@ export function CanonicalReviewEvidence({ review }: { review: ReviewReadModel })
     <div data-review-evidence-column className="grid min-w-0 gap-5">
       <CanonicalReviewAvailability review={review} />
       <CanonicalReviewSummary review={review} />
+      <CanonicalReviewDiscomfort review={review} />
       <CanonicalReviewExceptions review={review} exceptions={exceptions} onJump={jumpToSource} />
+      <CanonicalReviewSessionContext review={review} />
       <CanonicalReviewExerciseResults
         review={review}
         openExercises={openExercises}
@@ -120,7 +122,6 @@ export function CanonicalReviewEvidence({ review }: { review: ReviewReadModel })
           return next;
         })}
       />
-      <CanonicalReviewSessionContext review={review} />
     </div>
   );
 }
@@ -417,14 +418,26 @@ function LongCopy({ text, className }: { text: string; className?: string }) {
   );
 }
 
+function CanonicalReviewDiscomfort({ review }: { review: ReviewReadModel }) {
+  return <dl className="border-t border-zinc-800 pt-5 text-sm">
+        <div className="border-l-2 border-amber-300/50 pl-3" data-review-discomfort>
+          <dt className="text-xs text-zinc-500">Дискомфорт во время тренировки</dt>
+          <dd className="mt-1 whitespace-pre-wrap break-words text-zinc-200">
+            {review.sessionContext.discomfort.status === "ready" ? review.sessionContext.discomfort.value.comment
+              : review.sessionContext.discomfort.status === "known_empty" ? "Спортсмен отметил: дискомфорта не было"
+                : review.sessionContext.discomfort.status === "unsupported" ? "Данные о дискомфорте не собирались"
+                  : "Данные о дискомфорте недоступны"}
+          </dd>
+        </div>
+    </dl>;
+}
+
 export function CanonicalReviewSessionContext({ review }: { review: ReviewReadModel }) {
   return (
     <section aria-labelledby="review-session-context-heading" className="border-t border-zinc-800 pt-5">
       <h2 id="review-session-context-heading" className="text-lg font-semibold text-zinc-50">Контекст сессии</h2>
-      <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
-        <ContextAvailability label="Самочувствие" value={review.sessionContext.discomfort} unsupported="Данные о самочувствии для этой тренировки не собирались" />
+      <dl className="mt-3 text-sm">
         <ContextAvailability label="Общий комментарий" value={review.sessionContext.overallComment} unsupported="Общий комментарий к тренировке не собирался" />
-        <ContextAvailability label="Общая субъективная оценка" value={review.sessionContext.subjectiveMetrics} unsupported="Общая оценка самочувствия не собиралась" />
       </dl>
       {review.session.zeroResultReason.status === "ready" ? (
         <div className="mt-4 border-l-2 border-amber-300/50 pl-3">
@@ -444,7 +457,7 @@ function ContextAvailability({ label, value, unsupported }: {
   return (
     <div className="rounded-[8px] border border-zinc-800 p-3">
       <dt className="text-xs text-zinc-500">{label}</dt>
-      <dd className="mt-1 leading-relaxed text-zinc-300">{availabilityText(value, label, unsupported)}</dd>
+      <dd className="mt-1 whitespace-pre-wrap break-words leading-relaxed text-zinc-300">{value.status === "ready" && typeof value.value === "string" ? value.value : availabilityText(value, label, unsupported)}</dd>
     </div>
   );
 }

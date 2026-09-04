@@ -34,7 +34,8 @@ export class TrainerWorkflowTransitionService {
     const context = validatedReviewContext(requested, review);
     const destination = await this.destinations(actor, context, review.attention.id);
     const profileHref = withReceipt(
-      `/trainer/clients/${review.athlete.id}?tab=training`,
+      review.capabilities.canOpenAthleteProfile
+        ? `/trainer/clients/${review.athlete.id}?tab=training` : destination.queueHref,
       result.kind === "review" ? "review" : result.kind === "manual_resolution" ? "manual-resolution" : "review-current",
       result.entityId,
       result.kind === "review" ? "latest-feedback" : "workflow-receipt",
