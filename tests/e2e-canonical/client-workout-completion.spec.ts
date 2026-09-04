@@ -25,7 +25,8 @@ test("R3D client completion unknowns, mobile gates and original-trainer suspende
     httpRequests.push({ path: url.pathname, query: url.searchParams, method: request.method() });
   });
   const measuredRequests: Record<string, number[]> = {};
-  const countHttp = (path: string, method = "GET") => httpRequests.filter((request) => request.path === path && request.method === method).length;
+  // R3E has a separate terminal presentation read; this gate measures R3D command reconciliation only.
+  const countHttp = (path: string, method = "GET") => httpRequests.filter((request) => request.path === path && request.method === method && request.query.get("mode") !== "completed").length;
   const record = (operation: string, count: number) => { (measuredRequests[operation] ??= []).push(count); };
   athlete.on("pageerror", (error) => errors.push(error.message));
   athlete.on("console", (message) => { if (/hydration|DialogDescription|aria-describedby/i.test(message.text())) errors.push(message.text()); });

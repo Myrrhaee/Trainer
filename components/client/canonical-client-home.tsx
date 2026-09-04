@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, CalendarDays, CheckCircle2, Dumbbell, Loader2, LogOut, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CanonicalClientHistory } from "./canonical-client-history";
+import { CanonicalRecentFeedback } from "./canonical-recent-feedback";
 import type {
   ClientWorkoutAssignmentReadModel,
   ClientWorkoutCollectionReadModel,
@@ -94,11 +96,11 @@ export function CanonicalClientHome({ mode = "home" }: { mode?: "home" | "collec
         </header>
 
         {loading ? (
-          <section className="grid min-h-[60vh] place-items-center py-12" aria-label="Загрузка тренировок">
+          <section className="grid place-items-center py-12" aria-label="Загрузка тренировок">
             <Loader2 className="size-6 animate-spin text-zinc-500" />
           </section>
         ) : loadFailed ? (
-          <section className="grid min-h-[60vh] place-items-center py-12">
+          <section className="grid place-items-center py-12">
             <div className="max-w-md text-center">
               <AlertCircle className="mx-auto size-9 text-red-300" />
               <h2 className="mt-4 text-lg font-semibold tracking-normal">Не удалось загрузить тренировки</h2>
@@ -106,7 +108,7 @@ export function CanonicalClientHome({ mode = "home" }: { mode?: "home" | "collec
             </div>
           </section>
         ) : allAssignments.length === 0 ? (
-          <section className="grid min-h-[60vh] place-items-center py-12">
+          <section className="grid place-items-center py-12">
             <div className="max-w-md text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-full border border-lime-300/20 bg-lime-300/10 text-lime-200">
               <Dumbbell aria-hidden />
@@ -128,9 +130,7 @@ export function CanonicalClientHome({ mode = "home" }: { mode?: "home" | "collec
                   {mode === "home" ? "Текущая тренировка" : "Текущие и ближайшие"}
                 </h2>
               </div>
-              {mode === "collection" ? <span className="text-sm text-zinc-500">{assignments.length}</span> : (
-                <Link href="/client/workouts" className="text-sm text-zinc-400 hover:text-zinc-100">Все тренировки</Link>
-              )}
+              {mode === "collection" ? <span className="text-sm text-zinc-500">{assignments.length}</span> : null}
             </div>
             <div className="divide-y divide-zinc-800">
               {assignments.map((assignment: ClientWorkoutAssignmentReadModel) => (
@@ -149,7 +149,7 @@ export function CanonicalClientHome({ mode = "home" }: { mode?: "home" | "collec
                     <Button asChild className="mt-5 gap-2 rounded-lg bg-lime-300 text-black hover:bg-lime-200">
                       <Link href={`/client/workouts${assignment.session ? `?session=${assignment.session.sessionId}` : `?assignment=${assignment.assignmentId}`}&returnTo=${encodeURIComponent(mode === "home" ? "/client/me" : "/client/workouts")}`}>
                         <Play className="size-4" />
-                        {assignment.session ? "Продолжить тренировку" : "Начать тренировку"}
+                        {assignment.session ? "Продолжить тренировку" : assignment.capabilities.canStart ? "Начать тренировку" : "Посмотреть назначение"}
                       </Link>
                     </Button>
                   </div>
@@ -169,6 +169,7 @@ export function CanonicalClientHome({ mode = "home" }: { mode?: "home" | "collec
             </div>
           </section>
         )}
+        {mode === "collection" ? <><CanonicalClientHistory/><Link href="/client/me" className="mt-6 inline-flex min-h-11 items-center text-zinc-400">На главную</Link></> : <><CanonicalRecentFeedback/><Link href="/client/workouts" className="inline-flex min-h-11 items-center text-lime-300">Все тренировки</Link></>}
       </div>
     </main>
   );

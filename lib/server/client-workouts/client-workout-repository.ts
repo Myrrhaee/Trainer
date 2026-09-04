@@ -117,7 +117,7 @@ export class ClientWorkoutRepository {
 
 }
 
-const assignmentSelect = `
+export const assignmentSelect = `
   SELECT assignment.id AS assignment_id, assignment.athlete_user_id,
          trainer.display_name AS trainer_display_name,
          assignment.source_template_id, assignment.source_revision_id,

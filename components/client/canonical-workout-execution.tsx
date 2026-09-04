@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle2, List, Loader2, MessageSquare, Play, Save, SkipForward } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle2, List, Loader2, Play, Save, SkipForward } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CanonicalWorkoutCompletion, WorkoutCompletionReceipt } from "./canonical-workout-completion";
+import { CanonicalCompletedWorkout } from "./canonical-completed-workout";
+import type { ClientCompletedWorkoutReadModel } from "@/lib/server/client-workouts/client-completed-types";
 import { Input } from "@/components/ui/input";
 import {
   createClientWorkoutSetAttempt,
@@ -27,7 +29,6 @@ import type {
   ClientWorkoutSetPrescription,
   StartOrResumeSessionResult,
 } from "@/lib/server/client-workouts/client-workout-types";
-import type { ReviewFeedback } from "@/lib/server/reviews/review-types";
 import type { WorkoutSession, WorkoutSetLog } from "@/lib/server/workout-sessions/workout-session-types";
 
 type Values = { repetitions: string; duration: string; weight: string; rpe: string; comment: string };
@@ -98,7 +99,7 @@ function exactExecutionReadUrl(assignmentId?: string, sessionId?: string) {
   return `/api/client/workouts?${query.toString()}`;
 }
 
-function clientSessionRoute(sessionId: string, returnTo: "/client/me" | "/client/workouts") {
+function clientSessionRoute(sessionId: string, returnTo: string) {
   return `/client/workouts?session=${encodeURIComponent(sessionId)}&returnTo=${encodeURIComponent(returnTo)}`;
 }
 
@@ -106,16 +107,17 @@ export function CanonicalWorkoutExecution({
   assignmentId,
   sessionId,
   returnTo,
+  feedbackId,
 }: {
   assignmentId?: string;
   sessionId?: string;
-  returnTo: "/client/me" | "/client/workouts";
+  returnTo: string;
+  feedbackId?: string;
 }) {
   const router = useRouter();
   const [assignment, setAssignment] = useState<ClientWorkoutAssignmentReadModel | null>(null);
   const [session, setSession] = useState<WorkoutSession | null>(null);
-  const [feedback, setFeedback] = useState<ReviewFeedback[]>([]);
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [completed,setCompleted] = useState<ClientCompletedWorkoutReadModel|null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, Values>>({});
@@ -136,8 +138,9 @@ export function CanonicalWorkoutExecution({
     let cancelled = false;
     async function load() {
       try {
-        const body = await jsonRequest<{ execution: ClientWorkoutExecutionReadModel }>(exactExecutionReadUrl(assignmentId, sessionId));
+        const body = await jsonRequest<{ execution: ClientWorkoutExecutionReadModel; completed?: ClientCompletedWorkoutReadModel }>(`${exactExecutionReadUrl(assignmentId, sessionId)}&mode=presentation`);
         if (cancelled) return;
+        if(body.completed){setCompleted(body.completed);return;}
         if (body.execution.assignment.status === "cancelled" && !body.execution.session) {
           setUnavailable(true);
           return;
@@ -182,26 +185,6 @@ export function CanonicalWorkoutExecution({
       setActiveExerciseId(session.exercises[0].id);
     }
   }, [activeExerciseId, session]);
-
-  useEffect(() => {
-    if (!session || session.status === "active") {
-      setFeedback([]);
-      return;
-    }
-    let cancelled = false;
-    setFeedbackLoading(true);
-    void jsonRequest<{ feedback: ReviewFeedback[] }>(`/api/client/feedback?sessionId=${encodeURIComponent(session.id)}`)
-      .then((body) => {
-        if (!cancelled) setFeedback(body.feedback);
-      })
-      .catch(() => {
-        if (!cancelled) setFeedback([]);
-      })
-      .finally(() => {
-        if (!cancelled) setFeedbackLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [session]);
 
   const persistedCount = session?.exercises.flatMap((item) => item.sets)
     .filter((item) => item.status !== "pending").length ?? 0;
@@ -405,18 +388,20 @@ export function CanonicalWorkoutExecution({
     return <main className="grid min-h-dvh place-items-center bg-black text-zinc-100"><Loader2 className="size-6 animate-spin text-zinc-500" /></main>;
   }
 
-  if (unavailable || (!assignment && !session)) {
+  if (unavailable || (!assignment && !session && !completed)) {
     return (
       <main className="grid min-h-dvh place-items-center bg-black px-4 text-zinc-100">
         <div className="text-center">
           <DumbbellMark />
-          <h1 className="mt-5 text-xl font-semibold tracking-normal">Тренировка недоступна</h1>
+          <h1 ref={node => node?.focus()} tabIndex={-1} className="mt-5 text-xl font-semibold tracking-normal">Тренировка недоступна</h1>
           <p className="mt-2 text-sm text-zinc-500">Возможно, ссылка устарела или назначение изменилось.</p>
           <Button asChild variant="outline" className="mt-6 rounded-lg"><Link href={returnTo}>Вернуться к тренировкам</Link></Button>
         </div>
       </main>
     );
   }
+
+  if(completed || (session?.completedAt && isTerminal)) return <CanonicalCompletedWorkout key={completed?.sessionId??session!.id} sessionId={completed?.sessionId??session!.id} initial={completed??undefined} returnTo={returnTo} feedbackId={feedbackId}/>;
 
   return (
     <main className="min-h-dvh bg-black px-4 py-6 text-zinc-100 sm:px-6 sm:py-8">
@@ -576,11 +561,6 @@ export function CanonicalWorkoutExecution({
           </footer>
         ) : null}
 
-        {isTerminal ? (
-          <div className="border-t border-zinc-800 py-8">
-            <ClientFeedbackHistory feedback={feedback} loading={feedbackLoading} />
-          </div>
-        ) : null}
       </div>
 
       {session ? <CanonicalWorkoutCompletion session={session} open={completeOpen} onOpenChange={setCompleteOpen} onRead={setSession}
@@ -592,50 +572,6 @@ export function CanonicalWorkoutExecution({
           setError(null);
         }} /> : null}
     </main>
-  );
-}
-
-function ClientFeedbackHistory({ feedback, loading }: { feedback: ReviewFeedback[]; loading: boolean }) {
-  if (loading) {
-    return (
-      <div className="mt-8 flex items-center justify-center gap-2 border-t border-zinc-800 pt-8 text-sm text-zinc-500">
-        <Loader2 className="size-4 animate-spin" /> Проверяем ответ тренера
-      </div>
-    );
-  }
-
-  if (!feedback.length) {
-    return (
-      <section className="mt-8 border-t border-zinc-800 pt-8 text-center">
-        <MessageSquare className="mx-auto size-6 text-zinc-600" />
-        <h2 className="mt-3 text-base font-medium text-zinc-300">Ответ тренера пока не получен</h2>
-        <p className="mt-1 text-sm text-zinc-600">Он появится здесь после разбора тренировки.</p>
-      </section>
-    );
-  }
-
-  return (
-    <section aria-labelledby="client-feedback-heading" className="mt-8 border-t border-zinc-800 pt-8">
-      <div className="flex items-center gap-2">
-        <MessageSquare className="size-5 text-lime-300" />
-        <h2 id="client-feedback-heading" className="text-lg font-semibold">Ответ тренера</h2>
-      </div>
-      <div className="mt-4 divide-y divide-zinc-800 border-y border-zinc-800">
-        {feedback.map((item) => {
-          const label = item.kind === "follow_up" ? "Уточнение" : item.kind === "acknowledgement" ? "Короткий ответ" : "Разбор";
-          const sentAt = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(item.sentAt));
-          return (
-            <article key={item.id} className="py-5">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
-                <span>{label}</span>
-                <span>{item.author} · {sentAt}</span>
-              </div>
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{item.body}</p>
-            </article>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 
