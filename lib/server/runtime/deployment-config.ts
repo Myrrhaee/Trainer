@@ -14,14 +14,17 @@ export type DeploymentConfigReport = {
 };
 
 const externalStages = new Set<DeploymentStage>(["staging", "production"]);
-const runtimeDatabaseVariables = [
+const coreRuntimeDatabaseVariables = [
   "DATABASE_AUTH_URL",
   "DATABASE_APP_URL",
   "DATABASE_HEALTH_URL",
-  "DATABASE_WORKER_URL",
 ] as const;
+const workerDatabaseVariable = "DATABASE_WORKER_URL" as const;
 const forbiddenDatabaseUsers = new Set(["postgres", "supabase_admin", "root"]);
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+
+export const disabledLegacySupabaseUrl = "https://legacy-supabase-disabled.invalid";
+export const disabledLegacySupabaseAnonKey = "legacy-supabase-disabled-public-anon-key";
 
 function value(env: EnvironmentMap, name: string) {
   return env[name]?.trim() ?? "";
@@ -124,6 +127,8 @@ export function validateDeploymentConfig(
   const stage = resolveDeploymentStage(env);
   const external = externalStages.has(stage);
   const explicitStage = value(env, "APP_ENV");
+  const notificationMode = value(env, "NOTIFICATION_DELIVERY_MODE") || "disabled";
+  const workerEnabled = notificationMode !== "disabled";
 
   if (explicitStage && !["local", "test", "staging", "production"].includes(explicitStage)) {
     issue(issues, "environment", "app_env_invalid");
@@ -136,6 +141,10 @@ export function validateDeploymentConfig(
   }
 
   const databaseUrls = new Map<string, URL>();
+  const runtimeDatabaseVariables = [
+    ...coreRuntimeDatabaseVariables,
+    ...(workerEnabled || value(env, workerDatabaseVariable) ? [workerDatabaseVariable] : []),
+  ];
   for (const name of runtimeDatabaseVariables) {
     if (external && !value(env, name)) issue(issues, "database", `${name.toLowerCase()}_required`);
     const parsed = parseDatabaseUrl(env, name, issues, external);
@@ -170,11 +179,20 @@ export function validateDeploymentConfig(
   }
 
   if (external) {
-    const identities = [...databaseUrls.values()]
-      .map((url) => decodeURIComponent(url.username).toLowerCase())
-      .filter(Boolean);
-    if (new Set(identities).size !== identities.length) {
-      issue(issues, "database", "database_identities_must_be_distinct");
+    const identity = (name: string) => {
+      const parsed = databaseUrls.get(name);
+      return parsed ? decodeURIComponent(parsed.username).toLowerCase() : null;
+    };
+    const runtimeIdentities = runtimeDatabaseVariables.map(identity).filter(Boolean) as string[];
+    if (new Set(runtimeIdentities).size !== runtimeIdentities.length) {
+      issue(issues, "database", "database_runtime_identities_must_be_distinct");
+    }
+    const operationalIdentities = [
+      identity("DATABASE_MIGRATION_URL"),
+      identity("DATABASE_OPERATOR_URL"),
+    ].filter(Boolean) as string[];
+    if (operationalIdentities.some((candidate) => runtimeIdentities.includes(candidate))) {
+      issue(issues, "database", "database_operational_identity_must_not_be_runtime");
     }
   }
 
@@ -221,7 +239,6 @@ export function validateDeploymentConfig(
   }
 
   if (external && isEnabled(env, "NEXT_PUBLIC_DEMO_MODE")) issue(issues, "runtime", "demo_mode_forbidden");
-  const notificationMode = value(env, "NOTIFICATION_DELIVERY_MODE") || "disabled";
   if (external && notificationMode === "memory") {
     issue(issues, "notifications", "memory_notification_delivery_forbidden");
   }
@@ -237,6 +254,12 @@ export function validateDeploymentConfig(
     "NEXT_PUBLIC_ENABLE_LEGACY_SUPABASE_CLIENT_HOME",
   ]) {
     if (external && isEnabled(env, name)) issue(issues, "runtime", "legacy_runtime_forbidden");
+  }
+  if (external && value(env, "NEXT_PUBLIC_SUPABASE_URL") !== disabledLegacySupabaseUrl) {
+    issue(issues, "runtime", "legacy_supabase_dummy_url_required");
+  }
+  if (external && value(env, "NEXT_PUBLIC_SUPABASE_ANON_KEY") !== disabledLegacySupabaseAnonKey) {
+    issue(issues, "runtime", "legacy_supabase_dummy_anon_key_required");
   }
 
   return { stage, ready: issues.length === 0, issues };

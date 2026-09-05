@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  disabledLegacySupabaseAnonKey,
+  disabledLegacySupabaseUrl,
   resolveDeploymentStage,
   validateDeploymentConfig,
   type EnvironmentMap,
 } from "../../lib/server/runtime/deployment-config";
+import { classifySchemaReadiness } from "../../lib/server/database/health";
+import { expectedSchemaMigrations } from "../../lib/server/runtime/schema-version";
 
 function stagingEnvironment(overrides: EnvironmentMap = {}): EnvironmentMap {
   return {
@@ -27,6 +31,8 @@ function stagingEnvironment(overrides: EnvironmentMap = {}): EnvironmentMap {
     AUTH_EMAIL_FROM: "AI Strength Coach <login@example.test>",
     NOTIFICATION_DELIVERY_MODE: "disabled",
     NEXT_PUBLIC_DEMO_MODE: "false",
+    NEXT_PUBLIC_SUPABASE_URL: disabledLegacySupabaseUrl,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: disabledLegacySupabaseAnonKey,
     ...overrides,
   };
 }
@@ -80,7 +86,7 @@ test("external deployment rejects shared, privileged, local and unencrypted data
   assert.ok(reportCodes.includes("database_app_url_local_host"));
   assert.ok(reportCodes.includes("database_app_url_privileged_identity"));
   assert.ok(reportCodes.includes("database_app_url_tls_required"));
-  assert.ok(reportCodes.includes("database_identities_must_be_distinct"));
+  assert.ok(reportCodes.includes("database_runtime_identities_must_be_distinct"));
 });
 
 test("runtime rejects migration credentials, demo escape hatches and development OTP disclosure", () => {
@@ -96,7 +102,7 @@ test("runtime rejects migration credentials, demo escape hatches and development
   assert.ok(reportCodes.includes("development_otp_disclosure_must_be_disabled"));
 });
 
-test("external preflight requires a distinct operator identity", () => {
+test("external preflight isolates operational identities from runtime but permits one operations login", () => {
   const missingCodes = codes(stagingEnvironment({
     DATABASE_OPERATOR_URL: "",
     ALPHA_OPERATOR_REF: "replace-with-operator-reference",
@@ -107,7 +113,28 @@ test("external preflight requires a distinct operator identity", () => {
   const sharedCodes = codes(stagingEnvironment({
     DATABASE_OPERATOR_URL: stagingEnvironment().DATABASE_WORKER_URL,
   }));
-  assert.ok(sharedCodes.includes("database_identities_must_be_distinct"));
+  assert.ok(sharedCodes.includes("database_operational_identity_must_not_be_runtime"));
+
+  const combinedOperationsUrl = stagingEnvironment().DATABASE_MIGRATION_URL;
+  const combinedReport = validateDeploymentConfig(stagingEnvironment({
+    DATABASE_OPERATOR_URL: combinedOperationsUrl,
+  }), "preflight");
+  assert.equal(combinedReport.ready, true);
+});
+
+test("disabled notifications do not require a worker database connection", () => {
+  const report = validateDeploymentConfig(stagingEnvironment({
+    DATABASE_WORKER_URL: "",
+    NOTIFICATION_DELIVERY_MODE: "disabled",
+  }), "preflight");
+  assert.equal(report.ready, true);
+
+  const telegramCodes = codes(stagingEnvironment({
+    DATABASE_WORKER_URL: "",
+    NOTIFICATION_DELIVERY_MODE: "telegram",
+    TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
+  }));
+  assert.ok(telegramCodes.includes("database_worker_url_required"));
 });
 
 test("external notification delivery is disabled by default and validates live Telegram mode", () => {
@@ -137,6 +164,51 @@ test("configuration reports contain issue codes but never secret values", () => 
   assert.equal(serialized.includes(secret), false);
   assert.ok(report.issues.some((item) => item.code === "auth_secrets_must_be_distinct"));
   assert.ok(report.issues.some((item) => item.code === "telegram_credentials_incomplete"));
+});
+
+test("pilot configuration requires inert public Supabase constructor values", () => {
+  const missingCodes = codes(stagingEnvironment({
+    NEXT_PUBLIC_SUPABASE_URL: "",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: "",
+  }));
+  assert.ok(missingCodes.includes("legacy_supabase_dummy_url_required"));
+  assert.ok(missingCodes.includes("legacy_supabase_dummy_anon_key_required"));
+
+  const realProjectCodes = codes(stagingEnvironment({
+    NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: "public-but-real-key",
+  }));
+  assert.ok(realProjectCodes.includes("legacy_supabase_dummy_url_required"));
+  assert.ok(realProjectCodes.includes("legacy_supabase_dummy_anon_key_required"));
+});
+
+test("pilot preflight rejects demo mode, missing canonical database and missing origin", () => {
+  const reportCodes = codes(stagingEnvironment({
+    NEXT_PUBLIC_DEMO_MODE: "true",
+    DATABASE_APP_URL: "",
+    AUTH_PUBLIC_ORIGIN: "",
+  }));
+  assert.ok(reportCodes.includes("demo_mode_forbidden"));
+  assert.ok(reportCodes.includes("database_app_url_required"));
+  assert.ok(reportCodes.includes("auth_public_origin_required"));
+});
+
+test("schema readiness distinguishes stale, current and uncontrolled states", () => {
+  assert.equal(classifySchemaReadiness({
+    appliedMigrations: expectedSchemaMigrations.slice(0, 11),
+  }), "outdated");
+  assert.equal(classifySchemaReadiness({
+    appliedMigrations: [...expectedSchemaMigrations],
+  }), "current");
+  assert.equal(classifySchemaReadiness({
+    appliedMigrations: [...expectedSchemaMigrations, "0017_unknown"],
+  }), "ahead_or_unknown");
+  assert.equal(classifySchemaReadiness({
+    appliedMigrations: expectedSchemaMigrations.filter((name) => name !== "0015_workout_template_command_hardening"),
+  }), "inconsistent");
+  assert.equal(classifySchemaReadiness({
+    appliedMigrations: ["0000_unknown", ...expectedSchemaMigrations.slice(1)],
+  }), "ahead_or_unknown");
 });
 
 test("local and test profiles permit isolated development adapters", () => {

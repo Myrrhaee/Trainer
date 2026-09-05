@@ -228,6 +228,9 @@ async function seedLegacyLifecycleStates(databaseName) {
   `, [assignment.rows[0].id]);
 
   return {
+    trainerUserId: trainer.rows[0].user_id,
+    athleteUserId: athlete.rows[0].user_id,
+    relationId: relation.rows[0].id,
     publishedOnly: [publishedOnly, publishedOnlyRevision],
     draftOnly: [draftOnly, draftOnlyRevision],
     publishedWithDraft: [publishedWithDraft, publishedWithDraftRevision, publishedWithDraftEditable],
@@ -335,11 +338,47 @@ async function verifyTemplateCommandHardening(databaseName, expected = true) {
   }
 }
 
+async function verifyWorkoutSessionCompletion(databaseName, legacySessionId = null, expected = true) {
+  const state = await query(databaseName, `
+    SELECT
+      (SELECT count(*)::integer FROM information_schema.columns
+        WHERE table_schema = 'app' AND table_name = 'workout_sessions'
+          AND column_name IN ('overall_comment', 'discomfort_reported', 'discomfort_comment')) = 3
+        AS has_context_columns,
+      to_regprocedure('app.has_terminal_assignment_workflow(uuid,uuid,uuid)') IS NOT NULL
+        AS has_terminal_helper,
+      EXISTS (SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'app.workout_sessions'::regclass
+          AND tgname = 'workout_sessions_enforce_context' AND NOT tgisinternal)
+        AS has_context_trigger
+  `);
+  const row = state.rows[0];
+  if (Object.values(row).some((value) => value !== expected)) {
+    throw new Error(`session_completion_migration_state_mismatch:${JSON.stringify({ expected, row })}`);
+  }
+  if (!expected || !legacySessionId) return;
+  const legacy = await query(databaseName, `
+    SELECT overall_comment, discomfort_reported, discomfort_comment
+    FROM app.workout_sessions WHERE id = $1
+  `, [legacySessionId]);
+  if (JSON.stringify(legacy.rows[0]) !== JSON.stringify({
+    overall_comment: null,
+    discomfort_reported: null,
+    discomfort_comment: null,
+  })) {
+    throw new Error(`session_completion_legacy_nulls_changed:${JSON.stringify(legacy.rows[0])}`);
+  }
+}
+
 async function runCleanUpgrade() {
   const databaseName = databaseNames.clean;
   const env = scenarioEnv(databaseName);
   await resetDatabase(databaseName, true);
   run(process.execPath, ["scripts/db/bootstrap.mjs"], env);
+  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0011_closed_alpha_operator"], env);
+  const baseline = await verifyState(databaseName, "0011_closed_alpha_operator", false);
+  if (baseline.migration_count !== 11) throw new Error("clean_upgrade_expected_11_migrations");
+
   run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0012_athlete_profile_read_model"], env);
   const before = await verifyState(databaseName, "0012_athlete_profile_read_model", true);
   if (before.migration_count !== 12) throw new Error("clean_upgrade_expected_12_migrations");
@@ -356,17 +395,38 @@ async function runCleanUpgrade() {
   await verifyExerciseBackfill(databaseName, fixture);
   await verifyLifecycleBackfill(databaseName, fixture);
 
-  run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const after = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
-  if (after.migration_count !== 15) throw new Error("clean_upgrade_expected_15_migrations");
+  run(process.execPath, ["scripts/db/migrate.mjs", "--through", "0015_workout_template_command_hardening"], env);
+  const commandHardening = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
+  if (commandHardening.migration_count !== 15) throw new Error("clean_upgrade_expected_15_migrations");
   await verifyTemplateCommandHardening(databaseName);
+  const legacySession = await query(databaseName, `
+    INSERT INTO app.workout_sessions (
+      assignment_id, relation_id, trainer_user_id, athlete_user_id, status,
+      version, start_idempotency_key_hash, completed_at, zero_result_reason
+    ) VALUES (
+      $1, $2, $3, $4, 'completed_with_omissions', 2,
+      encode(digest('upgrade-harness-start', 'sha256'), 'hex'),
+      clock_timestamp(), 'Legacy completion'
+    ) RETURNING id
+  `, [fixture.assignmentId, fixture.relationId, fixture.trainerUserId, fixture.athleteUserId]);
+
+  run(process.execPath, ["scripts/db/migrate.mjs"], env);
+  const after = await verifyState(databaseName, "0016_workout_session_completion", true);
+  if (after.migration_count !== 16) throw new Error("clean_upgrade_expected_16_migrations");
+  await verifyTemplateCommandHardening(databaseName);
+  await verifyWorkoutSessionCompletion(databaseName, legacySession.rows[0].id);
   await verifyExerciseBackfill(databaseName, fixture);
   await verifyLifecycleBackfill(databaseName, fixture);
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const repeated = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
-  if (repeated.migration_count !== 15) throw new Error("clean_upgrade_idempotency_failed");
+  const repeated = await verifyState(databaseName, "0016_workout_session_completion", true);
+  if (repeated.migration_count !== 16) throw new Error("clean_upgrade_idempotency_failed");
 
+  run(process.execPath, ["scripts/db/rollback.mjs"], env);
+  const completionRolledBack = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
+  if (completionRolledBack.migration_count !== 15) throw new Error("rollback_expected_15_migrations");
+  await verifyWorkoutSessionCompletion(databaseName, null, false);
+  await verifyTemplateCommandHardening(databaseName);
   run(process.execPath, ["scripts/db/rollback.mjs"], env);
   const rolledBack = await verifyState(databaseName, "0014_canonical_exercise_library", true);
   if (rolledBack.migration_count !== 14) throw new Error("rollback_expected_14_migrations");
@@ -374,8 +434,11 @@ async function runCleanUpgrade() {
   await verifyLifecycleBackfill(databaseName, fixture);
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
   await verifyTemplateCommandHardening(databaseName);
+  await verifyWorkoutSessionCompletion(databaseName, legacySession.rows[0].id);
   await verifyExerciseBackfill(databaseName, fixture);
 
+  run(process.execPath, ["scripts/db/rollback.mjs"], env);
+  await verifyWorkoutSessionCompletion(databaseName, null, false);
   const partial = await query(databaseName, `
     INSERT INTO app.workout_template_exercises
       (revision_id, instance_key, position, source_exercise_key, title, category,
@@ -395,6 +458,7 @@ async function runCleanUpgrade() {
   await verifyTemplateCommandHardening(databaseName, false);
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
   await verifyTemplateCommandHardening(databaseName);
+  await verifyWorkoutSessionCompletion(databaseName, legacySession.rows[0].id);
 
   run(process.execPath, ["scripts/database/seed-system-exercises.mjs"], env);
   run(process.execPath, ["scripts/database/seed-system-exercises.mjs"], env);
@@ -538,9 +602,10 @@ async function runLegacyRecovery() {
 
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
   run(process.execPath, ["scripts/db/migrate.mjs"], env);
-  const state = await verifyState(databaseName, "0015_workout_template_command_hardening", true);
-  if (state.migration_count !== 15) throw new Error("legacy_upgrade_expected_15_migrations");
+  const state = await verifyState(databaseName, "0016_workout_session_completion", true);
+  if (state.migration_count !== 16) throw new Error("legacy_upgrade_expected_16_migrations");
   await verifyTemplateCommandHardening(databaseName);
+  await verifyWorkoutSessionCompletion(databaseName);
   process.stdout.write(`LEGACY RECOVERY PASS ${JSON.stringify({
     legacyOwner: legacy.legacyOwner,
     catalogObjects: legacy.catalog.length,

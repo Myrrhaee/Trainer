@@ -73,8 +73,9 @@ env | cut -d= -f1 | sort
 
 - `APP_ENV=staging` for an internal-pilot staging environment;
 - immutable `APP_RELEASE`;
-- distinct `DATABASE_APP_URL`, `DATABASE_AUTH_URL`, `DATABASE_HEALTH_URL`, `DATABASE_WORKER_URL`;
-- isolated `DATABASE_MIGRATION_URL` and `DATABASE_OPERATOR_URL` available only to operator jobs;
+- distinct restricted `DATABASE_APP_URL`, `DATABASE_AUTH_URL` and `DATABASE_HEALTH_URL`;
+- a distinct restricted `DATABASE_WORKER_URL` only when notification delivery is enabled;
+- isolated `DATABASE_MIGRATION_URL` and `DATABASE_OPERATOR_URL` available only to operator jobs; one operations login may serve both purposes if it holds both group roles and is never exposed to runtime;
 - `ALPHA_OPERATOR_REF`;
 - HTTPS `AUTH_PUBLIC_ORIGIN`;
 - production-strength, distinct `AUTH_OTP_PEPPER` and `AUTH_FLOW_SECRET`;
@@ -84,7 +85,7 @@ env | cut -d= -f1 | sort
 - all legacy Supabase feature flags false/unset;
 - notification delivery explicitly `disabled` or approved `telegram`.
 
-4. For the temporary eager client dependency, set non-secret dummy public Supabase values. Do not inherit a real legacy service-role key into runtime. Record only that values are configured, never their content.
+4. For the temporary eager client dependency, set `NEXT_PUBLIC_SUPABASE_URL=https://legacy-supabase-disabled.invalid` and `NEXT_PUBLIC_SUPABASE_ANON_KEY=legacy-supabase-disabled-public-anon-key`. These are inert public constructor values, not credentials. Do not inherit a real legacy Supabase URL, anon key or service-role key into runtime.
 
 5. Confirm that the named database is the same database used in every following check. A different hostname/database invalidates all prior evidence.
 

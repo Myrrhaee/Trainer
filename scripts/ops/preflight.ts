@@ -17,6 +17,9 @@ const runtimeRoles = [
   ["DATABASE_AUTH_URL", "ai_strength_authenticator"],
   ["DATABASE_HEALTH_URL", "ai_strength_health"],
   ["DATABASE_WORKER_URL", "ai_strength_worker"],
+] as const;
+const operationalRoles = [
+  ["DATABASE_MIGRATION_URL", "ai_strength_migrator"],
   ["DATABASE_OPERATOR_URL", "ai_strength_operator"],
 ] as const;
 
@@ -61,7 +64,14 @@ async function migrationChecks(connectionString: string): Promise<CheckResult[]>
     }));
     checks.push({
       code: "migration_expected_schema",
-      ok: byName.get(expectedSchemaMigration) === expected.find((item) => item.name === expectedSchemaMigration)?.checksum,
+      ok: expected.at(-1)?.name === expectedSchemaMigration
+        && byName.size === expected.length
+        && byName.get(expectedSchemaMigration)
+          === expected.find((item) => item.name === expectedSchemaMigration)?.checksum,
+    });
+    checks.push({
+      code: "migration_no_unknown_entries",
+      ok: applied.rows.every((migration) => expected.some((item) => item.name === migration.name)),
     });
     return checks;
   } finally {
@@ -69,15 +79,40 @@ async function migrationChecks(connectionString: string): Promise<CheckResult[]>
   }
 }
 
-async function roleCheck(connectionString: string, expectedRole: string): Promise<CheckResult> {
+async function roleCheck(
+  connectionString: string,
+  expectedRole: string,
+  restrictedRuntime: boolean,
+): Promise<CheckResult[]> {
   const client = new Client({ connectionString, application_name: "ai-strength-preflight-role" });
   await client.connect();
   try {
-    const result = await client.query<{ role_ok: boolean }>(
-      "SELECT current_user = $1 OR pg_has_role(current_user, $1, 'member') AS role_ok",
+    const result = await client.query<{
+      role_ok: boolean;
+      principal_restricted: boolean;
+    }>(
+      `SELECT
+         current_user = $1 OR pg_has_role(current_user, $1, 'member') AS role_ok,
+         NOT (
+           login.rolsuper OR login.rolbypassrls OR login.rolcreatedb
+           OR login.rolcreaterole OR login.rolreplication
+           OR pg_has_role(current_user, 'ai_strength_migrator', 'member')
+           OR pg_has_role(current_user, 'ai_strength_operator', 'member')
+         ) AS principal_restricted
+       FROM pg_roles login
+       WHERE login.rolname = current_user`,
       [expectedRole],
     );
-    return { code: `${expectedRole}_active`, ok: result.rows[0]?.role_ok === true };
+    const checks: CheckResult[] = [
+      { code: `${expectedRole}_active`, ok: result.rows[0]?.role_ok === true },
+    ];
+    if (restrictedRuntime) {
+      checks.push({
+        code: `${expectedRole}_principal_restricted`,
+        ok: result.rows[0]?.principal_restricted === true,
+      });
+    }
+    return checks;
   } finally {
     await client.end();
   }
@@ -121,17 +156,34 @@ export async function runPreflight(env: EnvironmentMap = process.env) {
     }
   }
 
-  const roleChecks = config.stage === "staging" || config.stage === "production"
-    ? runtimeRoles
-    : runtimeRoles.filter(([name]) => name !== "DATABASE_OPERATOR_URL" || Boolean(configuredUrl(env, name)));
-  for (const [name, expectedRole] of roleChecks) {
+  const workerEnabled = (env.NOTIFICATION_DELIVERY_MODE?.trim() || "disabled") !== "disabled";
+  const runtimeRoleChecks = runtimeRoles.filter(([name]) => (
+    name !== "DATABASE_WORKER_URL" || workerEnabled || Boolean(configuredUrl(env, name))
+  ));
+  for (const [name, expectedRole] of runtimeRoleChecks) {
     const connectionString = configuredUrl(env, name);
     if (!connectionString) {
       checks.push({ code: `${name.toLowerCase()}_connection_missing`, ok: false });
       continue;
     }
     try {
-      checks.push(await roleCheck(connectionString, expectedRole));
+      checks.push(...await roleCheck(connectionString, expectedRole, true));
+    } catch {
+      checks.push({ code: `${expectedRole}_connection_failed`, ok: false });
+    }
+  }
+
+  const operationalRoleChecks = config.stage === "staging" || config.stage === "production"
+    ? operationalRoles
+    : operationalRoles.filter(([name]) => Boolean(configuredUrl(env, name)));
+  for (const [name, expectedRole] of operationalRoleChecks) {
+    const connectionString = configuredUrl(env, name);
+    if (!connectionString) {
+      checks.push({ code: `${name.toLowerCase()}_connection_missing`, ok: false });
+      continue;
+    }
+    try {
+      checks.push(...await roleCheck(connectionString, expectedRole, false));
     } catch {
       checks.push({ code: `${expectedRole}_connection_failed`, ok: false });
     }
