@@ -67,6 +67,33 @@ test("R3D client completion unknowns, mobile gates and original-trainer suspende
       record("preCompletionGet", countHttp("/api/client/workouts") - before);
       return dialog;
     }
+    await test.step("R4 invalid second batch Set keeps first local value unsaved and persisted facts unchanged after reload", async () => {
+      const session = sessions[0];
+      const exactPath = `/api/workout-sessions/${session.id}`;
+      const before = await body<{ session: WorkoutSession }>(await athlete.request.get(exactPath));
+      const receiptBefore = await admin.query("SELECT count(*)::int AS count FROM app.workout_session_command_receipts WHERE session_id=$1", [session.id]);
+      await athlete.goto(`/client/workouts?session=${session.id}`);
+      const row = athlete.locator(`#workout-set-${session.exercises[0].sets[0].id}`);
+      await row.getByLabel("Повторы", { exact: true }).fill("11");
+      await athlete.route(`**/api/workout-sessions/${session.id}/progress`, async (route) => {
+        const request = route.request().postDataJSON();
+        // Exercise the supported batch API through the existing one-Set Save UI, without faking a failure response.
+        const response = await route.fetch({ postData: { ...request,
+          sets: [...request.sets, { ...request.sets[0], setLogId: randomUUID() }] } });
+        expect(response.status()).toBe(404);
+        await route.fulfill({ response });
+      }, { times: 1 });
+      await row.getByRole("button", { name: "Сохранить", exact: true }).click();
+      await expect(row.getByRole("button", { name: "Продолжить редактирование" })).toBeVisible();
+      await expect(row.getByLabel("Повторы", { exact: true })).toHaveValue("11");
+      await expect(row.getByText("Подход сохранён", { exact: true })).toHaveCount(0);
+      await expect(row).toBeFocused();
+      expect(await body(await athlete.request.get(exactPath))).toEqual(before);
+      await athlete.reload();
+      await expect(athlete.getByRole("button", { name: "Завершить", exact: true })).toBeEnabled();
+      expect(await body(await athlete.request.get(exactPath))).toEqual(before);
+      expect((await admin.query("SELECT count(*)::int AS count FROM app.workout_session_command_receipts WHERE session_id=$1", [session.id])).rows).toEqual(receiptBefore.rows);
+    });
     await test.step("dirty, saving and unknown Set block completion with an exact return", async () => {
       await athlete.goto(`/client/workouts?session=${sessions[0].id}`);
       await athlete.getByLabel("Повторы", { exact: true }).first().fill("6");

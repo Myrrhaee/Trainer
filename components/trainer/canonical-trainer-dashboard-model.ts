@@ -5,6 +5,7 @@ import {
 import { getTeamSummary } from "@/components/trainer-os/home/mock-data";
 import type { TeamActivityDateGroup, TeamActivityItem, TeamClient } from "@/components/trainer-os/home/types";
 import type { TrainerDashboardSnapshot } from "@/lib/server/trainer-dashboard/trainer-dashboard-types";
+import { resolveTrainerAthletePrimaryAction } from "@/lib/trainer-athlete-primary-action";
 
 export type CanonicalTrainerDashboardView = {
   clients: TeamClient[];
@@ -20,7 +21,13 @@ export function buildCanonicalTrainerDashboardView(
   const reviewByAthlete = new Map(snapshot.reviews.toReversed().map((review) => [review.athleteUserId, review]));
   const clients = snapshot.athletes.map<TeamClient>((athlete) => {
     const review = reviewByAthlete.get(athlete.athleteUserId);
-    if (review) {
+    const primary = resolveTrainerAthletePrimaryAction({
+      relationStatus: athlete.relationStatus,
+      athleteStatus: athlete.athleteStatus,
+      currentAssignmentId: athlete.nextAssignment?.id ?? null,
+      openReview: review ? { sessionId: review.sessionId, attentionItemId: review.id } : null,
+    });
+    if (primary?.kind === "review" && review) {
       return {
         id: athlete.athleteUserId,
         name: athlete.displayName,
@@ -54,7 +61,7 @@ export function buildCanonicalTrainerDashboardView(
       };
     }
 
-    return {
+    const client: TeamClient = {
       id: athlete.athleteUserId,
       name: athlete.displayName,
       initials: athlete.initials,
@@ -67,8 +74,9 @@ export function buildCanonicalTrainerDashboardView(
       lastActivity: relativeTime(athlete.latestActivityAt, now),
       issue: "Нет следующей тренировки",
       context: "Активная связь есть, но доступная или начатая тренировка не найдена.",
-      primaryAction: "assign",
+      primaryAction: primary?.kind === "assign" ? "assign" : undefined,
     };
+    return client;
   });
 
   const clientById = new Map(clients.map((client) => [client.id, client]));
@@ -99,7 +107,7 @@ export function buildCanonicalTrainerDashboardView(
       };
   });
   const attentionItems = [...reviewItems, ...clients.flatMap<TrainerAttentionQueueItem>((client) => {
-    if (client.state === "no_next_workout") {
+    if (client.primaryAction === "assign") {
       return [{
         id: `assignment-${client.id}`,
         clientId: client.id,

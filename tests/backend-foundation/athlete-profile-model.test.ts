@@ -34,25 +34,21 @@ test("athlete profile current state follows the canonical priority order", () =>
 });
 
 test("athlete profile exposes only one state-dependent primary action", () => {
-  const projector = new AthleteCurrentStateProjector();
   const capabilities = new AthleteCapabilitiesService();
   const base = snapshot();
 
-  const noAssignment = projector.project(base);
-  assert.equal(capabilities.primaryAction(base, noAssignment)?.kind, "assign");
+  assert.equal(capabilities.primaryAction(base)?.kind, "assign");
 
   const reviewSnapshot = { ...base, openAttention: attention([]) };
-  const review = projector.project(reviewSnapshot);
-  assert.equal(capabilities.primaryAction(reviewSnapshot, review)?.kind, "review");
+  assert.equal(capabilities.primaryAction(reviewSnapshot)?.kind, "review");
 
   const scheduledSnapshot = { ...base, currentAssignment: assignment("scheduled") };
-  assert.equal(capabilities.primaryAction(
-    scheduledSnapshot,
-    projector.project(scheduledSnapshot),
-  ), null);
+  assert.equal(capabilities.primaryAction(scheduledSnapshot), null);
 
   const suspended = { ...base, relationStatus: "suspended" as const };
-  assert.equal(capabilities.primaryAction(suspended, projector.project(suspended)), null);
+  assert.equal(capabilities.primaryAction(suspended), null);
+  const suspendedReview = { ...suspended, openAttention: attention([]) };
+  assert.equal(capabilities.primaryAction(suspendedReview)?.kind, "review");
 });
 
 test("profile frame validates attention context and overview keeps local empty states", () => {

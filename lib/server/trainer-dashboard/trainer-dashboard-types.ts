@@ -2,7 +2,9 @@ import type { TrainerReviewQueueItem } from "@/lib/server/reviews/review-types";
 
 export type TrainerDashboardAthlete = {
   relationId: string;
+  relationStatus: "active";
   athleteUserId: string;
+  athleteStatus: "active" | "suspended" | "archived";
   displayName: string;
   initials: string;
   acceptedAt: string;

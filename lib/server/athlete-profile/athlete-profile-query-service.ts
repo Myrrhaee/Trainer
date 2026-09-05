@@ -13,6 +13,7 @@ import type {
   AthleteProfileReadModel,
   AthleteProfileSnapshot,
 } from "@/lib/server/athlete-profile/athlete-profile-types";
+import { resolveTrainerAthletePrimaryAction } from "@/lib/trainer-athlete-primary-action";
 
 export class AthleteProfileFrameQueryService {
   constructor(
@@ -26,7 +27,7 @@ export class AthleteProfileFrameQueryService {
     attention: AthleteProfileAttentionSnapshot | null,
   ): AthleteProfileFrameReadModel {
     const currentState = this.projector.project(snapshot);
-    const primary = this.capabilities.primaryAction(snapshot, currentState);
+    const primary = this.capabilities.primaryAction(snapshot);
     return {
       identity: {
         athleteUserId: snapshot.athleteUserId,
@@ -113,12 +114,20 @@ export class AthleteProfileQueryService {
 }
 
 function nextStep(snapshot: AthleteProfileSnapshot) {
+  const primary = resolveTrainerAthletePrimaryAction({
+    relationStatus: snapshot.relationStatus,
+    athleteStatus: snapshot.athleteStatus,
+    currentAssignmentId: snapshot.currentAssignment?.id ?? null,
+    openReview: snapshot.openAttention
+      ? { sessionId: snapshot.openAttention.sessionId, attentionItemId: snapshot.openAttention.id }
+      : null,
+  });
+  if (primary?.kind === "review") return "Разобрать завершённую тренировку";
+  if (primary?.kind === "assign") return "Назначить следующую тренировку";
   if (snapshot.relationStatus !== "active" || snapshot.athleteStatus !== "active") {
     return "Дождаться возобновления связи";
   }
-  if (snapshot.openAttention) return "Разобрать завершённую тренировку";
-  if (!snapshot.currentAssignment) return "Назначить следующую тренировку";
-  if (snapshot.currentAssignment.status === "in_progress") return "Дождаться завершения тренировки";
+  if (snapshot.currentAssignment?.status === "in_progress") return "Дождаться завершения тренировки";
   return "Дождаться выполнения назначения";
 }
 

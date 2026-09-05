@@ -5,6 +5,7 @@ import { resolveRequestActor } from "@/lib/server/auth/actor";
 import { ClientHistoryRepository } from "@/lib/server/client-workouts/client-history-repository";
 import { ClientHistoryInputError } from "@/lib/server/client-workouts/client-history-cursor";
 import { ClientCompletedRepository } from "@/lib/server/client-workouts/client-completed-repository";
+import { ClientCurrentInputError } from "@/lib/server/client-workouts/client-current-cursor";
 import {
   ClientWorkoutInputError,
   ClientWorkoutQueryService,
@@ -37,6 +38,8 @@ export async function GET(request: Request) {
             "first",
             "start",
             "after",
+            "currentStart",
+            "currentAfter",
             "assignmentId",
             "sessionId",
             "completionCommandId",
@@ -80,6 +83,16 @@ export async function GET(request: Request) {
       [...query.keys()].some((key) => ["first", "start", "after"].includes(key))
     )
       throw new ClientHistoryInputError("invalid_history_query");
+    if (
+      mode ||
+      query.has("assignmentId") ||
+      query.has("sessionId") ||
+      query.has("completionCommandId") ||
+      query.has("completionFingerprint")
+    ) {
+      if (query.has("currentStart") || query.has("currentAfter"))
+        throw new ClientCurrentInputError("invalid_current_query");
+    }
     if (mode && query.has("sessionId")) {
       const completed = await new ClientCompletedRepository().find(
         actor,
@@ -124,12 +137,20 @@ export async function GET(request: Request) {
             { status: 404, headers },
           );
     }
-    const collection = await service.collection(actor);
+    const collection = await service.collection(actor, {
+      start: query.get("currentStart") ?? undefined,
+      after: query.get("currentAfter") ?? undefined,
+    });
     return NextResponse.json(
       { collection },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
+    if (error instanceof ClientCurrentInputError)
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
     if (error instanceof ClientHistoryInputError)
       return NextResponse.json(
         { error: error.message },

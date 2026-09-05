@@ -79,6 +79,11 @@ export type ClientWorkoutCollectionReadModel = {
   assignments: ClientWorkoutAssignmentReadModel[];
   limit: number;
   hasMore: boolean;
+  pageInfo: {
+    hasNextPage: boolean;
+    startCursor: string | null;
+    endCursor: string | null;
+  };
 };
 
 export type ClientWorkoutExecutionReadModel = {

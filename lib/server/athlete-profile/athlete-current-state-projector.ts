@@ -13,16 +13,6 @@ export class AthleteCurrentStateProjector {
       attentionItemId: attention?.id ?? null,
     };
 
-    if (snapshot.relationStatus !== "active" || snapshot.athleteStatus !== "active") {
-      return {
-        ...base,
-        kind: "relation_unavailable",
-        tone: "muted",
-        label: "Связь приостановлена",
-        detail: "Рабочие действия недоступны, пока связь со спортсменом не активна.",
-      };
-    }
-
     if (attention?.priorityReasons.includes("discomfort")) {
       return {
         ...base,
@@ -40,6 +30,16 @@ export class AthleteCurrentStateProjector {
         tone: "attention",
         label: "Тренировка ждёт разбора",
         detail: attention.title,
+      };
+    }
+
+    if (snapshot.relationStatus !== "active" || snapshot.athleteStatus !== "active") {
+      return {
+        ...base,
+        kind: "relation_unavailable",
+        tone: "muted",
+        label: "Связь приостановлена",
+        detail: "Новые назначения недоступны, пока связь со спортсменом не активна.",
       };
     }
 

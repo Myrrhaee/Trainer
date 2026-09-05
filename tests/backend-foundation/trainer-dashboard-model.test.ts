@@ -69,7 +69,9 @@ function athlete(
 ): TrainerDashboardSnapshot["athletes"][number] {
   return {
     relationId: `relation-${athleteUserId}`,
+    relationStatus: "active",
     athleteUserId,
+    athleteStatus: "active",
     displayName,
     initials: displayName.split(" ").map((part) => part[0]).join(""),
     acceptedAt: "2026-08-20T10:00:00.000Z",

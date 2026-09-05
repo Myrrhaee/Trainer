@@ -189,6 +189,25 @@ export class WorkoutSessionRepository {
       if (duplicate) return this.findInTransaction(client, input.sessionId);
       if (session.rows[0].status !== "active") return null;
       if (session.rows[0].version !== input.expectedVersion) throw new SessionVersionConflictError("version_conflict");
+      // The Session lock serializes Save/Complete; validate the entire immutable lineage before writing.
+      const targets = await client.query(`SELECT target.id
+        FROM app.workout_set_logs target
+        JOIN app.workout_exercise_logs exercise ON exercise.id = target.exercise_log_id
+        JOIN app.workout_sessions session ON session.id = exercise.session_id
+        JOIN app.workout_assignment_exercises source
+          ON source.id = exercise.assignment_exercise_id AND source.assignment_id = session.assignment_id
+        LEFT JOIN app.workout_assignment_exercise_sets source_set ON source_set.id = target.source_assignment_set_id
+        WHERE session.id = $1 AND session.athlete_user_id = $2 AND session.status = 'active'
+          AND target.id = ANY($3::uuid[])
+          AND ((source_set.assignment_exercise_id = source.id
+            AND source_set.set_key_snapshot = target.set_key AND source_set.position = target.position)
+          OR (target.source_assignment_set_id IS NULL
+            AND target.set_key = 'generated-' || target.position::text
+            AND target.position BETWEEN 1 AND source.sets_snapshot
+            AND NOT EXISTS (SELECT 1 FROM app.workout_assignment_exercise_sets existing
+              WHERE existing.assignment_exercise_id = source.id)))`,
+      [input.sessionId, actor.userId, input.sets.map((set) => set.setLogId)]);
+      if (targets.rowCount !== input.sets.length || input.sets.length === 0) return null;
       for (const set of input.sets) {
         const updated = await client.query(`UPDATE app.workout_set_logs target SET
           status = $3, actual_repetitions = $4, actual_duration_seconds = $5,
@@ -197,7 +216,7 @@ export class WorkoutSessionRepository {
           WHERE target.id = $1 AND target.exercise_log_id = exercise.id
             AND exercise.session_id = $2`, [set.setLogId, input.sessionId, set.status,
           set.actualRepetitions, set.actualDurationSeconds, set.actualWeightKg, set.rpe, set.athleteComment]);
-        if (!updated.rowCount) return null;
+        if (updated.rowCount !== 1) throw new SessionVersionConflictError("version_conflict");
       }
       await this.refreshExerciseStatuses(client, input.sessionId);
       await client.query(`UPDATE app.workout_sessions SET version = version + 1 WHERE id = $1`, [input.sessionId]);

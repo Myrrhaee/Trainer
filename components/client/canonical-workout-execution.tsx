@@ -125,6 +125,8 @@ export function CanonicalWorkoutExecution({
   const [completeOpen, setCompleteOpen] = useState(false);
   const completionTrigger = useRef<HTMLButtonElement>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const loadGeneration = useRef(0);
   const [startState, setStartState] = useState<StartState>("idle");
   const startAttempt = useRef<ClientWorkoutStartAttempt | null>(null);
   const setAttempts = useRef<Record<string, ClientWorkoutSetCommandAttempt>>({});
@@ -134,35 +136,46 @@ export function CanonicalWorkoutExecution({
   const [executionCapabilities, setExecutionCapabilities] = useState<ClientWorkoutExecutionReadModel["capabilities"] | null>(null);
   const completionUnavailable = useCallback(() => { setSession(null); setAssignment(null); setUnavailable(true); setCompleteOpen(false); }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const body = await jsonRequest<{ execution: ClientWorkoutExecutionReadModel; completed?: ClientCompletedWorkoutReadModel }>(`${exactExecutionReadUrl(assignmentId, sessionId)}&mode=presentation`);
-        if (cancelled) return;
-        if(body.completed){setCompleted(body.completed);return;}
-        if (body.execution.assignment.status === "cancelled" && !body.execution.session) {
-          setUnavailable(true);
-          return;
-        }
-        setAssignment(body.execution.assignment);
-        setSession(body.execution.session);
-        setExecutionCapabilities(body.execution.capabilities);
-        if (!sessionId && body.execution.session) {
-          router.replace(clientSessionRoute(body.execution.session.id, returnTo));
-        }
-      } catch (caught) {
-        if (!cancelled) {
-          if (caught instanceof RequestError && caught.status === 404) setUnavailable(true);
-          else setError(errorText(caught instanceof Error ? caught.message : "request_failed"));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadExecution = useCallback(async () => {
+    const generation = ++loadGeneration.current;
+    setLoading(true);
+    setLoadFailed(false);
+    setUnavailable(false);
+    setError(null);
+    setAssignment(null);
+    setSession(null);
+    setCompleted(null);
+    setExecutionCapabilities(null);
+    try {
+      const body = await jsonRequest<{ execution: ClientWorkoutExecutionReadModel; completed?: ClientCompletedWorkoutReadModel }>(`${exactExecutionReadUrl(assignmentId, sessionId)}&mode=presentation`);
+      if (generation !== loadGeneration.current) return;
+      if (body.completed) {
+        setCompleted(body.completed);
+        return;
       }
+      if (body.execution.assignment.status === "cancelled" && !body.execution.session) {
+        setUnavailable(true);
+        return;
+      }
+      setAssignment(body.execution.assignment);
+      setSession(body.execution.session);
+      setExecutionCapabilities(body.execution.capabilities);
+      if (!sessionId && body.execution.session) {
+        router.replace(clientSessionRoute(body.execution.session.id, returnTo));
+      }
+    } catch (caught) {
+      if (generation !== loadGeneration.current) return;
+      if (caught instanceof RequestError && caught.status === 404) setUnavailable(true);
+      else setLoadFailed(true);
+    } finally {
+      if (generation === loadGeneration.current) setLoading(false);
     }
-    void load();
-    return () => { cancelled = true; };
   }, [assignmentId, sessionId, returnTo, router]);
+
+  useEffect(() => {
+    void loadExecution();
+    return () => { loadGeneration.current += 1; };
+  }, [loadExecution]);
 
   useEffect(() => {
     if (!session) return;
@@ -386,6 +399,24 @@ export function CanonicalWorkoutExecution({
 
   if (loading) {
     return <main className="grid min-h-dvh place-items-center bg-black text-zinc-100"><Loader2 className="size-6 animate-spin text-zinc-500" /></main>;
+  }
+
+  if (loadFailed) {
+    return (
+      <main className="grid min-h-dvh place-items-center bg-black px-4 text-zinc-100">
+        <div className="text-center">
+          <DumbbellMark />
+          <h1 ref={node => node?.focus()} tabIndex={-1} className="mt-5 text-xl font-semibold tracking-normal">Не удалось загрузить тренировку</h1>
+          <p className="mt-2 text-sm text-zinc-500">Проверьте соединение и повторите загрузку.</p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Button type="button" onClick={() => void loadExecution()} className="rounded-lg bg-lime-300 text-black hover:bg-lime-200">
+              Повторить
+            </Button>
+            <Button asChild variant="outline" className="rounded-lg"><Link href={returnTo}>Вернуться к тренировкам</Link></Button>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   if (unavailable || (!assignment && !session && !completed)) {

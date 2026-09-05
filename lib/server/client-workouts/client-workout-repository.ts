@@ -11,6 +11,13 @@ import type {
   ClientWorkoutCollectionReadModel,
   ClientWorkoutExercisePrescription,
 } from "./client-workout-types";
+import {
+  ClientCurrentInputError,
+  clientCurrentAdvanced,
+  decodeClientCurrentCursor,
+  encodeClientCurrentCursor,
+  type ClientCurrentKey,
+} from "./client-current-cursor";
 
 const COLLECTION_LIMIT = 20;
 
@@ -28,6 +35,8 @@ export type ClientAssignmentProjectionRow = {
   instruction_snapshot: string;
   trainer_note: string;
   created_at: Date;
+  current_bucket: 0 | 1;
+  current_created_at: string;
   session_id: string | null;
   session_status: "active" | "completed" | "completed_with_omissions" | "abandoned" | null;
   session_version: number | null;
@@ -88,21 +97,69 @@ export function mapClientAssignmentRow(row: ClientAssignmentProjectionRow): Clie
 export class ClientWorkoutRepository {
   constructor(private readonly pool: Pool = getDatabasePool("app")) {}
 
-  listCurrent(actor: Actor): Promise<ClientWorkoutCollectionReadModel> {
+  listCurrent(
+    actor: Actor,
+    input: { start?: string; after?: string } = {},
+  ): Promise<ClientWorkoutCollectionReadModel> {
+    if (input.start !== undefined && input.after !== undefined)
+      throw new ClientCurrentInputError("invalid_current_cursor");
+    const cursor =
+      input.start !== undefined
+        ? decodeClientCurrentCursor(input.start, actor.userId, "start")
+        : input.after !== undefined
+          ? decodeClientCurrentCursor(input.after, actor.userId, "after")
+          : null;
     return withActorTransaction(actor, async (client) => {
-      const result = await client.query<ClientAssignmentProjectionRow>(`${assignmentSelect}
-        WHERE assignment.athlete_user_id = $1
-          AND assignment.status = 'available'
-          AND (session.id IS NULL OR session.status = 'active')
-        ORDER BY CASE WHEN session.status = 'active' THEN 0 ELSE 1 END,
-                 assignment.scheduled_for ASC, assignment.created_at ASC, assignment.id ASC
-        LIMIT $2`, [actor.userId, COLLECTION_LIMIT + 1]);
-      const assignments = result.rows.slice(0, COLLECTION_LIMIT).map(mapClientAssignmentRow);
+      const result = await client.query<ClientAssignmentProjectionRow>(clientCurrentSql, [
+          actor.userId,
+          cursor?.upper.bucket ?? null,
+          cursor?.upper.scheduledFor ?? null,
+          cursor?.upper.createdAt ?? null,
+          cursor?.upper.assignmentId ?? null,
+          cursor?.after?.bucket ?? null,
+          cursor?.after?.scheduledFor ?? null,
+          cursor?.after?.createdAt ?? null,
+          cursor?.after?.assignmentId ?? null,
+          COLLECTION_LIMIT + 1,
+        ]);
+      const page = result.rows.slice(0, COLLECTION_LIMIT);
+      const assignments = page.map(mapClientAssignmentRow);
+      const key = (row: ClientAssignmentProjectionRow): ClientCurrentKey => ({
+        bucket: Number(row.current_bucket) as 0 | 1,
+        scheduledFor: row.scheduled_for.slice(0, 10),
+        createdAt: row.current_created_at,
+        assignmentId: row.assignment_id,
+      });
+      const upper = cursor?.upper ?? (page[0] ? key(page[0]) : null);
+      const hasNextPage = result.rows.length > COLLECTION_LIMIT;
+      const last = page.length ? key(page[page.length - 1]) : null;
+      if (
+        hasNextPage &&
+        cursor?.after &&
+        last &&
+        !clientCurrentAdvanced(cursor.after, last)
+      )
+        throw new ClientCurrentInputError("non_advancing_current_cursor");
+      const token = (after: ClientCurrentKey | null) =>
+        upper
+          ? encodeClientCurrentCursor({
+              v: 1,
+              domain: "client-current-workouts",
+              actor: actor.userId,
+              upper,
+              after,
+            })
+          : null;
       return {
         currentAssignmentId: assignments[0]?.assignmentId ?? null,
         assignments,
         limit: COLLECTION_LIMIT,
-        hasMore: result.rows.length > COLLECTION_LIMIT,
+        hasMore: hasNextPage,
+        pageInfo: {
+          hasNextPage,
+          startCursor: token(null),
+          endCursor: hasNextPage && last ? token(last) : null,
+        },
       };
     }, this.pool);
   }
@@ -125,6 +182,8 @@ export const assignmentSelect = `
          assignment.status::text AS assignment_status, relation.status::text AS relation_status,
          assignment.title_snapshot, assignment.instruction_snapshot, assignment.trainer_note,
          assignment.created_at,
+         CASE WHEN session.status = 'active' THEN 0 ELSE 1 END AS current_bucket,
+         to_char(assignment.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS current_created_at,
          session.id AS session_id, session.status::text AS session_status,
          session.version AS session_version, session.started_at AS session_started_at,
          session.completed_at AS session_completed_at,
@@ -179,3 +238,35 @@ export const assignmentSelect = `
     ) prescribed_sets ON true
     WHERE exercise.assignment_id = assignment.id
   ) composition ON true`;
+
+// Page identity is selected before prescription hydration so work stays bounded.
+export const clientCurrentSql = `WITH page AS MATERIALIZED (
+  SELECT assignment.id,
+         CASE WHEN session.status = 'active' THEN 0 ELSE 1 END AS bucket,
+         assignment.scheduled_for,
+         assignment.created_at
+  FROM app.workout_assignments assignment
+  LEFT JOIN app.workout_sessions session ON session.assignment_id = assignment.id
+  WHERE assignment.athlete_user_id = $1
+    AND assignment.status = 'available'
+    AND (session.id IS NULL OR session.status = 'active')
+    AND ($2::integer IS NULL OR ROW(
+      CASE WHEN session.status = 'active' THEN 0 ELSE 1 END,
+      assignment.scheduled_for,
+      assignment.created_at,
+      assignment.id
+    ) >= ROW($2::integer, $3::date, $4::timestamptz, $5::uuid))
+    AND ($6::integer IS NULL OR ROW(
+      CASE WHEN session.status = 'active' THEN 0 ELSE 1 END,
+      assignment.scheduled_for,
+      assignment.created_at,
+      assignment.id
+    ) > ROW($6::integer, $7::date, $8::timestamptz, $9::uuid))
+  ORDER BY bucket ASC, assignment.scheduled_for ASC,
+           assignment.created_at ASC, assignment.id ASC
+  LIMIT $10
+)
+${assignmentSelect}
+JOIN page current_page ON current_page.id = assignment.id
+ORDER BY current_page.bucket ASC, current_page.scheduled_for ASC,
+         current_page.created_at ASC, current_page.id ASC`;

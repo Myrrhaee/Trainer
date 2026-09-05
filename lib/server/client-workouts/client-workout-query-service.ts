@@ -20,8 +20,8 @@ export class ClientWorkoutQueryService {
     private readonly sessions = new WorkoutSessionRepository(),
   ) {}
 
-  collection(actor: Actor) {
-    return this.workouts.listCurrent(actor);
+  collection(actor: Actor, input: { start?: string; after?: string } = {}) {
+    return this.workouts.listCurrent(actor, input);
   }
 
   async execution(actor: Actor, input: { assignmentId?: unknown; sessionId?: unknown; completionCommandId?: string; completionFingerprint?: string }): Promise<ClientWorkoutExecutionReadModel | null> {

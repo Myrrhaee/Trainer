@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FederatedLoginOptions } from "@/components/auth/federated-login-options";
-import { safeReturnPath } from "@/lib/server/http/safe-return-path";
+import { safeAuthReturnPath } from "@/lib/server/http/safe-return-path";
 
 type Step = "email" | "code" | "complete";
 
@@ -40,7 +40,7 @@ export function EmailOtpLogin() {
   const [retryAfter, setRetryAfter] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const returnPath = safeReturnPath(searchParams.get("next"), "/auth/continue");
+  const returnPath = safeAuthReturnPath(searchParams.get("next"), "/auth/continue");
 
   const urlMessage = useMemo(() => {
     const value = searchParams.get("message")?.trim();

@@ -1,35 +1,40 @@
 import type {
   AthleteProfileAction,
-  AthleteProfileCurrentState,
   AthleteProfileSnapshot,
 } from "@/lib/server/athlete-profile/athlete-profile-types";
 import { createTrainerWorkflowContext, trainerWorkflowHref } from "@/lib/trainer-workflow-transition";
+import { resolveTrainerAthletePrimaryAction } from "@/lib/trainer-athlete-primary-action";
 
 export class AthleteCapabilitiesService {
   primaryAction(
     snapshot: AthleteProfileSnapshot,
-    state: AthleteProfileCurrentState,
   ): AthleteProfileAction | null {
-    if (snapshot.relationStatus !== "active" || snapshot.athleteStatus !== "active") return null;
-
     const profileHref = `/trainer/clients/${snapshot.athleteUserId}?tab=overview`;
-    if ((state.kind === "discomfort" || state.kind === "review_required") && state.sessionId) {
+    const primary = resolveTrainerAthletePrimaryAction({
+      relationStatus: snapshot.relationStatus,
+      athleteStatus: snapshot.athleteStatus,
+      currentAssignmentId: snapshot.currentAssignment?.id ?? null,
+      openReview: snapshot.openAttention
+        ? { sessionId: snapshot.openAttention.sessionId, attentionItemId: snapshot.openAttention.id }
+        : null,
+    });
+    if (primary?.kind === "review") {
       const context = createTrainerWorkflowContext({
         origin: "profile",
         athleteUserId: snapshot.athleteUserId,
-        sourceAttentionItemId: state.attentionItemId ?? undefined,
-        sourceSessionId: state.sessionId,
+        sourceAttentionItemId: primary.attentionItemId ?? undefined,
+        sourceSessionId: primary.sessionId,
         returnTo: profileHref,
         returnAnchor: "latest-feedback",
       });
       return {
         kind: "review",
         label: "Разобрать тренировку",
-        href: trainerWorkflowHref(`/trainer/review/${state.sessionId}`, context),
+        href: trainerWorkflowHref(`/trainer/review/${primary.sessionId}`, context),
       };
     }
 
-    if (state.kind === "no_next_assignment") {
+    if (primary?.kind === "assign") {
       const context = createTrainerWorkflowContext({
         origin: "profile",
         athleteUserId: snapshot.athleteUserId,

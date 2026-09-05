@@ -15,6 +15,7 @@ import type {
 type AthleteRow = {
   relation_id: string;
   athlete_user_id: string;
+  athlete_status: "active" | "suspended" | "archived";
   display_name: string | null;
   accepted_at: Date;
   latest_activity_at: Date;
@@ -69,6 +70,7 @@ export class TrainerDashboardRepository {
     return withActorTransaction(actor, async (client) => {
       const result = await client.query<AthleteRow>(`
         SELECT relation.id AS relation_id, relation.athlete_user_id,
+               profile.status::text AS athlete_status,
                account.display_name, relation.accepted_at,
                greatest(
                  relation.accepted_at,
@@ -80,6 +82,7 @@ export class TrainerDashboardRepository {
                next_work.scheduled_for, next_work.session_id, next_work.session_status
         FROM app.trainer_athlete_relations relation
         JOIN app.users account ON account.id = relation.athlete_user_id
+        JOIN app.athlete_profiles profile ON profile.user_id = relation.athlete_user_id
         LEFT JOIN LATERAL (
           SELECT assignment.created_at
           FROM app.workout_assignments assignment
@@ -129,7 +132,9 @@ export class TrainerDashboardRepository {
         const name = displayName(row.display_name, row.athlete_user_id);
         return {
           relationId: row.relation_id,
+          relationStatus: "active",
           athleteUserId: row.athlete_user_id,
+          athleteStatus: row.athlete_status,
           displayName: name,
           initials: initials(name),
           acceptedAt: row.accepted_at.toISOString(),

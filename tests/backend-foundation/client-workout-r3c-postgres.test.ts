@@ -162,7 +162,7 @@ test("R3C persists exact actual facts with receipts, source identity and optimis
     assert.equal(repetitionSaved?.version, 2);
     assert.equal(repetitionReplay?.version, 2);
     assert.deepEqual(repetitionReplay?.exercises[0].sets[0], repetitionSaved?.exercises[0].sets[0]);
-    assert.equal(repetitionSaveQueries, 13);
+    assert.equal(repetitionSaveQueries, 14); // One set-based lineage preflight before writes.
     await assert.rejects(
       sessions.saveProgress(athlete, { ...repetitionRequest, requestHash: hash("changed"), sets: [progress(repetitionSet.id, { actualRepetitions: 8 })] }),
       SessionIdempotencyConflictError,
@@ -184,7 +184,7 @@ test("R3C persists exact actual facts with receipts, source identity and optimis
     });
     assert.equal(durationSaved?.exercises[1].sets[0].actualDurationSeconds, 48);
     assert.equal(durationSaved?.exercises[0].sets[0].actualRepetitions, 7);
-    assert.equal(durationCounter.count(), 13);
+    assert.equal(durationCounter.count(), 14);
 
     const skipCounter = countedPool(app);
     const skipped = await new WorkoutSessionRepository(skipCounter.pool).saveProgress(athlete, {
@@ -206,7 +206,7 @@ test("R3C persists exact actual facts with receipts, source identity and optimis
     assert.equal(persistedSkip?.actualRepetitions, null);
     assert.equal(persistedSkip?.actualDurationSeconds, null);
     assert.equal(persistedSkip?.actualWeightKg, null);
-    assert.equal(skipCounter.count(), 13);
+    assert.equal(skipCounter.count(), 14);
 
     const sameSetConcurrency = await Promise.allSettled([
       sessions.saveProgress(athlete, {

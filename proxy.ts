@@ -2,6 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export async function proxy(req: NextRequest) {
+  if (req.nextUrl.pathname.startsWith("/client/")) {
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set("x-ai-canonical-return", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   const res = NextResponse.next();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -40,5 +46,5 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/api/notify-complete"],
+  matcher: ["/client/:path*", "/dashboard/:path*", "/api/notify-complete"],
 };

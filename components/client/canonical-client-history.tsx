@@ -7,6 +7,7 @@ import {
   appendHistory,
   historyCollectionUrl,
   readHistoryNavigation,
+  replaceClientWorkoutCollectionUrl,
 } from "@/lib/client-history-navigation";
 import type {
   ClientWorkoutHistoryItem,
@@ -51,7 +52,7 @@ const initial: View = {
   loading: true,
   failed: false,
   notice: "",
-  anchor: "#history",
+  anchor: "",
 };
 const control =
   "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-zinc-700 px-4 text-sm hover:bg-zinc-900 focus-visible:outline-2 focus-visible:outline-lime-300 disabled:opacity-50";
@@ -68,10 +69,13 @@ export function CanonicalClientHistory() {
       if (!disposed) setView(value);
     };
     const writeUrl = (value: View) =>
-      window.history.replaceState(
-        window.history.state,
-        "",
-        historyCollectionUrl(value.start, value.depth, value.anchor),
+      replaceClientWorkoutCollectionUrl(
+        historyCollectionUrl(
+          value.start,
+          value.depth,
+          value.anchor,
+          new URL(window.location.href),
+        ),
       );
     async function load(next = false) {
       if (request.current) return;
@@ -99,10 +103,13 @@ export function CanonicalClientHistory() {
               ...initial,
               notice: "История обновлена: сохранённая позиция недоступна.",
             };
-            window.history.replaceState(
-              window.history.state,
-              "",
-              "/client/workouts#history",
+            replaceClientWorkoutCollectionUrl(
+              historyCollectionUrl(
+                null,
+                1,
+                "#history",
+                new URL(window.location.href),
+              ),
             );
             publish(current);
             continue;
@@ -184,10 +191,13 @@ export function CanonicalClientHistory() {
           : "",
       });
       if (navigation.invalid)
-        window.history.replaceState(
-          window.history.state,
-          "",
-          "/client/workouts#history",
+        replaceClientWorkoutCollectionUrl(
+          historyCollectionUrl(
+            null,
+            1,
+            "#history",
+            new URL(window.location.href),
+          ),
         );
       void load();
     }
@@ -227,7 +237,14 @@ export function CanonicalClientHistory() {
       <ol className="divide-y divide-zinc-800">
         {view.rows.map((item) => {
           const anchor = `#workout-${item.sessionId}`;
-          const origin = historyCollectionUrl(view.start, view.depth, anchor);
+          const origin = historyCollectionUrl(
+            view.start,
+            view.depth,
+            anchor,
+            typeof window === "undefined"
+              ? undefined
+              : new URL(window.location.href),
+          );
           return (
             <li key={item.sessionId} className="py-5">
               <h3 className="break-words text-lg font-medium [overflow-wrap:anywhere]">
@@ -264,11 +281,7 @@ export function CanonicalClientHistory() {
                     !event.shiftKey &&
                     event.button === 0
                   )
-                    window.history.replaceState(
-                      window.history.state,
-                      "",
-                      origin,
-                    );
+                    replaceClientWorkoutCollectionUrl(origin);
                 }}
               >
                 Открыть тренировку <ArrowRight size={16} aria-hidden />
